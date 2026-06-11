@@ -44,25 +44,54 @@ func TestLevelMapDecode(t *testing.T) {
 			}
 		}
 	}
-	if lm.PlayerSpawn != (Point{Col: 22, Row: 1}) {
-		t.Errorf("level 0 player spawn: got %+v, want {22 1}", lm.PlayerSpawn)
+	// Visual position in buffer coordinates: the craft's 4-char
+	// footprint (19-22) sits exactly over the FUEL text of the
+	// level-0 depot (buffer cols 19-22).
+	if lm.PlayerSpawn != (Point{Col: 19, Row: 1}) {
+		t.Errorf("level 0 player spawn: got %+v, want {19 1}", lm.PlayerSpawn)
 	}
-	if len(lm.EnemySpawns) == 0 {
-		t.Error("no enemy spawn candidates found")
+	if len(lm.PrisonerSpawns) == 0 {
+		t.Error("no prisoner spawn candidates found")
 	}
-	for _, p := range lm.EnemySpawns {
+	for _, p := range lm.PrisonerSpawns {
 		if lm.Cells[p.Row][p.Col] != 0x48 || lm.Cells[p.Row-1][p.Col] != 0x1F {
 			t.Errorf("spawn %+v does not match the $48/$1F pattern", p)
 		}
+	}
+	// Tank homes: 6 per level, level 0 from $911C/$9122 (rows 18/38).
+	if len(lm.TankHomes) != 6 {
+		t.Fatalf("got %d tank homes, want 6", len(lm.TankHomes))
+	}
+	if lm.TankHomes[0] != (Point{Col: 0x53 - 5, Row: 0x12}) {
+		t.Errorf("tank home 0: %+v, want {78 18}", lm.TankHomes[0])
+	}
+	for i, p := range lm.TankHomes {
+		if p.Row != 0x12 && p.Row != 0x26 {
+			t.Errorf("tank home %d: unexpected row %d", i, p.Row)
+		}
+	}
+	// Enemy patrol points, level 0: 5 unique of 8 table entries; the
+	// fort-top point ($84,0) renders centered over the entry shaft
+	// (footprint cols 125-128), half above the map's top edge.
+	if len(lm.EnemySpawns) != 5 {
+		t.Fatalf("got %d enemy patrol points, want 5", len(lm.EnemySpawns))
+	}
+	if lm.EnemySpawns[0] != (Point{Col: 125, Row: -2}) {
+		t.Errorf("enemy patrol point 0: %+v, want {125 -2}", lm.EnemySpawns[0])
 	}
 
 	lm1, err := g.LevelMap(1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Level 1 starts at the top-center shaft entrance.
-	if lm1.PlayerSpawn.Col < 0x78 || lm1.PlayerSpawn.Col > 0x88 {
-		t.Errorf("level 1 player spawn col $%02X not near the shaft", lm1.PlayerSpawn.Col)
+	// Level 1 starts centered in the top-center shaft: the shaft
+	// trigger columns are $7E-$86 game = 121-129 buffer, and the
+	// 4-char craft footprint should straddle the center (~125).
+	if c := lm1.PlayerSpawn.Col; c < 121 || c+3 > 129 {
+		t.Errorf("level 1 player spawn col %d: footprint %d-%d not inside the shaft", c, c, c+3)
+	}
+	if len(lm1.EnemySpawns) != 3 {
+		t.Errorf("level 1: got %d enemy patrol points, want 3", len(lm1.EnemySpawns))
 	}
 	// Map structure: content in columns 0-214, columns 215-254 always
 	// empty padding, column 255 = wrap seam (mostly equal to column 0).

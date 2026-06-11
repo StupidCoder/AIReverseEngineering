@@ -16,7 +16,7 @@ import (
 func main() {
 	outDir := flag.String("o", ".", "output directory")
 	scale := flag.Int("scale", 2, "pixel scale factor")
-	markers := flag.Bool("markers", false, "mark player (cyan) and enemy spawn candidates (yellow)")
+	markers := flag.Bool("markers", false, "mark player spawn (cyan), prisoner spawn candidates (yellow), tank homes (light red), enemy-heli patrol points (light green)")
 	flag.Parse()
 	if flag.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "usage: gfxrender [-o outdir] [-scale n] [-markers] FORT-fast-7000.prg")
@@ -83,8 +83,8 @@ func run(path, outDir string, scale int, markers bool) error {
 		if err := fortgfx.WritePNG(p, img); err != nil {
 			return err
 		}
-		fmt.Printf("wrote %s (player spawn %d,%d; %d enemy spawn candidates)\n",
-			p, lm.PlayerSpawn.Col, lm.PlayerSpawn.Row, len(lm.EnemySpawns))
+		fmt.Printf("wrote %s (player spawn %d,%d; %d prisoner spawn candidates; %d tank homes; %d enemy patrol points)\n",
+			p, lm.PlayerSpawn.Col, lm.PlayerSpawn.Row, len(lm.PrisonerSpawns), len(lm.TankHomes), len(lm.EnemySpawns))
 	}
 	return nil
 }

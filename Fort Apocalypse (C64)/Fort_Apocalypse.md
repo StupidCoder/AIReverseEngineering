@@ -399,7 +399,7 @@ PILOT", "PILOTS LEFT"), 5 life lost, 2 playing, 6 game over/debrief,
 | $2E00–$343F  | **scanner soft bitmap**, 40×5 chars (320×40 px)          |
 | $3500–$354D  | char-object X / row coordinate tables (39 slots)         |
 | $3600–$361F  | prisoner tables (state, X, row, direction/phase)         |
-| $3700–$374D  | patrol-craft state machine bytes                         |
+| $3700–$374D  | SPM state machine bytes                                  |
 | $4000–$43FF  | VIC sprite blocks; **blocks 1–14 = helicopter shapes**   |
 | $4400–$47E7  | screen: rows 0–5 HUD image, row 6 frame/messages, rows 9–24 = map window |
 | $47F8–$47FF  | sprite pointers (0 player, 1 enemy, 2–4 bullets)         |
@@ -501,7 +501,7 @@ Chars $00–$20 are left for
 00=black, 01=$D022, 10=$D023=white, 11=colour-RAM green. The letter
 glyphs $21–$3A/$41–$5A double as the double-width HUD font *and* as
 object graphics: $3B–$3E/$49–$4A are the prisoner, $40/$5B–$5F the
-patrol craft, $6C–$72 tank and missiles.)
+SPM (Self-Propelled Mine), $6C–$72 tank and missiles.)
 
 ## 3. Sprites — packed column format
 
@@ -569,8 +569,17 @@ Address arithmetic for game coordinates ($A7D8):
 map address = $04FE + X + (row << 8)     ; i.e. $0503 + (X-5) + row*256
 ```
 
-The rendered maps (wrap-seam column first, then columns 0–214; player
-spawn framed cyan, enemy-gun spawn candidates yellow):
+The rendered maps (wrap-seam column first, then columns 0–214).
+Markers: player spawn framed **cyan** (the helicopter's 4×3-character
+footprint — centered above the surface fuel depot on level 0,
+centered in the entry shaft on level 1); prisoner spawn candidates
+(the $48/$48-floor-under-rock pattern the level builder samples 8
+prisoners from, $90A4) **yellow**; the six fixed tank homes per level
+(body + turret row, tables $911C/$9128) **light red**; the enemy
+helicopter's patrol/spawn points (tables $9CBA/$9CCA, sized to its
+4×3-character footprint like the player marker) **light green** —
+note the fort-top point on level 0, half above the map edge, dead
+center over the entry shaft:
 
 **Level 0 — Vaults of Draconis** (surface with FUEL depots and the
 LAND HERE pad, cavern levels below):
@@ -633,7 +642,7 @@ are drawn with leading-zero blanking ($A9D3).
    the explosion char $20 into the map on impact; char actors die
    from touching it.
 
-Engine scheduling per frame: patrol-craft engine 15 of 39 slots
+Engine scheduling per frame: SPM engine 15 of 39 slots
 ($94D2), one prisoner slot ($AABA), tank and missile engines on
 difficulty countdowns ($992A/$9644), zone/fuel checks — all from the
 main loop; player control, bullets, enemy chopper, camera and HUD run
@@ -653,8 +662,8 @@ $0A refueling).
   value indexes the sprite-shape table — the copter visibly tilts.
 - Up/down move 1px/frame; bank auto-centers every 8 frames when
   moving vertically or hovering ($A62F).
-- Gravity: sinks 1px every 16 frames (novice) or 8 (expert) —
-  mask $F5.
+- Gravity: sinks 1px every 16 / 8 / 4 frames for the WEAK / NORMAL /
+  STRONG gravity options (mask $F5 = $0F/$07/$03, see §9).
 - The camera keeps the sprite between x $6E–$82 and scrolls
   2px/frame; the world wraps (Part IV §4).
 - Title attract mode replays 108 recorded joystick values from $AA4F.
@@ -686,43 +695,141 @@ Three slots ($78/$7B/$7E); 0–1 player, 2 enemy. Fire is
 edge-triggered, spawns at the nose with a small spread. **Trajectory
 follows the bank angle** (tables $A472/$A477, per-step px): full-left
 (−4,+2), left (−4,0), level (0,+2) **straight down**, right (+4,0),
-full-right (+4,+2). On impact (pixel test):
+full-right (+4,+2). On impact (pixel test) the special cases come
+first:
 - fort core $3F on level 1 → `$ED=5` → **fort destruction sequence**
   ($97B0: expanding $20-char explosion, 16 colour flashes, bonus 9999);
-- destructible rock $47 → permanently cleared;
-- object chars (table $A45D) → bullet dies *without* explosion —
-  direct hits never hurt char actors;
-- other solid chars → explosion char $20 in that cell for 7 frames,
-  then restored. The $20 is what kills nearby char actors.
-- dies at playfield edges. Only the enemy helicopter is killed
-  directly (sprite-sprite latch).
+- destructible rock $47 → permanently cleared.
+
+Every other impact **stamps the explosion char $20 into the hit
+cell** ($A3B7 — unconditionally, in both of the following paths).
+The object-char table $A45D only selects the bullet's afterlife:
+- hit char *not* in the table (plain terrain): bullet state 7 — the
+  explosion stays 7 frames, then the saved char is restored;
+- hit char *in* the table (SPM, tank, missile, prisoner glyphs): the
+  bullet slot is freed immediately and **no restore happens — the
+  object's own engine finds the $20 in its cell, dies, and restores
+  its saved background itself.** So direct hits *do* kill SPMs,
+  tanks, missiles and even prisoners; the table merely hands cleanup
+  over to the victim.
+
+Bullets die at the playfield edges; the enemy helicopter is the one
+target killed by sprite-sprite contact instead of the $20 mechanism.
 
 ## 3. Enemy helicopter (sprite 1)
 
-One at a time: `$6E` (1 idle, 3 hunting, 4 dying), map pos $76/$77,
-own bank $71. Spawns after a delay at one of 8 per-level patrol
-points ($9CBA/$9CCA), only ≥ $22 columns or ≥ 8 rows away from the
-player. Moves every 4th/2nd/every frame by variant (mask $72); it is
-a copy of the player physics — banks, homes toward the player
-column- and row-wise, and **probes the map with the same pixel test**
-(it navigates terrain). Fires bullet slot 2 every 5th move tick with
-the same bank-angle trajectories. Dies from player bullets
-(sprite-sprite) or background contact → 20-frame explosion, respawn
-delay. XOR-blinks on the scanner.
+One at a time, all state in zero page:
+
+| var     | content                                                |
+|---------|--------------------------------------------------------|
+| $6E     | state: 1 idle, 3 hunting, 4 dying                      |
+| $76/$77 | map column / row                                       |
+| $71     | bank/tilt 0–$10 (selects sprite shape), bit 0 = rotor phase (toggled every 4 frames) |
+| $6D     | sprite flag: 1 = hidden/off-screen, 2 = sprite shown   |
+| $6F/$70 | sprite x / y (when on camera)                          |
+| $74/$75 | position wobble offsets (masked & 3 / & 7)             |
+| $43     | spawn delay / 20-frame explosion timer                 |
+| $44     | fire-rate counter (reloaded with 5)                    |
+| $7A     | its bullet: slot 2 of the $78 bullet arrays            |
+
+Its logic ($9C52) runs once per playing frame from the playfield IRQ.
+
+**Idle (state 1):** invisible; the only activity is `DEC $43` once
+per frame. $43 is $FF (≈5.1 s) after a death, and the state is also
+forced back to idle whenever the *player* crashes ($A290). When $43
+reaches 0, a spawn is attempted ($9C6B): bank is reset to 8 (level),
+the sprite colour set from $9C4F, and a **random patrol point** is
+drawn — `$D41B & 7`, +8 on level 1, indexing $9CBA/$9CCA (level 0:
+the fort top-center — weighted 4 of 8 entries — and the four cavern
+corridor ends; level 1: the upper corridors and the pocket in the
+destructible-rock field; all marked light green on the map renders
+in Part IV §4). The point is accepted only if it is
+**≥ $22 (34) columns or ≥ 8 rows away from the player** — it never
+materialises next to you. Accepted → state 3, sub-cell counters
+cleared, fire counter = 1, scanner blip plotted. Rejected → the next
+frame's `DEC` wraps $43 to $FF, re-arming a full ~5 s wait.
+
+**Hunting (state 3):** a movement tick runs every frame in which
+`($15 AND $72) == 0` — every 4th/2nd/every frame for NOVICE/PRO/
+EXPERT. Each tick ($9CDA):
+
+1. erase its scanner blip (XOR), strip the rotor bit from $71;
+2. **fire check**: every 5th tick ($44), only while the sprite is on
+   camera ($6D=2) and bullet slot 2 is free — direction derived from
+   its own bank $71 with the *same* bank→trajectory mapping as the
+   player's gun, bullet spawned at its nose;
+3. **steering is pure per-axis pursuit**: if the player's column
+   differs, move one step toward it (left/right helper); then the
+   same for the row (up/down helper). No pathfinding;
+4. the horizontal helpers ($9DB9/$9DE9) pixel-test its own cell and
+   the next *two* cells in the movement direction — it only advances
+   into clear corridor. A step advances the sub-cell counter $74
+   (4 sub-steps per character, i.e. 2 hardware pixels per tick), and
+   every 4th frame banks $71 by ±2 — it visibly tilts into its
+   motion, which in turn aims its shots;
+5. the down helper ($9E19) likewise probes two cells below and steps
+   $75 (8 sub-steps per character = 1 pixel per tick);
+6. the up helper ($A000) probes three rows above — but this routine
+   is **broken by the "JOE VIERMON" signature** (Appendix B): its
+   first opcode byte, $A5 (`LDA $76`), was overwritten by the
+   signature's final 'U' ($55), making it `EOR $76,X` — the column
+   used for the upward probes is garbage. Climbing is therefore
+   erratic: spuriously blocked or clipping into ceilings (where the
+   sprite-background latch then kills it, see below). Above row 3 the
+   probes are skipped entirely;
+7. plot the blip at the new position, clamp the bank to 0–$10,
+   restore the rotor bit (toggled every 4 frames, $A313).
+
+At the map edge columns $30/$D8 it levels its bank and, while
+off-screen, is clamped to columns $31/$D7 — it cannot chase you
+around the cylinder wrap. Visibility is decided per frame ($A1B0):
+within $30 columns and $13 rows of the camera the sprite is shown at
+the computed position; otherwise it is hidden but **keeps hunting in
+map coordinates** — only the sprite and its gun go live on camera.
+
+**Hunting never times out.** The only exits are death — terrain
+contact (sprite-background latch $73 bit 1) or being touched by a
+player bullet sprite ($68: bit 1 together with bit 2/3) — giving
+state 4: 20 frames of colour-cycling explosion ($A2FB), then idle
+with the full $FF respawn delay.
 
 ## 4. Tanks (6 per level, char-based)
 
-Slots 0–5: `$BE,X` (1 dead, 2 active, 4 exploding, 7 respawn), pos
-$C4/$CA, direction $D0, background save $D6+3X. Fixed homes per level
-($911C+/$9128+). A tank is **3 cells $6C $6D $6E plus a turret char
+Six slots X=0–5, held in zero-page arrays (each tank shares its slot
+index with one homing missile, §5):
+
+| array      | content                                              |
+|------------|------------------------------------------------------|
+| $BE,X      | state: 1 dead, 2 active, 4 exploding, 7 respawn      |
+| $C4,X      | map column (game coordinate, leftmost body cell)     |
+| $CA,X      | map row                                              |
+| $D0,X      | direction: $01 right / $FF left (toggled `EOR #$FE`) |
+| $D6+3X     | saved background chars, 3 cells                      |
+| $31,X/$37,X| home column / row (fixed per level, $911C+/$9128+ — marked light red on the map renders in Part IV §4) |
+| $41        | shared explosion timer (10 ticks)                    |
+| $F0/$F1    | engine step countdown / reload (4/3/2 by variant)    |
+
+A tank is **3 cells $6C $6D $6E plus a turret char
 one row up: $6F/$70 always aiming at the player**. Patrols
 horizontally (step every 4/3/2 frames by variant), reversing on any
 obstacle-table char. Dies (→ three $20 cells for 10 ticks) when a
 cell it occupies/enters contains $20/$71/$72 — i.e. explosions and
-missiles, not direct bullets. Respawns at home once no tank-body
+missiles — and direct bullet hits, which stamp $20 onto a body
+cell (§2). Respawns at home once no tank-body
 chars remain within 13 cells. Blinks on the scanner.
 
 ## 5. Homing missiles (one per tank, chars $71/$72)
+
+Six slots X=0–5, indexed by the owning tank's slot number:
+
+| array   | content                                                  |
+|---------|----------------------------------------------------------|
+| $A0,X   | state: 1 idle, 7 launch, 4 flying left, 8 flying right   |
+| $A6,X   | map column (game coordinate)                             |
+| $AC,X   | map row                                                  |
+| $B2,X   | fuel: starts $14 (20 steps); negative = falling          |
+| $B8,X   | saved background char (1 cell)                           |
+| $F2/$F3 | engine step countdown / reload (3/2/1 by variant)        |
 
 Launch when the player is within ±9 columns and 0–14 rows above the
 tank; spawn above the tank with 20 fuel. Per step (every 3/2/1 frames
@@ -731,46 +838,81 @@ $72 right), vertically steered toward the player's row; if the player
 gets behind it, or it leaves columns $2D–$D7, or fuel runs out, it
 stops homing and falls. Detonates on any solid char (pixel test of
 the cell it enters) without damaging the map; dies on explosions. Its
-char kills patrol craft, tanks and prisoners it passes through — it
+char kills SPMs, tanks and prisoners it passes through — it
 can be lured into them.
 
-## 6. Patrol craft / whirlybirds (13/26/39 by difficulty)
+## 6. SPMs — Self-Propelled Mines (13/26/39 by difficulty)
 
-39 slots ($3500/$3527/$3700/$3727), 15 stepped per frame round-robin;
-the armed count $FC is the difficulty dial. Spawn: random position
-(columns $32–$CD) until two adjacent **empty** cells are found. A
-2-cell craft that flies horizontally, animating through 4 phases per
-cell (char pairs `$40 —`, `$5B $5C`, `$5D $5E`, `— $5F`); the 2
-destination cells must be exactly $00 or it reverses. Dies (no
-respawn until next level start) when overlapped by $20/$71/$72.
-Bullets fizzle on it harmlessly — kill it with wall-splash explosions
-or missiles.
+The manual's name for the small drones patrolling the corridors. The
+engine at $94D2 keeps **39 slots**, stepping 15 per frame round-robin
+(slot cursor $E8); the armed count $FC is the difficulty dial. Slot
+data is held in parallel 39-byte arrays:
+
+| array         | content                                          |
+|---------------|--------------------------------------------------|
+| $3500–$3526,X | map column (game coordinate, buffer col = X−5)   |
+| $3527–$354D,X | map row                                          |
+| $354E–$3574,X | saved background char, left cell                 |
+| $3575–$359B,X | saved background char, right cell                |
+| $3700–$3726,X | state: low nibble = type (1 dormant, 2 active, 7 respawn), bits 4–5 = animation phase |
+| $3727–$374D,X | direction: $01 right / $FF left (toggled `EOR #$FE`) |
+
+**Spawn** (type 7, $9545): random position from SID noise — column
+$32–$CD, **row $00–$27 (any of the 40 map rows)** — re-rolled until
+the two cells at that position are both empty; in practice that
+limits them to open corridor/sky cells. **No respawn** after death
+until the next level start.
+
+**Behavior:** a 2-cell craft that flies horizontally, animating
+through 4 phases per cell of travel (state += $10 mod $40, char pairs
+from $963C: `$40 —`, `$5B $5C`, `$5D $5E`, `— $5F`); the 2 destination
+cells must be exactly $00 or it reverses (columns clamped $32–$CD).
+
+**Death** ($957B): its own cells containing $20/$71/$72 — i.e.
+explosions (including those stamped by a direct bullet hit, see §2)
+and homing missiles passing through.
 
 ## 7. Prisoners — "MEN TO RESCUE" (8 per level)
 
+Eight slots X=0–7 in parallel 8-byte arrays (engine $AABA, one slot
+per frame via cursor $EA):
+
+| array   | content                                                  |
+|---------|----------------------------------------------------------|
+| $3600,X | state: 1 gone (dead or rescued), 2 alive, $0B boarding   |
+| $3608,X | map column (game coordinate)                             |
+| $3610,X | map row (of the lower/leg cell)                          |
+| $3618,X | direction + animation: $1x running right / $Fx running left (flipped `EOR #$E0`), bit 0 = leg phase |
+| $EB     | "MEN TO RESCUE" count (alive prisoners)                  |
+| $EC     | rescued count (scored at the debrief)                    |
+
 Placed at level build by scanning the map for **floor $48 with rock
-$1F directly above**; up to 8 random pattern cells ($90A4). A
+$1F directly above**; up to 8 random pattern cells ($90A4 — all
+candidate cells are marked yellow on the map renders in Part IV §4). A
 prisoner is 2 chars tall (torso $49/$4A over legs $3B/$3C right,
 $3D/$3E left) and **runs back and forth along the $48 walkway**,
 reversing when the next floor cell isn't $48. One slot per frame.
 Rescue: terrain contact within ±3 cells → he boards (player held in
 mode $0B), rescued count $EC++, "MEN TO RESCUE n" reprinted. Death:
-his cell becomes $00 (floor shot away), $20, or $71/$72. Dead or
+his cell becomes $00 (floor shot away), $20, or $71/$72 — note that
+a direct bullet hit stamps $20 (§2), so prisoners can be shot, by the
+player as well as by the enemy helicopter. Dead or
 rescued, he leaves $EB — and **both level exits require $EB = 0**.
 
 ## 8. Collision matrix
 
-| agent ↓ hits →   | terrain pixels | barrier (lit) | explosion $20 | missile $71/$72 | patrol craft | tank chars | prisoner | enemy heli (sprite) | player (sprite) |
+| agent ↓ hits →   | terrain pixels | barrier (lit) | explosion $20 | missile $71/$72 | SPM | tank chars | prisoner | enemy heli (sprite) | player (sprite) |
 |------------------|----------------|---------------|---------------|-----------------|--------------|------------|----------|--------------------|-----------------|
 | player copter    | land/bounce or crash | crash (solid) | — | — | solid | solid | board (±3 cells) | crash | n/a |
-| player bullet    | 7-frame $20 splash; $47 destroyed; $3F = fort | splash | dies | dies quietly | dies quietly | dies quietly | dies quietly | **kills** (sprite latch) | n/a |
-| enemy bullet     | same splash mechanics | splash | dies | dies | dies | dies | dies | n/a | **crash** (latch) |
+| player bullet    | 7-frame $20 splash; $47 destroyed; $3F = fort | splash | dies | **stamps $20 → kills it** | **stamps $20 → kills it** | **stamps $20 → kills it** | **stamps $20 → kills it** | **kills** (sprite latch) | n/a |
+| enemy bullet     | same mechanics as player bullets, $20 stamps included | splash | dies | stamps $20 → kills | stamps $20 → kills | stamps $20 → kills | stamps $20 → kills | n/a | **crash** (latch) |
 | homing missile   | detonates | detonates | dies | diverts down | **kills it** (overlap) | **kills it** (overlap) | **kills it** | — | solid to the player (pixels: background-latch contact) |
-| patrol craft     | reverses | reverses | **dies** | **dies** | reverses | reverses | reverses | — | solid to player |
+| SPM              | reverses | reverses | **dies** | **dies** | reverses | reverses | reverses | — | solid to player |
 | tank             | reverses | reverses | **dies** | **dies** | reverses | reverses | reverses | — | solid to player |
 
-(“dies quietly” = removed without an explosion — the deliberate rule
-that makes direct shots harmless to char actors.)
+(“stamps $20 → kills it” = the bullet writes the explosion char over
+the object's cell and is freed; the object's engine detects the $20,
+dies, and restores its own saved background — see §2.)
 
 ## 9. Difficulty variants
 
@@ -787,7 +929,7 @@ string table at $9452+):
 | $8E01 | $F9 lives | 3, 5, 7 | pilots |
 | $8E04 | $EF barrier rate | +4, +8, +16 | barrier blink speed |
 | $8DFE | $72 enemy-heli mask | 3, 1, 0 | moves every 4th/2nd/every frame |
-| $8E07 | $FC patrol craft | 13, 26, 39 | active whirlybirds |
+| $8E07 | $FC SPM count | 13, 26, 39 | active Self-Propelled Mines |
 | $8E0A | $F1 tank period | 4, 3, 2 frames | tank speed |
 | $8E0B | $F3 missile period | 3, 2, 1 frames | missile speed |
 
@@ -892,10 +1034,13 @@ Two more curiosities:
 
 * **$9FF0: hidden ASCII `N0:JOE VIERMON.Z`** — plain ASCII (not the
   game's text encoding, never displayed), sitting in padding right
-  before the routine at $A000; its last two bytes overlap the routine
-  entry and execute as a harmless `EOR $76,X`. It contains the
-  porter's name and looks like a CBM DOS command/filename remnant —
-  a development leftover or deliberate signature.
+  before the routine at $A000. It contains the porter's name and
+  looks like a CBM DOS command/filename remnant — a development
+  leftover or deliberate signature. Its last two bytes spill into the
+  routine entry, and the 'U' ($55) lands exactly on what must have
+  been the `$A5` of `LDA $76`, turning it into `EOR $76,X` — **the
+  signature actually corrupts the enemy helicopter's upward terrain
+  probe** (Part V §3): the column it tests while climbing is garbage.
 * **$AA4F** (108 bytes) reads like text (`NNNNKKKKKIIII...`) but is
   the **attract-mode joystick recording** — the byte values $46-$4E
   happen to be letter codes.
@@ -916,7 +1061,7 @@ Two more curiosities:
 | $8CDB | RLE decompressor                                   |
 | $8F8F | level builder: decompress, randomize, populate     |
 | $90A4 | prisoner spawn scan ($48/$48/$1F pattern)          |
-| $94D2 | patrol-craft engine (39 slots)                     |
+| $94D2 | SPM engine (39 slots)                              |
 | $9644 | missile engine                                     |
 | $992A | tank engine                                        |
 | $98F2 | char pixel-collision test                          |
@@ -941,7 +1086,7 @@ Two more curiosities:
 | $8DFC–$8E0F | difficulty variants                          |
 | $9107/$9110/$910A | per-level colour / camera / player start |
 | $911C–$9133 | tank homes                                   |
-| $963C | patrol-craft animation char pairs                  |
+| $963C | SPM animation char pairs                           |
 | $9CBA/$9CCA | enemy-heli patrol points                     |
 | $A320 | helicopter animation (18 entries, 7 poses × 2 rotor) |
 | $A45D | object/obstacle char table                         |

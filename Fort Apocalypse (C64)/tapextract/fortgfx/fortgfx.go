@@ -28,6 +28,9 @@ const (
 	colorTable      = 0x9107 // per-level multicolor ($D022) value
 	spriteStartTbl  = 0x910A // per-level player sprite start X,Y
 	cameraStartTbl  = 0x9110 // per-level camera start col,row
+	tankHomeTbl0    = 0x911C // 6 tank home cols (levels 0/2), rows at $9122
+	tankHomeTbl1    = 0x9128 // 6 tank home cols (level 1), rows at $912E
+	enemyPatrolTbl  = 0x9CBA // 16 enemy-heli patrol cols, rows at $9CCA
 	barrierPattern  = 0x8907 // 32 bytes: energy barrier chars 1-4
 	barrierTop      = 0x891F // 8 bytes: barrier cap char 9
 	waterPattern    = 0xA927 // 8 bytes: water/static chars $20/$3F
@@ -123,10 +126,12 @@ type Point struct{ Col, Row int }
 
 // LevelMap is one decompressed level.
 type LevelMap struct {
-	Level       int
-	Cells       [MapHeight][MapWidth]byte // screen character codes
-	PlayerSpawn Point
-	EnemySpawns []Point // all candidate gun positions ($90A4 pattern)
+	Level          int
+	Cells          [MapHeight][MapWidth]byte // screen character codes
+	PlayerSpawn    Point
+	PrisonerSpawns []Point // all candidate prisoner positions ($90A4 pattern)
+	TankHomes      []Point // 6 fixed tank home positions (leftmost body cell)
+	EnemySpawns    []Point // unique enemy-helicopter patrol points (visual top-left)
 }
 
 // LevelMap decompresses level 0 or 1 and derives the spawn positions.
@@ -180,21 +185,65 @@ func (g *Game) LevelMap(level int) (*LevelMap, error) {
 		copy(lm.Cells[r][:], flat[r*MapWidth:])
 	}
 
-	// Player spawn ($8EDD tables + coordinate formulas at $A2B9/$A2C5):
-	//   col = (spriteX-$24)/4 + cameraCol ; row = (spriteY-$58)/8 + cameraRow
+	// Player spawn: sprite/camera start values from the $8EDD tables.
+	// The marker shows the craft's *visual* position, not the game's
+	// logic coordinate $69 (which sits 3 chars into the sprite):
+	// hardware X = 2*(sx-$24) ($B0CB), the screen's first pixel column
+	// is at hardware X 24, and the window's left column is buffer
+	// camCol-1 — so the sprite's left edge is at buffer column
+	// (sx-$30)/4 + camCol - 1, rounded to the nearest character.
 	sx := int(g.mem[spriteStartTbl+2*level])
 	sy := int(g.mem[spriteStartTbl+2*level+1])
 	camCol := int(g.mem[cameraStartTbl+2*level])
 	camRow := int(g.mem[cameraStartTbl+2*level+1])
-	lm.PlayerSpawn = Point{Col: (sx-0x24)/4 + camCol, Row: (sy-0x58)/8 + camRow}
+	lm.PlayerSpawn = Point{Col: (sx-0x30+2)/4 + camCol - 1, Row: (sy-0x58)/8 + camRow}
 
-	// Enemy spawn candidates ($90A4): two $48 floor cells side by side
-	// with rock $1F directly above. The game arms up to 8 random ones.
+	// Prisoner spawn candidates ($90A4): two $48 floor cells side by
+	// side with rock $1F directly above. The level builder turns up to
+	// 8 random candidates into prisoners (the $3600 tables).
 	for r := 1; r < MapHeight; r++ {
 		for c := 0; c < MapWidth-1; c++ {
 			if lm.Cells[r][c] == 0x48 && lm.Cells[r][c+1] == 0x48 && lm.Cells[r-1][c] == 0x1F {
-				lm.EnemySpawns = append(lm.EnemySpawns, Point{Col: c, Row: r})
+				lm.PrisonerSpawns = append(lm.PrisonerSpawns, Point{Col: c, Row: r})
 			}
+		}
+	}
+
+	// Tank homes ($8F55 tables): 6 fixed positions per level, stored in
+	// game coordinates (buffer column = value - 5). The home column is
+	// the leftmost cell of the 3-cell tank body.
+	homeTbl := tankHomeTbl0
+	if level == 1 {
+		homeTbl = tankHomeTbl1
+	}
+	for i := 0; i < 6; i++ {
+		lm.TankHomes = append(lm.TankHomes, Point{
+			Col: int(g.mem[homeTbl+i]) - 5,
+			Row: int(g.mem[homeTbl+6+i]),
+		})
+	}
+
+	// Enemy-helicopter patrol points ($9C6B): 8 table entries per
+	// level at $9CBA/$9CCA (level 1 uses the second half), with
+	// duplicates for spawn-probability weighting. Stored in the
+	// enemy's coordinate space; its sprite placement ($A1D6/$A1F7:
+	// x = (col-cam)*4+$16, y = (row-cam)*8+$53) puts the craft's
+	// visual top-left at buffer column col-7.5, row col-2.1 — rounded
+	// here to (col-7, row-2).
+	base := enemyPatrolTbl + 8*level
+	for i := 0; i < 8; i++ {
+		p := Point{
+			Col: int(g.mem[base+i]) - 7,
+			Row: int(g.mem[base+16+i]) - 2,
+		}
+		dup := false
+		for _, q := range lm.EnemySpawns {
+			if q == p {
+				dup = true
+			}
+		}
+		if !dup {
+			lm.EnemySpawns = append(lm.EnemySpawns, p)
 		}
 	}
 	return lm, nil
@@ -350,8 +399,10 @@ func RenderCharset(charset []byte, d022 byte, s int) *image.RGBA {
 // RenderMap renders a level map at its true width (216 chars: the wrap
 // seam column stored at offset 255, then content columns 0-214; the
 // empty padding columns 215-254 are cropped), scale s. If markers is
-// true, the player spawn is framed in cyan and every enemy spawn
-// candidate in yellow.
+// true, the player spawn is framed in cyan, every prisoner spawn
+// candidate in yellow, the tank homes (body + turret row) in light
+// red, and the enemy-helicopter patrol points in light green (both
+// helicopter markers sized to the craft's 4x3-character footprint).
 func RenderMap(lm *LevelMap, charset []byte, d022 byte, s int, markers bool) *image.RGBA {
 	pal := mcPalette(d022)
 	width := ContentWidth + 1 // seam column + content
@@ -365,11 +416,23 @@ func RenderMap(lm *LevelMap, charset []byte, d022 byte, s int, markers bool) *im
 		}
 	}
 	if markers {
-		cyan, yellow := c64Palette[3], c64Palette[7]
-		for _, p := range lm.EnemySpawns {
-			frameCell(img, p.Col+1, p.Row, 2, 1, s, yellow) // pattern is 2 cells wide
+		cyan, yellow, lightRed := c64Palette[3], c64Palette[7], c64Palette[10]
+		for _, p := range lm.PrisonerSpawns {
+			// the floor pattern is 2 cells wide; the prisoner himself
+			// is 2 chars tall (torso drawn one row above the leg cell)
+			frameCell(img, p.Col+1, p.Row-1, 2, 2, s, yellow)
 		}
-		frameCell(img, lm.PlayerSpawn.Col+1, lm.PlayerSpawn.Row, 1, 1, s, cyan)
+		for _, p := range lm.TankHomes {
+			// 3-cell body plus the turret row above
+			frameCell(img, p.Col+1, p.Row-1, 3, 2, s, lightRed)
+		}
+		lightGreen := c64Palette[13]
+		for _, p := range lm.EnemySpawns {
+			frameCell(img, p.Col+1, p.Row, 4, 3, s, lightGreen)
+		}
+		// The helicopter's visual footprint: 16x18 used sprite pixels,
+		// X-expanded = 4 chars wide, ~3 chars tall, from the left edge.
+		frameCell(img, lm.PlayerSpawn.Col+1, lm.PlayerSpawn.Row, 4, 3, s, cyan)
 	}
 	return img
 }

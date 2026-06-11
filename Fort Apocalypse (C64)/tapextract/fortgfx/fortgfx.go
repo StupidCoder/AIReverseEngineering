@@ -31,6 +31,7 @@ const (
 	tankHomeTbl0    = 0x911C // 6 tank home cols (levels 0/2), rows at $9122
 	tankHomeTbl1    = 0x9128 // 6 tank home cols (level 1), rows at $912E
 	enemyPatrolTbl  = 0x9CBA // 16 enemy-heli patrol cols, rows at $9CCA
+	dropPointTbl    = 0x98DA // 4 cavern drop points: $57,$59,$56,$58,$65,$66 presets
 	barrierPattern  = 0x8907 // 32 bytes: energy barrier chars 1-4
 	barrierTop      = 0x891F // 8 bytes: barrier cap char 9
 	waterPattern    = 0xA927 // 8 bytes: water/static chars $20/$3F
@@ -132,6 +133,7 @@ type LevelMap struct {
 	PrisonerSpawns []Point // all candidate prisoner positions ($90A4 pattern)
 	TankHomes      []Point // 6 fixed tank home positions (leftmost body cell)
 	EnemySpawns    []Point // unique enemy-helicopter patrol points (visual top-left)
+	DropPoints     []Point // cavern teleport destinations, level 0 only (craft center)
 }
 
 // LevelMap decompresses level 0 or 1 and derives the spawn positions.
@@ -244,6 +246,25 @@ func (g *Game) LevelMap(level int) (*LevelMap, error) {
 		}
 		if !dup {
 			lm.EnemySpawns = append(lm.EnemySpawns, p)
+		}
+	}
+
+	// Cavern drop points ($9892, level 0 only): the barrier-gate
+	// teleport picks one of 4 presets (fine scroll, camera, sprite
+	// position) from $98DA+. Converted to the craft's visual center:
+	// centre px = 2*(sx-$24) - 24 + 16 - fineX; row from sy as for
+	// the player spawn, plus half the 3-row footprint.
+	if level == 0 {
+		for i := 0; i < 4; i++ {
+			fx := int(g.mem[dropPointTbl+i]) & 7
+			cc := int(g.mem[dropPointTbl+8+i])
+			cr := int(g.mem[dropPointTbl+12+i])
+			sx := int(g.mem[dropPointTbl+16+i])
+			sy := int(g.mem[dropPointTbl+20+i])
+			lm.DropPoints = append(lm.DropPoints, Point{
+				Col: (2*sx-80-fx+4)/8 + cc - 1,
+				Row: (sy-100+12)/8 + cr,
+			})
 		}
 	}
 	return lm, nil
@@ -430,11 +451,29 @@ func RenderMap(lm *LevelMap, charset []byte, d022 byte, s int, markers bool) *im
 		for _, p := range lm.EnemySpawns {
 			frameCell(img, p.Col+1, p.Row, 4, 3, s, lightGreen)
 		}
+		white := c64Palette[1]
+		for _, p := range lm.DropPoints {
+			drawCircle(img, ((p.Col+1)*8+4)*s, (p.Row*8+4)*s, 6*s, s, white)
+		}
 		// The helicopter's visual footprint: 16x18 used sprite pixels,
 		// X-expanded = 4 chars wide, ~3 chars tall, from the left edge.
 		frameCell(img, lm.PlayerSpawn.Col+1, lm.PlayerSpawn.Row, 4, 3, s, cyan)
 	}
 	return img
+}
+
+// drawCircle draws a hollow circle of radius r px and line thickness t
+// centered at (cx,cy), matching the frame markers' line weight.
+func drawCircle(img *image.RGBA, cx, cy, r, t int, c color.RGBA) {
+	inner := (r - t) * (r - t)
+	for dy := -r; dy <= r; dy++ {
+		for dx := -r; dx <= r; dx++ {
+			d := dx*dx + dy*dy
+			if d <= r*r && d >= inner {
+				img.SetRGBA(cx+dx, cy+dy, c)
+			}
+		}
+	}
 }
 
 // frameCell draws a rectangle around a w x h cell area at (col,row).

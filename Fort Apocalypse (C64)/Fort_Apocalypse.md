@@ -582,7 +582,8 @@ prisoners from, $90A4) **yellow**; the six fixed tank homes per level
 helicopter's patrol/spawn points (tables $9CBA/$9CCA, sized to its
 4×3-character footprint like the player marker) **light green** —
 note the fort-top point on level 0, half above the map edge, dead
-center over the entry shaft:
+center over the entry shaft; the four cavern teleport drop points
+($98DA presets, level 0 only) as **white circles**:
 
 **Level 0 — Vaults of Draconis** (surface with FUEL depots and the
 LAND HERE pad, cavern levels below):
@@ -1001,7 +1002,9 @@ handler ($A0A1, see §1) then decides:
   position cell, $B230) is converted into the **teleport**: state
   $0A → $9892 picks one of the four cavern drop points at random
   (camera presets $98DA+: two in the upper cavern band, two in the
-  deep band) and sets the $4D grace flag so the arrival cannot
+  deep band — each lands you at another scissor gate; marked as
+  white circles on the level-0 map render) and sets the $4D grace flag
+  so the arrival cannot
   crash. Since a barrier can only be touched while it is lit, and
   lit means its timer is in the wrap window, the $A0CE timer check
   ($3D or $3E == 0) passes automatically in this case — its real job

@@ -79,6 +79,17 @@ func TestLevelMapDecode(t *testing.T) {
 	if lm.EnemySpawns[0] != (Point{Col: 125, Row: -2}) {
 		t.Errorf("enemy patrol point 0: %+v, want {125 -2}", lm.EnemySpawns[0])
 	}
+	// Cavern drop points (level 0 only): one near each central
+	// scissor gate.
+	want := []Point{{51, 21}, {206, 21}, {104, 34}, {153, 34}}
+	if len(lm.DropPoints) != 4 {
+		t.Fatalf("got %d drop points, want 4", len(lm.DropPoints))
+	}
+	for i, w := range want {
+		if lm.DropPoints[i] != w {
+			t.Errorf("drop point %d: %+v, want %+v", i, lm.DropPoints[i], w)
+		}
+	}
 
 	lm1, err := g.LevelMap(1)
 	if err != nil {

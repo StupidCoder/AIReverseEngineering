@@ -1,0 +1,50 @@
+# Elite (C64) engine annotations — consumed by codetrace -annotate.
+# Format: ADDR  name  description   (ADDR is hex; '#' starts a comment line)
+# Regenerate elite.asm to apply (see Elite.md Appendix A step 7).
+# This file grows as the analysis progresses; routines are added as they are
+# identified. Names are derived from observed behaviour, not external sources.
+# Addresses are in the reconstructed running-game memory image.
+
+# --- startup / init (Part III) ---
+1D1F  game_entry        back up zero page to $CE02, decrypt the game regions, hardware init, then start the game
+1D33  decrypt_game      in-place rolling-SBC decrypt of $1D7E-$3ECE (key $36) and $7300-$CA6C (key $49)
+1D56  decrypt_pass      one descending rolling-SBC decrypt pass (shared by decrypt_game)
+B3B2  hw_init           clear $0400-$06FF, set NMI/BSOUT vectors, enable the raster IRQ, install the RAM IRQ/NMI vectors
+B433  nmi_handler       NMI handler: CLI + RTI (the RESTORE key is neutralised)
+B1FA  irq_handler       raster-split IRQ: load the VIC split registers from the tables at $B1DA, run the SID player on the final split
+916F  game_start        one-time game setup: clear flags $1D01-$1D11, build the title/commander screen
+
+# --- pseudo-random generator (Part IV §2) ---
+8DBB  fib_rng           4-byte Fibonacci-style pseudo-random generator (seed $02-$05); the universe and effects RNG
+824D  fib_rng_alt       inline copy of fib_rng
+8264  fib_rng_coord     fib_rng turned into a signed screen coordinate (scale via $39E7, accumulator $9B/$9C)
+
+# --- vector / wireframe graphics (Part IV §1) ---
+2911  pixel             plot a distance-scaled point (1/2/4 px) to the multicolor view bitmap at $4000
+B49D  line              draw one Bresenham line into the multicolor view bitmap
+B814  line_steep        the line routine's steep-axis (dy>dx) variant
+8888  line_plot         the line routine's inner EOR plot loop
+AA72  draw_linelist     draw a list of 4-byte (x1,y1,x2,y2) line records via pointer $2A
+ABA0  ship_move_draw    move/rotate a ship by its orientation, apply level-of-detail and visibility, then draw it
+A3A0  draw_ship         project ship vertices, back-face cull faces, build the line heap at $0580
+855B  spawn_ship        create a ship in a universe slot (reads the blueprint header attributes)
+81C6  starfield         seeded star/dust-field plotter: reseed $02-$05, derive coordinates, plot dots
+8300  starfield_alt     seeded star/dust-field plotter (variant)
+
+# --- text / token system (Part IV §2) ---
+238D  print_dispatch    token/character print dispatcher (the self-modified JSR at $2432 selects the handler)
+2F21  chrout            character output routine
+807E  print_token       text token printer (handles control codes and letter case)
+8111  expand_msgtoken   recursive message-token expander: strings live at $0700, EOR-$23 encrypted
+8100  expand_digram     digram-token expander: full-table letter pairs from $2563
+24CB  digram_name       digram name generator (first 32 pairs only; NOT the full system-name generator — see Elite.md Part IV §2.4)
+24EA  name_case         select name output case mode ($2F1B = $DF)
+24AD  name_from_buf     print a name from the $0647 vowel-cache buffer
+
+# --- data tables ---
+2614  commander_def     default commander block ("JAMESON") + galaxy seed + starting state
+2621  galaxy_seed       galaxy-1 seed $5A4A,$0248,$B753 (6 bytes, inside commander_def)
+254B  digram_table      two-letter (digram) table: the alphabet for message tokens and names
+2507  token_handlers    text-token handler address table (one word per token; dispatched via self-modified JSR)
+B1DA  irq_split_tbl     VIC raster-split register tables (D018/D016/D012/D01C/D028/D021, per split)
+CFFE  blueprint_ptrs    ship blueprint pointer table (one word per ship type)

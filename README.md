@@ -53,7 +53,8 @@ AIReverseEngineering/
 │   ├── Elite.md                # tape + loader + startup writeup (more to follow)
 │   ├── extract/                # module elite/extract — extraction + graphics tools
 │   ├── extracted/              # generated .prg files (regenerable; git-ignored)
-│   └── rendered/               # generated PNGs (loading screen, ship wireframes)
+│   ├── rendered/               # generated PNGs (loading screen, ship wireframes)
+│   └── disasm/                 # annotated recursive-descent disassembly + annotations.txt
 │
 └── Fort Apocalypse (C64)/
     ├── Fort_Apocalypse.tap      # raw tape image

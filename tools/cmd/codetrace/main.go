@@ -30,13 +30,14 @@ func main() {
 	entry := flag.String("entry", "", "comma-separated entry addresses (hex)")
 	var tables multiFlag
 	flag.Var(&tables, "table", "jump table to seed as code, ADDR:N (N little-endian words); repeatable")
+	annotate := flag.String("annotate", "", "annotations file: lines \"ADDR name description\" (# comments)")
 	out := flag.String("o", "", "write disassembly to this file (default stdout)")
 	flag.Parse()
 	if flag.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: codetrace [-load HEX] -entry A,B,C [-table ADDR:N ...] [-o out] image.prg")
+		fmt.Fprintln(os.Stderr, "usage: codetrace [-load HEX] -entry A,B,C [-table ADDR:N ...] [-annotate FILE] [-o out] image.prg")
 		os.Exit(2)
 	}
-	if err := run(flag.Arg(0), *load, *entry, tables, *out); err != nil {
+	if err := run(flag.Arg(0), *load, *entry, tables, *annotate, *out); err != nil {
 		fmt.Fprintln(os.Stderr, "codetrace:", err)
 		os.Exit(1)
 	}
@@ -55,7 +56,44 @@ func hx(s string) (uint16, error) {
 	return uint16(v), err
 }
 
-func run(path, loadStr, entryStr string, tables multiFlag, outPath string) error {
+type annot struct{ name, desc string }
+
+// loadAnnotations reads "ADDR name rest-of-line-is-description" entries.
+func loadAnnotations(path string) (map[uint16]annot, error) {
+	if path == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	m := map[uint16]annot{}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		f := strings.Fields(line)
+		if len(f) < 2 {
+			continue
+		}
+		a, err := hx(f[0])
+		if err != nil {
+			return nil, fmt.Errorf("annotations: bad address %q", f[0])
+		}
+		name := f[1]
+		rest := strings.TrimSpace(line[len(f[0]):]) // after the address
+		desc := strings.TrimSpace(rest[len(name):]) // after the name
+		m[a] = annot{name: name, desc: desc}
+	}
+	return m, nil
+}
+
+func run(path, loadStr, entryStr string, tables multiFlag, annPath, outPath string) error {
+	ann, err := loadAnnotations(annPath)
+	if err != nil {
+		return err
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -115,7 +153,7 @@ func run(path, loadStr, entryStr string, tables multiFlag, outPath string) error
 		w = bufio.NewWriter(f)
 	}
 	defer w.Flush()
-	emit(w, mem, lo, hi, tr)
+	emit(w, mem, lo, hi, tr, ann)
 
 	// summary to stderr
 	code := 0
@@ -189,15 +227,22 @@ func trace(mem []byte, seeds []uint16) *traced {
 	return t
 }
 
-// emit writes the listing: a header before each subroutine (JSR target), the
-// decoded instructions, and condensed .byte runs for data gaps.
-func emit(w *bufio.Writer, mem []byte, lo, hi int, t *traced) {
+// emit writes the listing: a header before each subroutine (JSR target) or
+// annotated address, the decoded instructions, and condensed .byte runs for
+// data gaps. Annotations (from -annotate) name and describe addresses.
+func emit(w *bufio.Writer, mem []byte, lo, hi int, t *traced, ann map[uint16]annot) {
 	pos := lo
 	for pos < hi {
 		a := uint16(pos)
+		an, named := ann[a]
 		if in, ok := t.instr[a]; ok {
-			if n := t.callers[a]; n > 0 {
-				fmt.Fprintf(w, "\n; ==== sub_%04X (%d caller%s) ====\n", a, n, plural(n))
+			switch {
+			case t.callers[a] > 0 && named:
+				fmt.Fprintf(w, "\n; ==== %s  $%04X  (%d caller%s) — %s ====\n", an.name, a, t.callers[a], plural(t.callers[a]), an.desc)
+			case t.callers[a] > 0:
+				fmt.Fprintf(w, "\n; ==== sub_%04X (%d caller%s) ====\n", a, t.callers[a], plural(t.callers[a]))
+			case named:
+				fmt.Fprintf(w, "\n; --- %s  $%04X — %s ---\n", an.name, a, an.desc)
 			}
 			raw := make([]string, in.Len)
 			for i := 0; i < in.Len; i++ {
@@ -207,10 +252,18 @@ func emit(w *bufio.Writer, mem []byte, lo, hi int, t *traced) {
 			pos += in.Len
 			continue
 		}
-		// data run until the next instruction start (or hi)
+		// data: annotate if named, then run until the next instruction start,
+		// the next annotated address, or hi.
+		if named {
+			fmt.Fprintf(w, "\n; --- %s  $%04X — %s (data) ---\n", an.name, a, an.desc)
+		}
 		start := pos
+		pos++
 		for pos < hi {
 			if _, ok := t.instr[uint16(pos)]; ok {
+				break
+			}
+			if _, ok := ann[uint16(pos)]; ok {
 				break
 			}
 			pos++

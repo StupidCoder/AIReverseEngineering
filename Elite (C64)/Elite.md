@@ -565,7 +565,7 @@ type  2: $D1A3     type 13: $DB3D     type 24: $E50B
 type 11: $D8C3     type 22: $E395     type 33: $EE2D
 ```
 
-The table is read by the spawn routine (`$855B`, NWSHP) and the per-ship draw
+The table is read by the spawn routine (`$855B`, spawn_ship) and the per-ship draw
 path (`$2030` → `$ABA0`), each doing `LDA $CFFE,Y / STA $57 ; LDA $CFFF,Y / STA
 $58` to point a zero-page vector (`$57/$58`) at the chosen blueprint.
 
@@ -581,7 +581,7 @@ edges, faces:
 +4           FACES offset  (low byte of the offset to the face array)
 +5           visibility distance / model "size" (drawn as a dot beyond this)
 +9           number of edges (NE)
-+0E +0F      level-of-detail / max-size attributes (read by NWSHP and MVEIT)
++0E +0F      level-of-detail / max-size attributes (read by spawn_ship and ship_move_draw)
 +13          AI / energy attributes
 ... (remaining bytes: scaling and AI/economy attributes)
 ```
@@ -681,23 +681,23 @@ table in §1.5):
 1. **Per-ship setup (`$2030`).** The ship's 37-byte state block is copied from
    its universe slot into the zero-page workspace at `$0009`, and its blueprint
    pointer is loaded into `$57/$58`.
-2. **Rotate & cull-by-distance (`$ABA0`, MVEIT).** The ship's orientation
+2. **Rotate & cull-by-distance (`$ABA0`, ship_move_draw).** The ship's orientation
    vectors are applied; the model "size" is clamped against header byte `+0F`
    for level-of-detail, and far ships are dropped or reduced.
-3. **Project & build the line heap (`$A3A0`, LL9).** Each vertex is rotated into
+3. **Project & build the line heap (`$A3A0`, draw_ship).** Each vertex is rotated into
    view space and perspective-projected (the depth divide) to a screen x,y,
    stored 4 bytes per vertex. Faces are back-face tested with their normals;
    each edge whose face(s) are visible and whose visibility distance passes is
    appended to the ship's **line heap at `$0580`** as a 4-byte record
    `(x1, y1, x2, y2)`. The heap begins with a length byte.
 4. **Draw the heap.** The line-list drawer (`$AA72`) walks the heap — a count
-   followed by 4-byte endpoint records — calling the **LINE** routine for each.
-5. **LINE (`$B49D`).** A Bresenham line drawn into the multicolor space-view
+   followed by 4-byte endpoint records — calling the **line** routine for each.
+5. **line (`$B49D`).** A Bresenham line drawn into the multicolor space-view
    bitmap at `$4000`. The major/minor axis split is handled at `$B814`; the
    gradient comes from the reciprocal tables at `$9C00–$9F00`; the bitmap byte
    address is formed from the row tables `$A000` (low) / `$A100` (high) plus
    `(x & $F8)`; the inner plot loop EORs pixels (relocated, at `$8888`).
-   Single points (stars, distant ships) instead use **PIXEL (`$2911`)**, which
+   Single points (stars, distant ships) instead use **pixel (`$2911`)**, which
    plots a 1-, 2- or 4-pixel dot depending on distance (`$A1`), using the
    2-bit multicolor masks at `$28C5`.
 
@@ -709,24 +709,24 @@ Elite flicker-free redraw.
 
 | address | name | role |
 |---------|------|------|
-| `$CFFE` | XX21 | blueprint pointer table (33 ships, word per type×2) |
+| `$CFFE` | blueprint_ptrs | blueprint pointer table (33 ships, word per type×2) |
 | `$D0A5–$EE2D` | — | the 33 ship blueprints (under I/O) |
 | `$0580` | line heap | per-ship list of projected line segments |
-| `$0009–$002D` | workspace | the active ship's 37-byte state block (INWK) |
-| `$2030` | — | per-ship processor: slot↔workspace copy, fetch blueprint, call MVEIT |
-| `$ABA0` | MVEIT | rotate ship, level-of-detail/visibility, dispatch draw |
-| `$A3A0` | LL9 | project vertices, back-face cull, build the line heap |
-| `$855B` | NWSHP | create a ship in a universe slot (reads blueprint attrs +5,+0E,+0F,+13) |
+| `$0009–$002D` | workspace | the active ship's 37-byte state block |
+| `$2030` | — | per-ship processor: slot↔workspace copy, fetch blueprint, call ship_move_draw |
+| `$ABA0` | ship_move_draw | rotate ship, level-of-detail/visibility, dispatch draw |
+| `$A3A0` | draw_ship | project vertices, back-face cull, build the line heap |
+| `$855B` | spawn_ship | create a ship in a universe slot (reads blueprint attrs +5,+0E,+0F,+13) |
 | `$AA72` | — | draw a line list (count + 4-byte `x1,y1,x2,y2` records) via `$2A` |
-| `$B49D` | LINE | draw one Bresenham line into the view bitmap (multicolor) |
-| `$B814` | — | LINE's steep-axis (dy>dx) variant |
-| `$8888` | — | LINE inner EOR plot loop (relocated under I/O) |
-| `$2911` | PIXEL | plot a distance-scaled point (1/2/4 px) to the view bitmap |
-| `$9C00–$9F00` | — | reciprocal/gradient tables used by LINE |
+| `$B49D` | line | draw one Bresenham line into the view bitmap (multicolor) |
+| `$B814` | — | line's steep-axis (dy>dx) variant |
+| `$8888` | — | line inner EOR plot loop (relocated under I/O) |
+| `$2911` | pixel | plot a distance-scaled point (1/2/4 px) to the view bitmap |
+| `$9C00–$9F00` | — | reciprocal/gradient tables used by line |
 | `$A000 / $A100` | — | bitmap scanline address tables (low / high byte) |
 | `$28B7` | — | 8-bit hires pixel-mask table |
-| `$28C5` | — | multicolor 2-bit dot-mask table (used by PIXEL) |
-| `$8DBB` | DORND | random-number generator |
+| `$28C5` | — | multicolor 2-bit dot-mask table (used by pixel) |
+| `$8DBB` | fib_rng | random-number generator |
 
 The view bitmap itself is at `$4000` (VIC bank 1, multicolor — Part III), the
 same RAM the loading picture used; once loading is done it becomes the live
@@ -805,9 +805,9 @@ the algorithm.
 
 ### 2.3 The generator: a Fibonacci twist
 
-All procedural values come from one routine, the Elite **DORND** generator at
-`$8DBB` (with inline copies at `$824D` and `$8264`). It is a two-word
-Fibonacci-style step over a 4-byte seed at `$02–$05`:
+All procedural values come from one routine — a Fibonacci-style pseudo-random
+generator at `$8DBB`, named **`fib_rng`** here (with inline copies at `$824D`
+and `$8264`). It is a two-word lagged-sum step over a 4-byte seed at `$02–$05`:
 
 ```
 8DBB  LDA $02  ROL A  TAX  ADC $04  STA $02  STX $04   ; word0' = rol(word0)+word1
@@ -837,11 +837,11 @@ table at `$2507`):
 24E6  DEY  BPL $24D4      ; repeat for each pair
 ```
 
-So a name is **one to four digram pairs** (2–8 letters): one DORND call picks
+So a name is **one to four digram pairs** (2–8 letters): one fib_rng call picks
 the length, then each pair is five seed-derived bits indexing the digram table.
 This is the procedural-name mechanism, and **running `$24CB` under emulation
 confirms it** — it produces valid digram names (`ESALOUXE`, `NULEARIT`,
-`MAON`…) and advances the DORND seed as it goes.
+`MAON`…) and advances the fib_rng seed as it goes.
 
 **But this routine is not the full planet-name generator.** The `AND #$3E` mask
 limits the index to 0–31, so `$24CB` can only ever use the *first 32* of the
@@ -859,8 +859,8 @@ was not isolated — see §2.6.
 
 The seeded-dot routines at `$81C6` and `$8300` show the same machinery used for
 position: each reseeds `$02–$05` from a stored seed (the bytes EOR-`$AA`), then
-derives an on-screen coordinate through `$8264` (DORND followed by a signed
-scale via `$39E7` and the `$9B/$9C` accumulator) and plots it with `PIXEL`
+derives an on-screen coordinate through `$8264` (fib_rng followed by a signed
+scale via `$39E7` and the `$9B/$9C` accumulator) and plots it with `pixel`
 (`$2937`). This is how the deterministic star/dust field — and the dots on the
 star charts — are produced from a seed rather than stored.
 
@@ -871,7 +871,7 @@ flat-RAM image of the decrypted engine, so they can be driven directly and their
 output captured. It established two things and a correction:
 
 - The digram-name **mechanism is real and runnable** — `$24CB` produces valid
-  two-letter-pair names from a seed and advances DORND as it does.
+  two-letter-pair names from a seed and advances fib_rng as it does.
 - **Correction:** `$24CB` is *not* the routine that prints the real system names
   (§2.4): its 32-pair limit cannot produce Lave/Leesti/Riedquat. That generator —
   full table, `?` handling — was not isolated.
@@ -883,7 +883,7 @@ These pieces remain **open**:
 - **System enumeration** — the step that advances from one system's seed to the
   next. A useful *negative* result: the C64 port does **not** use the classic
   6-byte seed-shift twist (that instruction cascade is absent from the whole 64 KB
-  image); generation runs through the 4-byte DORND RNG, but the fixed advance per
+  image); generation runs through the 4-byte fib_rng RNG, but the fixed advance per
   system was not pinned down.
 - **The per-galaxy transform** — how the galactic hyperdrive turns one galaxy's
   seed into the next.
@@ -910,12 +910,12 @@ raster/IRQ model and maps `$D000–$DFFF` as I/O, where game code actually runs)
 | `$254B` | digram (two-letter) table — alphabet for both message tokens and planet names |
 | `$2507` | text-token handler address table (dispatches the name generator) |
 | `$0700` | message token strings, EOR-`$23` encrypted |
-| `$8DBB` | DORND — the Fibonacci pseudo-random generator (seed at `$02–$05`) |
-| `$824D`, `$8264` | inline DORND copies; `$8264` turns it into a signed coordinate |
+| `$8DBB` | fib_rng — the Fibonacci pseudo-random generator (seed at `$02–$05`) |
+| `$824D`, `$8264` | inline fib_rng copies; `$8264` turns it into a signed coordinate |
 | `$24CB` | a digram name generator (1–4 pairs from the seed, first 32 pairs only — *not* the full system-name generator, see §2.4/§2.6) |
 | `$8111` | recursive message-token expander (EOR `$23` at `$813B`) |
 | `$8100` | digram-token expander (pairs from `$2563`) |
-| `$81C6`, `$8300` | seeded-dot plotters (star/dust field, chart dots): reseed `$02–$05` (`$81F3`/`$832B`), derive coordinates, plot via `PIXEL` |
+| `$81C6`, `$8300` | seeded-dot plotters (star/dust field, chart dots): reseed `$02–$05` (`$81F3`/`$832B`), derive coordinates, plot via `pixel` |
 
 So the answer to "are the names stored or generated?" is firmly **generated**:
 the seed plus a Fibonacci RNG, with a 90-byte letter-pair table as the only
@@ -974,14 +974,16 @@ extract/extract -o extracted Elite.tap
 #    (used to study the procedural name generator — Part IV §2)
 ( cd extract && go run ./cmd/galaxytrace )
 
-# 7. Reconstruct the full decrypted engine and recursive-descent disassemble it:
-#    follow every branch/jump/call from the entry points, plus the text-token
-#    handler table at $2509, separating code from data. Game code does not
-#    rewrite itself (unlike the loader), so this yields a stable disassembly.
+# 7. Reconstruct the full decrypted engine and recursive-descent disassemble it
+#    into disasm/elite.asm: follow every branch/jump/call from the entry points
+#    plus the text-token handler table at $2509, separating code from data, and
+#    apply the running function names/notes from disasm/annotations.txt. Game
+#    code does not rewrite itself (unlike the loader), so the disassembly is
+#    stable; annotations in disasm/annotations.txt grow as analysis progresses.
 ( cd extract && go run ./cmd/enginedump /tmp/elite-engine.prg )
 go run stupidcoder.com/tools/cmd/codetrace \
     -entry 1D1F,916F,B3B2,B1FA,B433 -table 2509:21 \
-    -o /tmp/elite.asm /tmp/elite-engine.prg
+    -annotate disasm/annotations.txt -o disasm/elite.asm /tmp/elite-engine.prg
 
 # run this module's tests
 ( cd extract && go test ./... )

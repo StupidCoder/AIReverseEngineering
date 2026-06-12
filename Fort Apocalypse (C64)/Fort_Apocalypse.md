@@ -31,6 +31,63 @@ All addresses are C64 memory addresses; "frame" means one PAL frame.
 
 ---
 
+## Contents
+
+- [Part I — The tape image](#part-i--the-tape-image)
+  - [1. TAP container](#1-tap-container)
+    - [Layout of this image](#layout-of-this-image)
+  - [2. Standard KERNAL encoding (bootstrap part)](#2-standard-kernal-encoding-bootstrap-part)
+    - [Records on this tape](#records-on-this-tape)
+  - [3. The fastloader encoding](#3-the-fastloader-encoding)
+    - [Stream layout](#stream-layout)
+- [Part II — Boot chain and loader internals](#part-ii--boot-chain-and-loader-internals)
+  - [1. Overview](#1-overview)
+  - [2. Loader setup ($080D, run by SYS 2061)](#2-loader-setup-080d-run-by-sys-2061)
+  - [3. The IRQ handler in the tape buffer ($0351)](#3-the-irq-handler-in-the-tape-buffer-0351)
+  - [4. Stage 2 — the loading screen ($E000–$E6FF, $EE00–$F1FF)](#4-stage-2--the-loading-screen-e000e6ff-ee00f1ff)
+  - [5. The music stream is a program — and hides the game start](#5-the-music-stream-is-a-program--and-hides-the-game-start)
+  - [6. End of loading, and the error path](#6-end-of-loading-and-the-error-path)
+- [Part III — Game program architecture](#part-iii--game-program-architecture)
+  - [1. Initialization ($8600 → $8927)](#1-initialization-8600--8927)
+  - [2. Interrupt architecture](#2-interrupt-architecture)
+  - [3. Memory map (during play)](#3-memory-map-during-play)
+    - [Game file layout ($7000–$B8FF)](#game-file-layout-7000b8ff)
+- [Part IV — Graphics and data formats](#part-iv--graphics-and-data-formats)
+  - [1. Compression: table-selective RLE](#1-compression-table-selective-rle)
+  - [2. Character sets](#2-character-sets)
+    - [HUD charset, $5000 (screen rows 0–6, $D018=$14)](#hud-charset-5000-screen-rows-06-d01814)
+    - [Playfield charset, $5800 (screen rows 7–24, $D018=$16)](#playfield-charset-5800-screen-rows-724-d01816)
+  - [3. Sprites — packed column format](#3-sprites--packed-column-format)
+  - [4. The level maps](#4-the-level-maps)
+    - [Actual width: 215 columns + wrap seam](#actual-width-215-columns--wrap-seam)
+    - [Scrolling: brute-force window copy ($A72C)](#scrolling-brute-force-window-copy-a72c)
+  - [5. The scanner (radar)](#5-the-scanner-radar)
+  - [6. HUD](#6-hud)
+- [Part V — Game mechanics and objects](#part-v--game-mechanics-and-objects)
+  - [0. The collision architecture](#0-the-collision-architecture)
+  - [1. The player — Rocket Copter (sprite 0)](#1-the-player--rocket-copter-sprite-0)
+  - [2. Player bullets (sprites 2–3)](#2-player-bullets-sprites-23)
+  - [3. Enemy helicopter (sprite 1)](#3-enemy-helicopter-sprite-1)
+  - [4. Tanks (6 per level, char-based)](#4-tanks-6-per-level-char-based)
+  - [5. Homing missiles (one per tank, chars $71/$72)](#5-homing-missiles-one-per-tank-chars-7172)
+  - [6. SPMs — Self-Propelled Mines (13/26/39 by difficulty)](#6-spms--self-propelled-mines-132639-by-difficulty)
+  - [7. Prisoners — "MEN TO RESCUE" (8 per level)](#7-prisoners--men-to-rescue-8-per-level)
+  - [8. Gates, moving walls, barriers and laser grids](#8-gates-moving-walls-barriers-and-laser-grids)
+    - [The reactor gate walls (chars $59/$5A)](#the-reactor-gate-walls-chars-595a)
+    - [Sweeping walls (chars $0E–$11)](#sweeping-walls-chars-0e11)
+    - [Laser grids (chars $0A–$0D)](#laser-grids-chars-0a0d)
+    - [Energy barriers (chars $01–$08, emitter caps $09)](#energy-barriers-chars-0108-emitter-caps-09)
+    - [Cosmetic wall animation (chars $4C–$4F, $47)](#cosmetic-wall-animation-chars-4c4f-47)
+  - [9. Collision matrix](#9-collision-matrix)
+  - [10. Difficulty variants](#10-difficulty-variants)
+  - [11. Level progression and victory](#11-level-progression-and-victory)
+    - [Pilot ranks](#pilot-ranks)
+- [Appendix A — Toolchain and reproduction](#appendix-a--toolchain-and-reproduction)
+- [Appendix B — Strings and easter eggs](#appendix-b--strings-and-easter-eggs)
+- [Appendix C — Key routines and tables](#appendix-c--key-routines-and-tables)
+
+---
+
 # Part I — The tape image
 
 ## 1. TAP container

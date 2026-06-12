@@ -823,8 +823,8 @@ bytes **EOR-`$AA`** into `$02–$05`) before calling the generator.
 
 ### 2.4 Building a name
 
-The name generator is a text-token handler at `$24CB` (reached through the
-token-handler table at `$2507`, not called directly):
+A digram-name generator sits at `$24CB` (a text-token handler reached through the
+table at `$2507`):
 
 ```
 24CB  JSR $24EA          ; select "capitalise first, lower-case rest" output mode
@@ -838,9 +838,22 @@ token-handler table at `$2507`, not called directly):
 ```
 
 So a name is **one to four digram pairs** (2–8 letters): one DORND call picks
-the length, then each pair is chosen by five seed-derived bits indexing the
-first 32 pairs of the digram table. "Lave" = pairs `LA` + `VE`; "Diso" =
-`DI` + `SO`; the bits come straight from the system's seed.
+the length, then each pair is five seed-derived bits indexing the digram table.
+This is the procedural-name mechanism, and **running `$24CB` under emulation
+confirms it** — it produces valid digram names (`ESALOUXE`, `NULEARIT`,
+`MAON`…) and advances the DORND seed as it goes.
+
+**But this routine is not the full planet-name generator.** The `AND #$3E` mask
+limits the index to 0–31, so `$24CB` can only ever use the *first 32* of the
+table's ~44 pairs. Running it across 20 000 seeds confirms exactly 32 distinct
+pairs appear (AB OU SE IT … RE A? ER AT EN BE) and the last twelve — including
+**LA, VE, TI, ED, OR, QU, AN, TE, IS, RI** — *never* do. Those are precisely the
+pairs needed for the canonical galaxy-1 names: "Lave" = `LA`+`VE`, "Leesti" =
+`LE`+`ES`+`TI`, "Riedquat" = `RI`+`ED`+`QU`+`AT`. So `$24CB` **cannot** generate
+them. It is a 32-pair digram generator used somewhere in the game, but the
+routine that prints the real system names (full table, with the `?`
+single-letter marker handled, as the message-token printer at `$23F1` does)
+was not isolated — see §2.6.
 
 ### 2.5 Coordinates — the same seed/generator
 
@@ -851,30 +864,42 @@ scale via `$39E7` and the `$9B/$9C` accumulator) and plots it with `PIXEL`
 (`$2937`). This is how the deterministic star/dust field — and the dots on the
 star charts — are produced from a seed rather than stored.
 
-### 2.6 Not yet traced: the enumeration and the galaxy transform
+### 2.6 What dynamic tracing settled, and what is still open
 
-Two parts of the universe generator resisted static tracing in this pass and are
-**not** claimed here:
+The `galaxytrace` tool (Appendix A) executes the real generator routines on a
+flat-RAM image of the decrypted engine, so they can be driven directly and their
+output captured. It established two things and a correction:
 
+- The digram-name **mechanism is real and runnable** — `$24CB` produces valid
+  two-letter-pair names from a seed and advances DORND as it does.
+- **Correction:** `$24CB` is *not* the routine that prints the real system names
+  (§2.4): its 32-pair limit cannot produce Lave/Leesti/Riedquat. That generator —
+  full table, `?` handling — was not isolated.
+
+These pieces remain **open**:
+
+- **The real planet-name generator** (full digram table, seed-driven), and where
+  it gets the current system's seed.
 - **System enumeration** — the step that advances from one system's seed to the
-  next, walking out the 256 systems of a galaxy. A useful *negative* result: the
-  C64 port does **not** use the classic 6-byte seed-shift twist — that
-  instruction cascade is absent from the entire 64 KB image. Generation instead
-  runs through the 4-byte DORND RNG (§2.3), but the exact fixed advance per
+  next. A useful *negative* result: the C64 port does **not** use the classic
+  6-byte seed-shift twist (that instruction cascade is absent from the whole 64 KB
+  image); generation runs through the 4-byte DORND RNG, but the fixed advance per
   system was not pinned down.
 - **The per-galaxy transform** — how the galactic hyperdrive turns one galaxy's
   seed into the next.
 - The bit-field extraction of the non-name attributes (economy, government, tech
-  level, population, productivity) was likewise not verified.
+  level, population, productivity).
 
-The seed flow is deliberately hard to follow: the seed is never referenced by
-its address (the commander block is copied wholesale), generation shares the
+The seed flow is deliberately hard to follow: the seed is never referenced by its
+address (the commander block is copied wholesale), generation shares the
 general-purpose RNG rather than a dedicated twist, text uses self-modifying token
 dispatch, and the core logic was relocated under the I/O area (Part III §1) next
-to data that disassembles into misleading instructions. Pinning these down most
-likely needs **dynamic** tracing — running the loaded game under the emulator to
-the star-chart screen and watching the seed reads/writes with the `c64`
-read-probe — which is a separate effort.
+to data that disassembles into misleading instructions. The `galaxytrace`
+harness is the lever for the rest: it can already run any engine routine and
+watch its memory access, so the remaining work is to locate the system-name and
+enumeration routines and drive them with it — rather than to run the whole
+IRQ-driven game (which the loader-oriented emulator does not support: it lacks a
+raster/IRQ model and maps `$D000–$DFFF` as I/O, where game code actually runs).
 
 ### 2.7 Routine and data map (universe generation)
 
@@ -887,7 +912,7 @@ read-probe — which is a separate effort.
 | `$0700` | message token strings, EOR-`$23` encrypted |
 | `$8DBB` | DORND — the Fibonacci pseudo-random generator (seed at `$02–$05`) |
 | `$824D`, `$8264` | inline DORND copies; `$8264` turns it into a signed coordinate |
-| `$24CB` | planet-name generator (1–4 digram pairs from the seed) |
+| `$24CB` | a digram name generator (1–4 pairs from the seed, first 32 pairs only — *not* the full system-name generator, see §2.4/§2.6) |
 | `$8111` | recursive message-token expander (EOR `$23` at `$813B`) |
 | `$8100` | digram-token expander (pairs from `$2563`) |
 | `$81C6`, `$8300` | seeded-dot plotters (star/dust field, chart dots): reseed `$02–$05` (`$81F3`/`$832B`), derive coordinates, plot via `PIXEL` |
@@ -945,6 +970,19 @@ extract/extract -o extracted Elite.tap
 ( cd extract && go run stupidcoder.com/tools/cmd/disprg -start 0334 -end 0358 \
     ../extracted/00_cbm_ELITE_029f.prg )
 
+# 6. Dynamic tracing: run real engine routines under emulation and watch output
+#    (used to study the procedural name generator — Part IV §2)
+( cd extract && go run ./cmd/galaxytrace )
+
+# 7. Reconstruct the full decrypted engine and recursive-descent disassemble it:
+#    follow every branch/jump/call from the entry points, plus the text-token
+#    handler table at $2509, separating code from data. Game code does not
+#    rewrite itself (unlike the loader), so this yields a stable disassembly.
+( cd extract && go run ./cmd/enginedump /tmp/elite-engine.prg )
+go run stupidcoder.com/tools/cmd/codetrace \
+    -entry 1D1F,916F,B3B2,B1FA,B433 -table 2509:21 \
+    -o /tmp/elite.asm /tmp/elite-engine.prg
+
 # run this module's tests
 ( cd extract && go test ./... )
 ```
@@ -958,7 +996,9 @@ Package overview — game-specific (`extract/`): `main.go` (write coalescing and
 file output), `driver.go` (the BASIC-stub driver and Elite-specific KERNAL
 hooks), `shipmodel` (engine reconstruction + blueprint decoding),
 `cmd/loadingscreen` (reassembles and renders the loading picture),
-`cmd/shiprender` (wireframe ship animations). Shared (`tools/`): `tap` (TAP
+`cmd/shiprender` (wireframe ship animations), `cmd/galaxytrace` (runs engine
+routines under emulation to study the procedural generator), `cmd/enginedump`
+(writes the reconstructed 64 KB engine for static tools). Shared (`tools/`): `tap` (TAP
 container), `cbmtape` (ROM-loader decoder), `mos6502` (disassembler + CPU
 emulator), `c64` (machine model), `gfx` (rendering primitives: multicolor
 bitmap, line drawing, animated-PNG output), `cmd/disprg`, `cmd/tapdump`.

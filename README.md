@@ -39,7 +39,8 @@ AIReverseEngineering/
 ├── README.md                   # this file
 ├── tools/                      # shared tooling (module stupidcoder.com/tools)
 │   ├── mos6502/                #   6502 disassembler + executable CPU core (any 6502 platform)
-│   ├── cmd/disprg/             #   disassemble a .prg file (6502)
+│   ├── cmd/disprg/             #   linear disassembler for a .prg file (6502)
+│   ├── cmd/codetrace/          #   recursive-descent disassembler (code/data separation)
 │   └── c64/                    #   C64-specific tools
 │       ├── tap/                #     TAP container parser + segmentation
 │       ├── cbmtape/            #     standard KERNAL ROM tape-format decoder
@@ -92,7 +93,8 @@ Platform-neutral packages sit at the top level; C64-specific ones live under
 | Package / command | What it does |
 |-------------------|--------------|
 | `mos6502` | One opcode table driving both a `Disassemble` function and an executable `CPU` core (all documented opcodes, binary + BCD) — usable by any 6502 platform. |
-| `cmd/disprg` | Disassemble a `.prg` file (2-byte load address + data), optionally over an address range. |
+| `cmd/disprg` | Linear disassembler for a `.prg` file (2-byte load address + data), optionally over an address range. |
+| `cmd/codetrace` | Recursive-descent disassembler: from given entry points (and seeded jump tables) it follows every branch/jump/call, marks reachable code vs data, lists routines and unresolved indirect jumps — so tables and graphics aren't mis-decoded as instructions. |
 | `c64/tap` | Parse a TAP v0/v1 image (C64/C16) into a pulse stream; `Segmentize` splits it at pauses. |
 | `c64/cbmtape` | Decode the standard Commodore KERNAL (ROM loader) tape encoding: blocks, headers, and paired header+data files with checksum verification. |
 | `c64/c64` | A minimal C64 machine model — RAM, the `mos6502` CPU, a CIA pulse-feed tape model, a PC-hook registry, a RAM write log and an optional read probe — for *running* a self-modifying loader instead of decoding it, or tracing which game routine touches which memory. Optional standard KERNAL tape hooks included. |

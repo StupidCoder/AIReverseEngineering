@@ -769,26 +769,21 @@ system attribute is **generated on demand from a tiny seed**.
 
 ### 2.1 Why the names aren't there: the text system
 
-Almost all of Elite's text is stored as **tokens**, not letters. Two layers do
-the compression:
+Almost all of Elite's text is stored as EOR-obfuscated **tokens**, not letters,
+so a raw search of the image for "LAVE", "DISO" or any other planet name finds
+nothing — the letters are not there in sequence. The full token machinery
+(recursive tokens, two-letter digrams, and a worked byte-by-byte decode) is
+documented in §3.1. The one part that matters for the names is the **digram
+table at `$254B`** — the two-letter pairs `AB OU SE IT IL ET …` — because that
+same table is the alphabet the planet-name generator draws from in §2.4:
 
-- **Recursive message tokens.** A message is a list of token bytes terminated by
-  `$00`, kept in the relocated low engine at `$0700`. The expander at `$8111`
-  walks to the requested token's string and prints each byte **EOR-encrypted
-  with `$23`** (`$813B: EOR #$23`). That is why a raw search for English never
-  matches.
-- **Two-letter digram tokens.** Common letter pairs are a single token. A token
-  value of `$D7`+ prints a pair from a **digram table at `$254B`**:
+```
+$254B: "ABOUSEITILETSTONLONUTHNO" + "ALLEXEGEZACEBISOUSESARMAINDIREA?ERATENBERALAVETIEDORQUANTEISRION"
+       pairs: AB OU SE IT IL ET ST ON LO NU TH NO  AL LE XE GE  ZA CE BI SO  US ES …
+```
 
-  ```
-  $254B: "ABOUSEITILETSTONLONUTHNO" + "ALLEXEGEZACEBISOUSESARMAINDIREA?ERATENBERALAVETIEDORQUANTEISRION"
-         pairs: AB OU SE IT IL ET ST ON LO NU TH NO  AL LE XE GE  ZA CE BI SO  US ES …
-  ```
-
-  (the `"LAVE"` that *does* appear in the image is just the adjacent pair bytes
-  `LA`+`VE` inside this table — coincidence, not a stored planet name).
-
-The same digram table is the alphabet the planet-name generator draws from.
+(the `"LAVE"` that *does* turn up in the image is just the adjacent pair bytes
+`LA`+`VE` sitting inside this table — a coincidence, not a stored planet name).
 
 ### 2.2 The seed
 
@@ -928,26 +923,79 @@ flagged as open in §2.6.
 
 ## 3. String and token tables
 
-Almost every word the game ever prints — commodity names, equipment names, the
-descriptions of governments, economies and alien races, the combat ranks, even
-"GAME OVER" — lives in a string dictionary at **`$0700`–`$0AC7`**. It is
-stored the same way as the message tokens of §2.1: each entry is EOR-`$23`
-obfuscated and the entries are separated by `$00` bytes, so decoding is just
-"split on `$00`, then XOR each piece with `$23`". Many entries also embed
-references to *other* entries and to the two-letter digram table (§2.2), which is
-why a raw decode shows gaps — the printer (`expand_msgtoken` at `$8111`) expands
-those references recursively, so a long word like "RADIOACTIVES" is stored as a
-few token bytes rather than twelve letters. This is the same compression that
-made the planet names so compact, reused here for fixed strings.
+Almost every word the game ever prints — commodity and equipment names, the
+descriptions of governments, economies and alien races, the combat ranks, the
+mission briefings, even "GAME OVER" — is held as compressed, obfuscated
+**tokens** rather than plain letters. This section documents how that encoding
+works (§3.1) and what the tables contain (§3.2).
 
-A *second*, larger token table at **`$0E00`** holds the longer messages — the
-mission briefings, the on-screen prompts — read by a different printer,
-`print_dispatch` (`$238D`), and obfuscated with EOR-`$57` rather than `$23`. It
-works the same recursive way but adds control codes that splice in dynamic text
-(the commander's name, a number, a generated name). Decoding it is what recovers
-the mission briefings shown in Part V §12.
+### 3.1 How text is stored: recursive tokens and digrams
 
-Decoding the table recovers the game's entire vocabulary. The notable lists:
+There are two token tables, read by two printers but built on the same idea:
+
+| table | contents | printer | key |
+|-------|----------|---------|-----|
+| `$0700`–`$0AC7` | the word dictionary — names, labels, ranks | `expand_msgtoken $8111` → `print_token $807E` | EOR-`$23` |
+| `$0E00`–`$1CFF` | the long messages — mission briefings, prompts | `print_dispatch $238D` | EOR-`$57` |
+
+Each table is a run of strings separated by `$00` bytes; a *token number* selects
+the n-th string. To read a string you walk to it, then decode and print each
+byte. The bytes are not plain ASCII — every byte is first XORed with the table's
+key (`$23` or `$57`), which is why a raw search of the image for English never
+matches. The decoded byte is then interpreted **by its value**:
+
+| decoded byte | meaning |
+|--------------|---------|
+| `$20`–`$5F` | a literal character (printed, with case handling) |
+| `$80`–`$9F` | a **digram token** — a two-letter pair, index `byte − $80`, from the digram table at `$2563` |
+| `$A0`+ | a **nested token** — recurse and expand that whole string here |
+| `< $20` | a control code (newline, case switch, or — in the `$0E00` table — a dynamic insert such as the commander's name or a number) |
+
+So a word is a mix of literal letters, two-letter digrams, and references to
+other tokens, and expansion is **recursive**: a token can name tokens that name
+further tokens, down to the literal letters and digram pairs at the leaves. The
+digram pairs are:
+
+```
+$2563 pairs: AL LE XE GE ZA CE BI SO US ES AR MA IN DI RE A?
+             ER AT EN BE RA LA VE TI ED OR QU AN TE IS RI ON
+```
+
+(a pair whose second letter is `?` prints only its first letter, for odd-length
+words.)
+
+**A worked example — "RADIOACTIVES".** The trade-good name at `$0859` is twelve
+letters but only eight stored bytes:
+
+```
+stored:    B7 AE 6C 62 60 B4 B5 70   ($00 terminator)
+EOR $23:   94 8D 4F 41 43 97 96 53
+```
+
+Decoding each byte in turn:
+
+| byte | rule | output |
+|------|------|--------|
+| `$94` | digram `$94 − $80 = 20` | `RA` |
+| `$8D` | digram `13` | `DI` |
+| `$4F` | literal | `O` |
+| `$41` | literal | `A` |
+| `$43` | literal | `C` |
+| `$97` | digram `23` | `TI` |
+| `$96` | digram `22` | `VE` |
+| `$53` | literal | `S` |
+| `$00` | end of string | — |
+
+Concatenated: `RA·DI·O·A·C·TI·VE·S` → **RADIOACTIVES**. Four digram tokens and
+three literals encode a twelve-letter word in eight bytes — the same trick that
+makes the planet names (§2) and the mission briefings (Part V §12) compact. The
+briefings additionally use the control-code inserts of the `$0E00` table; the
+tool `extract/cmd/missiontext` expands them end to end.
+
+### 3.2 The game's vocabulary
+
+Decoding the `$0700` table recovers the game's entire vocabulary. The notable
+lists:
 
 | category | entries (in table order) |
 |----------|--------------------------|

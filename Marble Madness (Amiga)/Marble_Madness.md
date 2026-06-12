@@ -123,7 +123,11 @@ reaching the main game code — is a Part II/III concern.
 |------|------|
 | `s/startup-sequence` | the boot script (21 bytes): `LoadWb` then `endcli` — it boots to Workbench |
 | `c/LoadWb`, `c/EndCLI` | the AmigaDOS CLI commands the script runs |
-| `c/splash`, `c/bootscr`, `c/sigfile`, `c/xxx`, `c/zzz` | boot-time overlays (splash/title screen and helpers) |
+| `c/splash` | the title/splash screen — an IFF ILBM bitmap (Part IV §1) |
+| `c/bootscr` | the boot-screen program (a 50-hunk overlay) that displays the splash (Part II §3) |
+| `c/zzz` | the decruncher — unpacks the crunched files at load (Part III) |
+| `c/xxx` | crunched data unpacked by `c/zzz` |
+| `c/sigfile` | a disk-signature / copy-protection table (`"DOW"`+incrementing bytes) |
 | `libs/icon.library` | bundled so the disk shows icons without the user's Workbench disk |
 | `MarbleMadness!.info`, `Disk.info`, `.info` | Workbench icons (`$E310` magic, not hunks) |
 
@@ -132,7 +136,7 @@ reaching the main game code — is a Part II/III concern.
 | file | size | role |
 |------|------|------|
 | `MarbleMadness!` | 5,864 | the launcher executable (started from the Workbench icon) |
-| `c/MarbleMadness!.dat` | 175,360 | the main game code/data hunk |
+| `c/MarbleMadness!.dat` | 175,360 | the main game program — stored crunched, unpacked at load by `c/zzz` |
 
 **Per-course modules.** The bulk of the disk is six parallel families of files,
 one per Marble Madness course, keyed by a short prefix and a type suffix:
@@ -147,10 +151,25 @@ one per Marble Madness course, keyed by a short prefix and a type suffix:
 | `ult` / `ultima` | Ultimate | `ultima.mlb` | `ultima.ilb` | `ultobsc.vlb` | `UltSnd` | `ulttrack` |
 
 Plus shared assets: `marbdat` / `marbdat.vlb` (the marble), and `birdink.vlb`
-and `ooze.vlb` (the creatures). The suffix conventions are read off the names and
-sizes and are **provisional** until Part IV decodes the formats: `.mlb` appears
-to be course/level data, `.ilb` image/sprite data, `.vlb` vector or
-obstacle ("`obsc`") graphics, `*Snd` sound effects, and `*Track` music.
+and `ooze.vlb` (the creatures). The suffix conventions: `.ilb` is the per-course
+**sprite bank** (its container is decoded in Part IV §3); the rest are read off
+the names and sizes and stay **provisional** until Part IV decodes them — `.mlb`
+course/level data, `.vlb` vector or obstacle ("`obsc`") graphics, `*Snd` sound
+effects, and `*Track` music.
+
+**Compression and encryption.** Several encodings appear on the disk, decoded in
+this writeup where possible. The two executables that matter most —
+`c/MarbleMadness!.dat` (the main program) and `c/xxx` — are **crunched** by a
+custom packer (a shared `$0000_03F3 8F01…` header, contents at ≈ 7.95 of 8
+bits/byte) and unpacked at load by `c/zzz`; reaching the main code therefore means
+reversing that decruncher (Part III). The title screen `c/splash` is an IFF ILBM
+whose pixels are **ByteRun1 (PackBits)** compressed (Part IV §1). The per-course
+sprite banks (`.ilb`) carry their own **run-length sprite packing** (Part IV §3).
+`c/sigfile` is not compression but a copy-protection signature table. The
+remaining per-course formats (`.mlb`, `.vlb`, `Snd`, `Track`) and whatever
+encoding they use are still to be decoded. (The on-disk filesystem also frames
+every file in OFS data blocks — a storage layout, not compression — which the
+`adf` reader undoes when it extracts the files, Part I §2.)
 
 Putting it together, the boot model is: a standard AmigaDOS disk boots to
 Workbench via `startup-sequence`; the player launches the game from the
@@ -208,12 +227,17 @@ LoadWb
 endcli > nil:
 ```
 
-`LoadWb` starts Workbench; `endcli` closes the boot shell. The disk bundles its
-own `libs/icon.library` and the `.info` icon files (Part I) so it can present its
-Workbench window and icons even when booted on a bare machine. The game is then
-launched the Workbench way — by double-clicking the **`MarbleMadness!`** icon,
-which is a *tool* icon (icon type 3), so Workbench `LoadSeg`s and runs the
-`MarbleMadness!` program directly.
+`LoadWb` starts Workbench; `endcli` closes the boot shell. Workbench here is the
+Amiga's desktop GUI — and it is not a single program but a service of the
+operating system: the windowing, menu and gadget machinery (`intuition.library`,
+`graphics.library`, and the kernel `exec`) lives in the Kickstart **ROM**, and
+`LoadWb` is just the small command that brings the desktop up on top of those ROM
+libraries. The disk itself carries no Workbench binary; the only GUI pieces it
+bundles are `libs/icon.library` (which draws icons) and the `.info` files, so that
+it can show its own window and icons even on a bare machine without the user's
+Workbench floppy. The game is then launched the Workbench way — by double-clicking
+the **`MarbleMadness!`** icon, which is a *tool* icon (icon type 3), so Workbench
+`LoadSeg`s and runs the `MarbleMadness!` program directly.
 
 ## 3. The launcher
 

@@ -1,6 +1,6 @@
-// disprg disassembles a C64 .prg file (2-byte load address + data).
+// dis6502 disassembles a C64 .prg file (2-byte load address + data).
 //
-// Usage: disprg [-start addr] [-end addr] file.prg
+// Usage: dis6502 [-start addr] [-end addr] file.prg
 package main
 
 import (
@@ -24,7 +24,7 @@ func main() {
 	endF := flag.String("end", "", "end address (hex, exclusive), default: end of file")
 	flag.Parse()
 	if flag.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: disprg [-start addr] [-end addr] file.prg")
+		fmt.Fprintln(os.Stderr, "usage: dis6502 [-start addr] [-end addr] file.prg")
 		os.Exit(2)
 	}
 	raw, err := os.ReadFile(flag.Arg(0))
@@ -33,7 +33,7 @@ func main() {
 		os.Exit(1)
 	}
 	if len(raw) < 3 {
-		fmt.Fprintln(os.Stderr, "disprg: file too short")
+		fmt.Fprintln(os.Stderr, "dis6502: file too short")
 		os.Exit(1)
 	}
 	load := uint16(raw[0]) | uint16(raw[1])<<8
@@ -52,7 +52,7 @@ func main() {
 		}
 	}
 	if start < load || int(start) >= int(load)+len(code) || int(end) > int(load)+len(code) || end <= start {
-		fmt.Fprintf(os.Stderr, "disprg: range $%04X-$%04X outside file ($%04X-$%04X)\n",
+		fmt.Fprintf(os.Stderr, "dis6502: range $%04X-$%04X outside file ($%04X-$%04X)\n",
 			start, end, load, int(load)+len(code)-1)
 		os.Exit(1)
 	}

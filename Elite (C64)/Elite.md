@@ -1718,7 +1718,7 @@ extract/extract -o extracted Elite.tap
 
 # 5. Disassemble anything (shared tool, run by import path) — e.g. the
 #    getbit/getbyte routines at $0334 inside the boot file
-( cd extract && go run stupidcoder.com/tools/cmd/disprg -start 0334 -end 0358 \
+( cd extract && go run stupidcoder.com/tools/cmd/dis6502 -start 0334 -end 0358 \
     ../extracted/00_cbm_ELITE_029f.prg )
 
 # 6. Dynamic tracing: run real engine routines under emulation and watch output
@@ -1759,4 +1759,4 @@ routines under emulation to study the procedural generator), `cmd/missiontext`
 `cmd/enginedump` (writes the reconstructed 64 KB engine for static tools). Shared (`tools/`): `tap` (TAP
 container), `cbmtape` (ROM-loader decoder), `mos6502` (disassembler + CPU
 emulator), `c64` (machine model), `gfx` (rendering primitives: multicolor
-bitmap, line drawing, animated-PNG output), `cmd/disprg`, `cmd/tapdump`.
+bitmap, line drawing, animated-PNG output), `cmd/dis6502`, `cmd/tapdump`.

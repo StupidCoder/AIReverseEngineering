@@ -23,7 +23,7 @@ learned in this analysis session, in reading order:
   strings and easter eggs, key routine/table reference.
 
 Methods: a Go extraction toolchain (`extract/` plus the shared
-`tools/`), a table-driven 6502 disassembler (`tools/cmd/disprg`),
+`tools/`), a table-driven 6502 disassembler (`tools/cmd/dis6502`),
 a graphics renderer (`extract/cmd/gfxrender`), and dynamic verification
 that ran the real init/title/game path under the shared `tools/c64/c64`
 machine model, logging all reads/writes to confirm the static analysis.
@@ -1181,7 +1181,7 @@ extract/extract -o extracted -dis Fort_Apocalypse.tap
 #      FORT-fast-EE00.prg (+ loader disassemblies with -dis)
 
 # 2. Disassemble anything (shared tool, run by import path)
-( cd extract && go run stupidcoder.com/tools/cmd/disprg -start 8927 -end 8A40 \
+( cd extract && go run stupidcoder.com/tools/cmd/dis6502 -start 8927 -end 8A40 \
     ../extracted/FORT-fast-7000.prg )
 
 # 3. Render charsets, level maps (with spawn markers) and sprites
@@ -1206,7 +1206,7 @@ Package overview — game-specific (`extract/`): `fastload`
 extraction and PNG rendering), `cmd/gfxrender`. Shared (`tools/`):
 `tap` (TAP container), `cbmtape` (ROM-loader decoder), `mos6502`
 (disassembler + CPU emulator), `c64` (machine model with write log and
-read probe), `gfx` (rendering primitives), `cmd/disprg`, `cmd/tapdump`.
+read probe), `gfx` (rendering primitives), `cmd/dis6502`, `cmd/tapdump`.
 
 # Appendix B — Strings and easter eggs
 

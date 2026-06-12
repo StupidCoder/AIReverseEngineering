@@ -78,12 +78,16 @@ AIReverseEngineering/
 │   ├── rendered/               # generated PNGs (loading screen, ship wireframes)
 │   └── disasm/                 # annotated recursive-descent disassembly + annotations.txt
 │
-└── Fort Apocalypse (C64)/
-    ├── Fort_Apocalypse.tap      # raw tape image
-    ├── Fort_Apocalypse.md       # full game + tape writeup
-    ├── extract/                 # module fortapoc/extract — extraction + gfx tools
-    ├── extracted/               # generated .prg files (regenerable; git-ignored)
-    └── rendered/                # generated PNGs (charsets, maps, sprites)
+├── Fort Apocalypse (C64)/
+│   ├── Fort_Apocalypse.tap      # raw tape image
+│   ├── Fort_Apocalypse.md       # full game + tape writeup
+│   ├── extract/                 # module fortapoc/extract — extraction + gfx tools
+│   ├── extracted/               # generated .prg files (regenerable; git-ignored)
+│   └── rendered/                # generated PNGs (charsets, maps, sprites)
+│
+└── Marble Madness (Amiga)/
+    ├── Marble_Madness.adf       # raw disk image (not committed; see Image files)
+    └── Marble_Madness.md        # disk-format writeup (Part I done; rest stubbed)
 ```
 
 Per-game folder contract: `<Game>.<ext>` raw image, a markdown writeup of the

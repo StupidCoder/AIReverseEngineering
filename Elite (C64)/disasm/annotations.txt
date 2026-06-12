@@ -57,10 +57,17 @@ A3A0  draw_ship         project ship vertices, back-face cull faces, build the l
 9B1E  dock_complete     finalise docking: silence the SID, set the docked state, hand off to the station screens ($1D7E)
 7C9B  thargoid_spawn    spawn a Thargoid mothership (type $1D) + Thargon (type $1E) pair with full hostile AI
 7CB3  witchspace_ambush after a hyperspace misjump: enter witchspace, scramble the destination, seed up to three Thargoid pairs
+1D7E  arrival_handler   post-arrival handler: the scripted-mission event dispatcher (stage $04A8, flags $0499, target coords $049A/$049B)
+3DDC  mission_spawn     mission event: spawn the unique target ship (type $1F) with an intro animation
+3DAC  mission_reward    mission event: pay the large fixed cash reward and print the success message
+74A9  system_attributes derive a system's economy/government/tech/productivity ($0500-$0503) from its seed
+7B46  commodity_price   compute one commodity's market price: base +/- economy*slope + random fluctuation (table $999D)
 73A1  data_on_system    "data on system" screen: print government/economy/population/productivity from the system block $0500
 
 # --- data tables ---
 0700  token_strings     string/name dictionary (EOR-$23, $00-separated, nested token refs): trade goods, equipment, governments, economies, races, combat ranks, legal status, UI labels
+999D  commodity_table   per-commodity market data (base price, signed economy slope, fluctuation mask), 4 bytes each
+0500  system_block      current system: $0500 economy, $0501 government, $0502 tech level, $0503 productivity
 2614  commander_def     default commander block ("JAMESON") + galaxy seed + starting state
 2621  galaxy_seed       galaxy-1 seed $5A4A,$0248,$B753 (6 bytes, inside commander_def)
 254B  digram_table      two-letter (digram) table: the alphabet for message tokens and names

@@ -20,7 +20,8 @@ order:
   name and label;
 * **Part V** — game mechanics: the per-frame game loop, and how the other ships
   spawn, move, fight, and disappear; the legal-status/bounty system, the combat
-  rating, docking, the game-over conditions, and the Thargoid threat;
+  rating, docking, the game-over conditions, the Thargoid threat, the scripted
+  missions, and how a system's economy and government shape play;
 * **Appendices** — toolchain and reproduction.
 
 Methods: purely static analysis of the image bytes — no external tools or
@@ -1394,6 +1395,103 @@ on any jump), come in groups, carry full combat AI, and continuously replenish
 their own escorts — so a drawn-out fight only makes the swarm bigger. The counter
 to all of it is to ignore the drones and concentrate fire on the motherships,
 after which the surviving Thargons go quiet and can be mopped up or left to drift.
+
+## 12. Scripted missions
+
+On top of the open-ended trading and combat there is a small **scripted mission
+chain**, driven by what happens when you arrive in a system. Each hyperspace
+arrival runs an event dispatcher (in the arrival handler at `$1D7E`, the logic at
+`$1D9D`) that checks four things and, on a match, jumps to a scripted handler:
+
+- **`$04A8` — the mission-stage counter.** It is advanced by `INC $04A8` at
+  `$7ADD` each time you dock, alongside a 6-byte "ticks elapsed" register at
+  `$049C` that is rotated one bit per dock. Missions therefore become available
+  only after you have played (docked) for a while.
+- **`$0499` — mission flag bits**, set and cleared by the handlers as a mission
+  moves through its stages.
+- **`$04E1` — an objective counter**, bumped when you destroy the mission target.
+- **The destination's galactic coordinates `$049A`/`$049B`.** Several branches
+  fire *only* at one specific system — e.g. `$1DD7` requires `$049A == $D7` **and**
+  `$049B == $54` before taking event `$3D8A`; another waits for `$049A == $3F`,
+  `$049B == $48`. These are hard-coded target systems.
+
+The handlers (`$3D7A`, `$3D8A`, `$3D98`, `$3DAC`, `$3DDC`) implement the actual
+mission beats:
+
+- **Briefings.** Most call the text dispatcher `$238D` with a message token
+  (`$0B`, `$C7`, `$DE`, `$DF`) — the briefing you read on docking — and return to
+  the commander screen.
+- **Spawning the target.** `$3DDC` is the set-piece: it spawns the unique
+  **type-`$1F`** ship (`LDA #$1F / STA $A5 / JSR spawn_ship`), after spinning it
+  on screen for `$40` frames as an introduction. This is the special,
+  tougher-than-usual enemy you are sent to hunt.
+- **Completion and reward.** Killing the type-`$1F` ship is detected in
+  `remove_ship` (`$8C1A`: `CPX #$1F` → set `$0499` bit 1, `INC $04E1`), flagging
+  the objective done. The next time you dock the dispatcher sees `$0499 & 3 == 3`
+  and jumps to `$3DAC`, which calls the cash routine (`$7D81`) to pay a large
+  fixed reward and prints the success message.
+
+So the shape of a mission is: dock enough times to trigger a briefing → fly to a
+named system → destroy a unique ship → return and get paid. There are at least
+two such missions (multiple distinct target-coordinate branches), matching the
+structure of the original game. Two honest limits on this analysis: the briefing
+**text** is held in the compressed token form of Part IV §3, so the trigger,
+spawn and reward logic are pinned down exactly but the mission prose is not
+decoded here; and the missions are described by mechanism rather than by plot
+name, since those names live only in that tokenized text and the printed manual.
+
+## 13. System character: economy and government
+
+Every system carries four attributes, and two of them shape gameplay directly.
+They are derived from the system's seed when you look at it, by the routine at
+`$74A9`, and stored in a four-byte block:
+
+| address | attribute | derivation |
+|---------|-----------|------------|
+| `$0500` | **economy** (0–7) | three bits of the seed; low = rich industrial, high = poor agricultural |
+| `$0501` | **government** (0–7) | three bits of the seed; 0 = Anarchy … 7 = Corporate State |
+| `$0502` | tech level | `(7 − economy)` + a little randomness + `government/2` |
+| `$0503` | productivity | a function of economy, government and tech |
+
+The derivation already couples them: at `$74BA`, if the government is below 2
+(Anarchy or Feudal — the lawless end) the economy is forced poorer, and tech
+level rises with both wealth and good government. So well-run, wealthy systems
+are also high-tech, and lawless ones are poor and backward. On arrival the block
+is copied into the working variables the rest of the engine reads: economy →
+`$04EE`, government → `$04F0`, tech level → `$04F1`.
+
+**Economy drives prices — this is the trading game.** The market screen prices
+each of the 17 goods with the routine `$7B46`, using a per-commodity record in
+the table at `$999D`: a base price, a *signed* economy slope, and a random-mask
+for day-to-day fluctuation. The price is
+
+```
+price = base  ±  (economy × slope)  +  (random AND mask)
+```
+
+where the slope's sign is per-commodity (`$7B7C` adds or subtracts based on it).
+Because the sign differs between goods, the *same* commodity is cheap in one kind
+of economy and dear in another: industrial worlds sell computers and machinery
+cheaply and pay well for food and minerals, agricultural worlds the reverse.
+Buying where a good is produced and selling where it is consumed is the whole
+basis of profitable trade routes, and it falls straight out of this one signed
+multiply.
+
+**Government drives danger.** The spawn director (§3) gates pirate spawning on
+`$04F0` at `$8EB4`: if it is zero (Anarchy) pirates are spawned freely; as the
+government value rises the roll `(random AND 7) < government` increasingly
+suppresses them, so a Corporate State is almost pirate-free. Travelling through
+lawless space is lucrative — poor systems make for big price gradients — but you
+fly it through a gauntlet of pirates, while the safe, high-government systems
+offer thinner margins. That risk/reward tension is the same `$04F0` byte read in
+two places.
+
+**Tech level decides what you can buy.** The equipment screen (`$7DBB`) sizes its
+list from `$04F1` (`items = tech level + 3`, capped at `$7DD6`), so advanced kit —
+better lasers, the docking computer, the galactic hyperdrive — only appears for
+sale at high-tech (rich, well-governed) systems. Productivity and population fill
+out the "data on system" screen (`data_on_system $73A1`) and the system
+descriptions, completing the picture a trader reads before deciding where to jump.
 
 ---
 

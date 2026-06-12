@@ -78,6 +78,8 @@
 04D0  .byte 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
 04E0  .byte 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
 04F0  .byte 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+
+; --- system_block  $0500 — current system: $0500 economy, $0501 government, $0502 tech level, $0503 productivity (data) ---
 0500  .byte 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
 0510  .byte 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
 0520  .byte 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
@@ -516,6 +518,8 @@
 1D77  D0 E5     BNE $1D5E
 1D79  60        RTS
 1D7A  .byte B7 AA 45 23                                     ; ..E#
+
+; --- arrival_handler  $1D7E — post-arrival handler: the scripted-mission event dispatcher (stage $04A8, flags $0499, target coords $049A/$049B) ---
 1D7E  20 EB 8C  JSR $8CEB
 1D81  20 9B 37  JSR $379B
 1D84  A9 00     LDA #$00
@@ -4305,6 +4309,8 @@
 3DA5  EE E1 04  INC $04E1
 3DA8  A9 DF     LDA #$DF
 3DAA  D0 D8     BNE $3D84
+
+; --- mission_reward  $3DAC — mission event: pay the large fixed cash reward and print the success message ---
 3DAC  4E 99 04  LSR $0499
 3DAF  0E 99 04  ASL $0499
 3DB2  A2 50     LDX #$50
@@ -4324,6 +4330,8 @@
 3DD3  20 5A 7D  JSR $7D5A
 3DD6  EE C9 04  INC $04C9
 3DD9  4C E7 91  JMP $91E7
+
+; --- mission_spawn  $3DDC — mission event: spawn the unique target ship (type $1F) with an intro animation ---
 3DDC  4E 99 04  LSR $0499
 3DDF  38        SEC
 3DE0  2E 99 04  ROL $0499
@@ -5467,6 +5475,8 @@
 74A2  20 87 73  JSR $7387
 74A5  4C 2C 3D  JMP $3D2C
 74A8  .byte 60                                              ; `
+
+; --- system_attributes  $74A9 — derive a system's economy/government/tech/productivity ($0500-$0503) from its seed ---
 74A9  A5 80     LDA $80
 74AB  29 07     AND #$07
 74AD  8D 00 05  STA $0500
@@ -6272,7 +6282,7 @@
 7B44  68        PLA
 7B45  60        RTS
 
-; ==== sub_7B46 (3 callers) ====
+; ==== commodity_price  $7B46  (3 callers) — compute one commodity's market price: base +/- economy*slope + random fluctuation (table $999D) ====
 7B46  48        PHA
 7B47  85 92     STA $92
 7B49  0A        ASL A
@@ -10060,6 +10070,8 @@
 9995  4C 05 99  JMP $9905
 9998  A9 6F     LDA #$6F
 999A  4C 05 99  JMP $9905
+
+; --- commodity_table  $999D — per-commodity market data (base price, signed economy slope, fluctuation mask), 4 bytes each (data) ---
 999D  .byte 13 82 06 01 14 81 0A 03 41 83 02 07 28 85 E2 1F ; ........A...(...
 99AD  .byte 53 85 FB 0F C4 08 36 03 EB 1D 08 78 9A 0E 38 03 ; S.....6....x..8.
 99BD  .byte 75 06 28 07 4E 01 11 1F 7C 0D 1D 07 B0 89 DC 3F ; u.(.N...|......?

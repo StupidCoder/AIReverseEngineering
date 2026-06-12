@@ -6,6 +6,8 @@ repository contains the results of a few tests, attempting to answer that
 question. All code and documents contained within (except this introduction) were
 written by Claude Fable 5 or Opus 4.8. In some cases my Fable session got flagged, probably due to the nature of reverse engineering, and downgraded to Opus. Opus still did a fine job though.
 
+Even though I explicitly restricted internet searches (released source code or other reverse engineering projects) Claude had detailed knowledge if the games I've had it analyze so far. When I asked how it knew exact function names for Elite it admitted that the original source code of the game, which has been publically released years ago, was part of its training data. The same is true for character and level names of Fort Apocalypse, for example.
+
 Some of the prompts I used (for reference):
 
 > Write a GoLang application that extracts program files from a C64 tape image
@@ -23,6 +25,20 @@ Some of the prompts I used (for reference):
 > Next, analyze the actual game code in the same way, again producing a markdown file that describes the initialization of the game until it reaches the main game loop. Put extra focus on the graphical elements like character sets, sprite data and level map. Describe compression or encryption schemes you find and build a memory map.
 
 > Analyze the game code and describe the different types of objects (player, enemies, obstacles) in the game and how they behave in a markdown file. Be as detailed as possible about each object's behavior, movement patterns and collision behaviors.
+
+To do:
+* Elite (C64)
+    * Part IV
+        * List all strings, including missiong briefings
+        * Try to reproduce exact system naming of initial galaxy (Diso, Leesti, Lave, etc.)
+* Fort Apocalypse (C64)
+    * Run new disassembler and add known annotations
+    * Part IV
+        * Visualize radar map and objects (tank, SPM, etc.)
+* Marble Madness (Amiga)
+    * Kick off project by writing ADF extractor, disassembler and emulator for 86k code
+* Tools
+    * Disassembler should be better at segmenting functions; currently jumps within a function are treated as separate sub-routines; try to document parameters of sub-routines (which registers are used?)
 
 ## Repository structure
 

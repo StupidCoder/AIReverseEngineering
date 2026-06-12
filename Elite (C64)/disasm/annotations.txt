@@ -41,6 +41,19 @@ A3A0  draw_ship         project ship vertices, back-face cull faces, build the l
 24EA  name_case         select name output case mode ($2F1B = $DF)
 24AD  name_from_buf     print a name from the $0647 vowel-cache buffer
 
+# --- game loop / ships (Part V) ---
+8FB0  main_loop         per-frame foreground loop: run the universe + spawn passes, read controls, dispatch the current view
+8FBD  view_dispatch     screen/command dispatcher (A = view id; $25 = the flight/cockpit view)
+8AEB  read_controls     poll keyboard/joystick into the command code
+1EBE  universe_update   rotate the player's frame, then iterate the slot array moving and drawing every object
+3E84  slot_ptr          slot index (X) -> 37-byte ship-record pointer ($59/$5A) via the table at $28A1
+32AA  ship_tactics      per-ship AI: station/escort launches and combat steering/firing (energy, aggression $2D, bounty $04CD)
+8E0D  spawn_director    periodic traffic generator (traders / police / pirates), runs when spawn counter $A3 wraps
+90B2  ship_in_range     distance cull: ship position high byte vs $E0
+8BFF  remove_ship       delete a ship slot, decrement the population counters, compact the slot + pointer arrays
+2C98  flight_hud        draw the cockpit dashboard / HUD for the flight view
+28A1  slot_ptr_tbl      per-slot pointers to the 37-byte ship records (two bytes per slot)
+
 # --- data tables ---
 2614  commander_def     default commander block ("JAMESON") + galaxy seed + starting state
 2621  galaxy_seed       galaxy-1 seed $5A4A,$0248,$B753 (6 bytes, inside commander_def)

@@ -17,7 +17,9 @@ order:
 * **Part IV** — graphics and data formats: the wireframe ship models (blueprint
   structure and vector-drawing pipeline) and the procedural generation of the
   galaxies and planet names;
-* *(more of Part IV, and game mechanics, to come.)*
+* **Part V** — game mechanics: the per-frame game loop, and how the other ships
+  spawn, move, fight, and disappear; the legal-status/bounty system and the
+  game-over conditions;
 * **Appendices** — toolchain and reproduction.
 
 Methods: purely static analysis of the image bytes — no external tools or
@@ -921,6 +923,323 @@ So the answer to "are the names stored or generated?" is firmly **generated**:
 the seed plus a Fibonacci RNG, with a 90-byte letter-pair table as the only
 stored fragment of any name. The deeper enumeration and per-galaxy transform are
 flagged as open in §2.6.
+
+---
+
+# Part V — Game mechanics: the other ships
+
+Parts I–IV covered how the program loads, starts, and stores its graphics and
+universe data. This part is about what the program *does* once flight begins:
+the per-frame loop that drives everything, and — the focus here — the *other
+ships*. How does traffic appear around the player, how does it move and fight,
+and when does it vanish again?
+
+Everything below was read out of `disasm/elite.asm` (the recursive-descent
+disassembly of the reconstructed engine, see Appendix A step 7). Addresses are
+in the running-game image; routine names are descriptions of observed
+behaviour, not labels from any external source.
+
+## 1. Two engines: the IRQ and the foreground loop
+
+The game runs on two cooperating control flows:
+
+- **The raster IRQ** (`irq_handler` at `$B1FA`, Part III §4) fires on each
+  screen split. It only swaps VIC registers between the bitmap and dashboard
+  regions and ticks the music player. It contains *no* game logic.
+- **The foreground loop** does all of the game logic — moving and drawing every
+  object, spawning, combat, scoring, and reading the controls. `game_start`
+  (`$916F`) finishes its one-time setup with `JMP $8FB0`, and `$8FB0` is the top
+  of this loop. It never returns; the whole game lives inside it.
+
+The loop body, with the load-bearing addresses:
+
+```
+   $8FB0  main loop top  (entered once from game_start, A = view id $25)
+   $8DF9 ─ JSR $1EBE      universe_update: move + draw every object (§2)
+   $8DFC ─ DEC $048B      tick assorted countdown timers
+   $8E06 ─ DEC $A3        spawn counter
+           └ if it reached 0:  spawn_director ($8E0D, §3) injects new ships
+   $8F33 ─ reset stack, tick timers, ambient events, sound
+   $8FAD ─ JSR $8AEB      read_controls: poll keyboard / joystick → command code
+   $8FB0 ─ JSR $8FBD      view_dispatch: run the handler for the current screen
+   $8FB3 ─ if docked/menu ($A7) → loop without the flight model
+   $8FBA ─ JMP $8DF9      next frame
+```
+
+`view_dispatch` (`$8FBD`) is the master screen selector: it takes a one-byte
+view id in A and `JMP`s to the handler for that screen — `$25` → the flight /
+cockpit view, others → the market, status, charts, equip screens, etc. While
+docked, the loop services menus and skips the universe model entirely; in flight
+it runs the model every pass. The loop is paced by how long the move-and-draw
+work takes (roughly one displayed frame), while the IRQ keeps the split screen
+and music going underneath it.
+
+## 2. The universe: slots, records, and the update pass
+
+### 2.1 How ships are stored
+
+The universe is a small fixed set of object **slots**:
+
+- **`$0452` — the slot array.** One byte per slot holding that slot's *ship
+  type* (1 = planet, 2 = station, higher = the various craft; `$00` terminates
+  the list). At most ten slots are used, so no more than ten objects — planet,
+  station/sun, and up to a handful of ships — can exist at once.
+- **`$28A1` — the slot pointer table.** Two bytes per slot pointing at that
+  slot's 37-byte **ship record**. `slot_ptr` (`$3E84`) turns a slot index in X
+  into a record pointer in `$59/$5A` (`X*2` indexes the table).
+- **`$0009`–`$002D` — the workspace.** A 37-byte scratch copy of *one* ship
+  record. The update pass copies a slot's record here, works on it in zero page
+  (fast, and the same code serves every slot), then copies it back.
+
+The fields of the 37-byte record that drive behaviour:
+
+| record bytes | when in workspace | meaning |
+|--------------|-------------------|---------|
+| `+0..+8` | `$09–$11` | x, y, z position — three 24-bit signed values (low, high, sign byte each) |
+| `+0A..+18` | `$13–$21` | orientation vectors and rotation rates (the mover reads the nose components at `$13/$15/$17`) |
+| `+1B` | `$24` | speed along the nose vector |
+| `+1C` | `$25` | acceleration |
+| `+1F` | `$28` | display/state flags — bit 7 = exploding, bit 5 = just killed |
+| `+20` | `$29` | AI flag (bit 7 = has hostile AI) plus energy/aggression in the low bits |
+| `+23` | `$2C` | running hit/energy counter (compared against the blueprint's limit) |
+| `+24` | `$2D` | tactics flags; bit 7 = scheduled for removal |
+
+### 2.2 The update pass
+
+`universe_update` (`$1EBE`, the routine that contains the slot loop at `$202A`)
+runs once per frame. It first turns the player's joystick/keyboard pitch and
+roll into a small rotation, then walks the slot array:
+
+```
+$202A  LDX #$00          ; slot index → $9D
+$202E  LDA $0452,X       ; this slot's ship type
+$2031  BNE process       ; non-zero → there is a ship here
+$2033  JMP $21F7         ; zero terminator → done, go run the spawn director
+process:
+       JSR $3E84         ; $59/$5A ← this slot's 37-byte record
+       copy 37 bytes ($00..$24) from ($59) into the workspace $0009
+       $CFFE,type*2 → $57/$58   ; the ship's blueprint (Part IV §1)
+       JSR $ABA0         ; ship_move_draw: rotate, move, draw this ship
+       …per-ship outcome logic (collision, docking, removal — §5)…
+       copy the workspace back to ($59)
+       INX → next slot
+```
+
+Crucially, the player's ship never moves: the *universe* is rotated and
+translated around a stationary camera. Each ship's position is updated by the
+player's own motion (so flying forward makes everything stream toward you) and
+then by the ship's own velocity and rotation.
+
+## 3. Spawning — when and where traffic appears
+
+### 3.1 `spawn_ship` (`$855B`): putting a ship into the world
+
+Everything that creates a ship goes through `spawn_ship`. Given a ship type in
+A, it:
+
+1. Scans `$0452` for the first free slot (`X = 0..9`); if all ten are taken it
+   returns with carry clear — the universe is full and nothing spawns.
+2. Looks up the blueprint via the pointer table at `$CFFE` (type `$80`+ are the
+   special objects — planet, sun, missiles — which have no blueprint).
+3. Computes an initial position. Ordinary traffic is placed *far away* (a large
+   z distance) so it approaches from a distance; the station (type 2) is placed
+   relative to the planet.
+4. Writes the type into the free slot (`$85C4`) and increments two counters:
+   `$047F` (total live traffic) and `$045D,type` (how many of that type exist).
+
+### 3.2 `spawn_director` (`$8E0D`): the traffic generator
+
+The spawn director runs only when the spawn counter `$A3` wraps to zero — i.e.
+roughly once every 256 frames — and never while docked or in a menu
+(`$0482 ≠ 0` aborts it). When it does run, it makes a series of weighted random
+rolls (all using `fib_rng`, Part IV §2) to decide what, if anything, to add:
+
+- **Lone traffic** (`$8E12`): about a 1-in-7 chance, and only while live traffic
+  is below a small cap. Spawns a single trader-class ship of a low type.
+- **Law enforcement** (`$8E76`): builds a "danger budget" in `$BB` from how many
+  police are already present (`$046D`) and the player's accumulated bounty
+  (`$04CD`), then rolls against it to spawn a type-`$10` enforcement ship — the
+  same craft the station launches at wanted pilots. The dirtier your record, the
+  more of these appear.
+- **Pirates** (`$8EB4`): gated by the system's government byte (`$0499`) and a
+  per-commander danger rating (`$04F0`) — lawless systems and more dangerous
+  commanders see more. A roll chooses between a **single** pirate (`$8EFE`,
+  types in the `$18–$1B` range) and a **pack** of one to four (`$8F17`–`$8F2C`,
+  random types `$11–$18` spawned in a loop).
+
+So *where*: new ships are placed at long range and fly in. *When*: on a periodic
+director pass, never while docked. *What*: a mix of traders, police scaled to
+your bounty, and pirates scaled to the system's lawlessness — plus the station
+and any escorts launched by the AI itself (§4).
+
+The ten callers of `spawn_ship` confirm the same split between the director and
+event-driven spawns:
+
+| caller | what it spawns |
+|--------|----------------|
+| `$8DF6` | passing traffic (director, lone-ship path) |
+| `$8E6B` | a trader (director) |
+| `$8E91` | a police/enforcement ship (director, bounty-scaled) |
+| `$8EFE` | a single pirate / special encounter (director) |
+| `$8F2C` | a pirate in a pack (director loop) |
+| `$32E9` | a ship *launched by another ship's AI* (station defenders, escorts — §4) |
+| `$8BC5` | the station itself, on arrival in a system |
+| `$376D`, `$3DED`, `$7CA4`, `$83E0` | event spawns (missiles, escape capsule, hyperspace arrival, etc.) |
+| `$924D` | the slowly-rotating display ship on the title / commander screen |
+
+## 4. Movement and AI
+
+### 4.1 `ship_move_draw` (`$ABA0`): the per-ship mover
+
+For each ship the update pass calls `ship_move_draw`, which:
+
+1. If the ship has hostile AI (`$29` bit 7) and is not the planet, calls the
+   tactics routine `$32AA` — but only every eighth frame (`$A3 EOR $9D AND 7`),
+   so the relatively expensive AI is time-sliced across ships and frames.
+2. Moves the ship forward along its nose vector by its speed (`$24`).
+3. Rotates the ship by its own angular velocity, then re-orthonormalises the
+   orientation vectors so rounding errors don't accumulate.
+4. Hands the result to `draw_ship` (`$A3A0`, Part IV §1) to project and draw the
+   wireframe.
+
+### 4.2 `ship_tactics` (`$32AA`): the AI
+
+The AI dispatches on ship type:
+
+- **The station (type 2)** doesn't fly — its "AI" is a launch controller. It
+  rolls occasionally and, if the player is wanted or unlucky, launches an
+  enforcement ship (`$32E7` → `spawn_ship`) to intercept.
+- **A mothership-class ship (type `$0F`)** launches escorts the same way —
+  spawning a small group of low-type craft around itself.
+- **Ordinary combat ships** run the general tactics at `$330C`: they track their
+  target (normally the player), accelerate up toward the blueprint's speed
+  limit, steer to point at or away from the target, and — depending on the
+  aggression bits in `$2D` and the player's bounty (`$04CD`) — fire lasers
+  (`$9571`) or break off into evasive manoeuvres (`$34A9`/`$34B9`). A ship that
+  takes enough damage can flip from attacking to fleeing.
+
+The behaviour you see in flight — traders cruising past, police forming up on a
+wanted player, pirates closing to fire — is all this one routine, parameterised
+by ship type and the per-ship flag bytes.
+
+## 5. Despawning — when ships disappear
+
+After `ship_move_draw` returns, the per-ship tail (`$21B0`–`$21F4`) decides the
+ship's fate. There are three ways a ship leaves the universe, all funnelling
+into `remove_ship`:
+
+1. **Marked for removal** (`$21B0`): `$2D` bit 7 is set — the ship has finished
+   whatever it was doing (a completed explosion, a missile that struck, a ship
+   that has flown off). Removed immediately.
+2. **Killed** (`$21B2`): `$28` says the ship just died. Before removal the game
+   banks the reward — the kill's bounty is OR-ed into the player's legal-status
+   byte `$04CD`, and cargo/credit is awarded (`$7D81`). Killing a *police* ship
+   adds to your bounty rather than your bank — this is where a clean trader
+   becomes a fugitive.
+3. **Out of range** (`$21E6`): `ship_in_range` (`$90B2`) compares the high byte
+   of each position coordinate against `$E0`. If the ship has drifted too far on
+   any axis, it is dropped. This is why traffic quietly thins out behind you as
+   you fly on.
+
+`remove_ship` (`$8BFF`) does the bookkeeping:
+
+- Decrements `$045D,type` (that type's population) and `$047F` (total traffic),
+  the same counters the spawn director reads — so removing a ship makes room for
+  the next one.
+- **Compacts the arrays**: it copies every higher slot in `$0452` down by one
+  (`$8C50`: `LDA $0452,X / STA $0451,X`) and shifts the matching record pointers
+  in `$28A1` down too, closing the gap so the slot list stays contiguous and
+  zero-terminated.
+- Handles special cases on the way out (the station, the escape-capsule/mission
+  type `$1F`, etc.).
+
+## 6. Routine and data map (ship mechanics)
+
+| address | role |
+|---------|------|
+| `$8FB0` | main loop top — dispatch input/view, then run the universe and spawn passes each frame |
+| `$8FBD` | `view_dispatch` — screen/command selector (A = view id; `$25` = flight) |
+| `$8AEB` | `read_controls` — poll keyboard/joystick into the command code |
+| `$1EBE` | `universe_update` — rotate the player's frame, then move + draw every slot |
+| `$202A` | the slot loop inside `universe_update` |
+| `$3E84` | `slot_ptr` — slot index → 37-byte ship-record pointer (`$59/$5A`) |
+| `$ABA0` | `ship_move_draw` — time-slice AI, move along nose, rotate, re-orthonormalise, draw |
+| `$32AA` | `ship_tactics` — per-ship AI: station/escort launches and combat steering/firing |
+| `$8E0D` | `spawn_director` — periodic traffic generator (traders / police / pirates) |
+| `$855B` | `spawn_ship` — place a ship in a free slot; bump the population counters |
+| `$90B2` | `ship_in_range` — distance cull (position high byte vs `$E0`) |
+| `$8BFF` | `remove_ship` — delete a slot and compact the slot + pointer arrays |
+| `$0452` | the slot array — one ship-type byte per slot, zero-terminated, ≤ 10 |
+| `$28A1` | slot pointer table — record pointer per slot |
+| `$0009`–`$002D` | the 37-byte ship-record workspace |
+| `$045D` | per-type population counter (indexed by ship type) |
+| `$047F` | live-traffic counter |
+| `$04CD` | player legal status / bounty (driven by kills; read by the spawn director and AI) |
+| `$0482` | docked / in-menu flag (suppresses spawning and the flight model) |
+| `$A3` | spawn counter (its wrap to zero triggers the spawn director) |
+
+## 7. Legal status and bounty
+
+One byte, `$04CD`, holds the player's standing with the law. The flight HUD turns
+it into one of three labels (`$2CC9`):
+
+| `$04CD` | status |
+|---------|--------|
+| `$00` | **Clean** (token `$13`) |
+| `$01`–`$31` (1–49) | **Offender** (token `$14`) |
+| `$32`+ (≥ 50) | **Fugitive** (token `$15`) |
+
+**How it goes up.** Every ship carries an "offence" value in its data. When you
+destroy a ship, that value is *OR-ed* into `$04CD` (`$21BE` in the kill path,
+`$7D41` in the bounty-award routine). The OR means offences accumulate and ratchet
+upward rather than averaging out. Lawful ships — chiefly the type-`$10`
+enforcement craft — carry the largest offence value, so shooting a police ship is
+what turns a clean pilot into a Fugitive in a single act. Innocent kills cost you;
+killing pirates does not.
+
+**How it goes down.** Each hyperspace jump halves it. The arrival handler
+(`$7CDD`) calls the cleanup routine `sub_838F`, whose `LSR $04CD` (`$83B2`) shifts
+the byte right by one. A minor offence therefore cools off to Clean after a few
+quiet jumps, while a serious one (a high value) lingers across many systems.
+
+**What it changes.** The byte is read in two gameplay-critical places:
+
+- **Police pressure.** The spawn director ORs `$04CD` into its enforcement "danger
+  budget" (`$8E7F`), so a dirty record makes the galaxy spawn more police to hunt
+  you down.
+- **AI hostility.** `ship_tactics` compares `$04CD` against `$28` (40) at `$3335`;
+  past that threshold ships treat you as a target and engage on sight. A Clean
+  trader is mostly left alone; a Fugitive flies through a running gun battle.
+
+So bounty is both a consequence (it tracks your worst recent act) and a driver
+(it dials up how dangerous the galaxy is for you) — a self-reinforcing pressure
+that the player manages by flying clean and jumping away to let it decay.
+
+## 8. Game over — and can you win?
+
+The main loop is abandoned in exactly one way: the death sequence at `$90DC`.
+Three conditions jump to it:
+
+| trigger | address | cause |
+|---------|---------|-------|
+| Energy gone | `$84F8` | the energy/shield bank `$04E9` reaches zero while taking fire |
+| Ship collision | `$210A` | ramming another ship (impact severity `$96` ≥ 5) |
+| Planet/sun crash | `$22AF` | flying inside the lethal radius of the planet or the sun |
+
+The death sequence silences the sound, prints message token `$92` ("game over"),
+runs the familiar tumbling cabin-debris explosion (the loop at `$9109` scatters
+fragments outward), and then rebuilds the title/commander screen (`$918E`, the
+same setup `game_start` uses). You resume from your **last saved commander**, not
+from scratch — death costs you only the progress since your last save.
+
+**Can you win?** No. There is no victory state anywhere in the code. The death
+routine has three callers and they are the only paths that leave the per-frame
+loop; none of them is a "you won" branch, and the view dispatcher has no ending
+screen. Elite is deliberately open-ended: the long-term goal is the combat rating
+that climbs as you rack up kills and is shown among your status, with "Elite" as
+its top rank — but reaching it only changes a label. Nothing in the loop ever
+checks a progress value and stops the game. The session ends when you die, when
+you save and switch off, or when you simply decide you have flown far enough.
 
 ---
 

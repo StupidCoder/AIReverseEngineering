@@ -639,7 +639,7 @@
 1EB8  20 8B 8B  JSR $8B8B
 1EBB  4C CB 1E  JMP $1ECB
 
-; ==== sub_1EBE (3 callers) ====
+; ==== universe_update  $1EBE  (3 callers) — rotate the player's frame, then iterate the slot array moving and drawing every object ====
 1EBE  AD 00 F0  LDA $F000
 1EC1  85 02     STA $02
 1EC3  AD 10 05  LDA $0510
@@ -1482,6 +1482,8 @@
 2871  .byte 49 80 85 70 90 FE E6 6F A5 76 30 FE A5 75 18 65 ; I..p...o.v0..u.e
 2881  .byte 0F 85 BB A5 10 69 00 85 99 4C 27 A7 A6 9A F0 FE ; .....i...L'.....
 2891  .byte A2 00 4A E8 C5 9A B0 FA 86 9C 20 AF A2 A6 9C A5 ; ..J....... .....
+
+; --- slot_ptr_tbl  $28A1 — per-slot pointers to the 37-byte ship records (two bytes per slot) (data) ---
 28A1  .byte 00 F0 25 F0 4A F0 6F F0 94 F0 B9 F0 DE F0 03 F1 ; ..%.J.o.........
 28B1  .byte 28 F1 4D F1 72 F1 80 40 20 10 08 04 02 01 80 40 ; (.M.r..@ ......@
 28C1  .byte C0 30 0C 03 C0 C0 60 30 18 0C 06 03 C0 30 0C 03 ; .0....`0.....0..
@@ -1964,6 +1966,8 @@
 2C93  B0 56     BCS $2CEB
 2C95  CA        DEX
 2C96  D0 53     BNE $2CEB
+
+; --- flight_hud  $2C98 — draw the cockpit dashboard / HUD for the flight view ---
 2C98  A9 08     LDA #$08
 2C9A  20 2F 73  JSR $732F
 2C9D  20 AB 79  JSR $79AB
@@ -2750,7 +2754,7 @@
 32A4  4C 6B 33  JMP $336B
 32A7  4C 00 BA  JMP $BA00
 
-; ==== sub_32AA (1 caller) ====
+; ==== ship_tactics  $32AA  (1 caller) — per-ship AI: station/escort launches and combat steering/firing (energy, aggression $2D, bounty $04CD) ====
 32AA  A9 03     LDA #$03
 32AC  85 B0     STA $B0
 32AE  A9 04     LDA #$04
@@ -4369,7 +4373,7 @@
 3E6E  .byte 85 10 20 86 A3 20 A0 AB 4C 49 96 20 49 96 D0 FB ; .. .. ..LI. I...
 3E7E  .byte 20 49 96 F0 F6 60                               ;  I...`
 
-; ==== sub_3E84 (5 callers) ====
+; ==== slot_ptr  $3E84  (5 callers) — slot index (X) -> 37-byte ship-record pointer ($59/$5A) via the table at $28A1 ====
 3E84  8A        TXA
 3E85  0A        ASL A
 3E86  A8        TAY
@@ -8320,7 +8324,7 @@
 8AE9  18        CLC
 8AEA  60        RTS
 
-; ==== sub_8AEB (1 caller) ====
+; ==== read_controls  $8AEB  (1 caller) — poll keyboard/joystick into the command code ====
 8AEB  A5 A0     LDA $A0
 8AED  D0 05     BNE $8AF4
 8AEF  20 DB 97  JSR $97DB
@@ -8459,7 +8463,7 @@
 8BFB  91 07     STA ($07),Y
 8BFD  F0 CB     BEQ $8BCA
 
-; ==== sub_8BFF (1 caller) ====
+; ==== remove_ship  $8BFF  (1 caller) — delete a ship slot, decrement the population counters, compact the slot + pointer arrays ====
 8BFF  86 AD     STX $AD
 8C01  A5 7C     LDA $7C
 8C03  C5 AD     CMP $AD
@@ -8730,6 +8734,8 @@
 8E06  C6 A3     DEC $A3
 8E08  F0 03     BEQ $8E0D
 8E0A  4C 33 8F  JMP $8F33
+
+; --- spawn_director  $8E0D — periodic traffic generator (traders / police / pirates), runs when spawn counter $A3 wraps ---
 8E0D  AD 82 04  LDA $0482
 8E10  D0 F8     BNE $8E0A
 8E12  20 BB 8D  JSR $8DBB
@@ -8917,13 +8923,15 @@
 8FA8  A0 0E     LDY #$0E
 8FAA  20 50 B1  JSR $B150
 8FAD  20 EB 8A  JSR $8AEB
+
+; --- main_loop  $8FB0 — per-frame foreground loop: run the universe + spawn passes, read controls, dispatch the current view ---
 8FB0  20 BD 8F  JSR $8FBD
 8FB3  A5 A7     LDA $A7
 8FB5  F0 03     BEQ $8FBA
 8FB7  4C 33 8F  JMP $8F33
 8FBA  4C F9 8D  JMP $8DF9
 
-; ==== sub_8FBD (1 caller) ====
+; ==== view_dispatch  $8FBD  (1 caller) — screen/command dispatcher (A = view id; $25 = the flight/cockpit view) ====
 8FBD  C9 25     CMP #$25
 8FBF  D0 03     BNE $8FC4
 8FC1  4C 98 2C  JMP $2C98
@@ -9037,7 +9045,7 @@
 ; ==== sub_90B0 (1 caller) ====
 90B0  A9 E0     LDA #$E0
 
-; ==== sub_90B2 (1 caller) ====
+; ==== ship_in_range  $90B2  (1 caller) — distance cull: ship position high byte vs $E0 ====
 90B2  C5 0A     CMP $0A
 90B4  90 06     BCC $90BC
 90B6  C5 0D     CMP $0D

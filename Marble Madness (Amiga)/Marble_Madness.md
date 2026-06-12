@@ -34,6 +34,9 @@ are stubs to be filled in.
   - [2. The AmigaDOS filesystem](#2-the-amigados-filesystem)
   - [3. The disk contents](#3-the-disk-contents)
 - [Part II — Boot chain](#part-ii--boot-chain)
+  - [1. The boot block](#1-the-boot-block)
+  - [2. AmigaDOS startup and the Workbench launch](#2-amigados-startup-and-the-workbench-launch)
+  - [3. The launcher](#3-the-launcher)
 - [Part III — Game program architecture](#part-iii--game-program-architecture)
 - [Part IV — Graphics and data formats](#part-iv--graphics-and-data-formats)
 - [Part V — Game mechanics](#part-v--game-mechanics)
@@ -139,9 +142,105 @@ overlays as the game reaches that course. Tracing that startup is Part II.
 
 # Part II — Boot chain
 
-*To follow.* The standard boot block and AmigaDOS hand-off, the `MarbleMadness!`
-launcher, and how the main `.dat` hunk and the per-course overlays are loaded
-and relocated (`LoadSeg`).
+Where the C64 tapes hid a custom fastloader that had to be reverse-engineered
+before a single byte could be read, the Amiga disk boots through entirely
+**stock AmigaDOS**. The chain is: ROM runs the boot block → the boot block
+hands off to `dos.library` → AmigaDOS runs `s/startup-sequence` → Workbench
+comes up → the player launches the game from its icon → a small compiled
+launcher pulls the game in with `LoadSeg`. Each link is a standard mechanism;
+the only game-specific code is the launcher.
+
+## 1. The boot block
+
+Blocks 0–1 are the boot block: the `"DOS\0"` signature, a checksum longword, the
+root-block pointer (880), and then a short 68000 routine. Disassembled, it is the
+**unmodified AmigaDOS 1.x boot code**:
+
+```
+0000: 43FA 0018     LEA   dosName(pc),a1     ; a1 -> "dos.library"
+0004: 4EAE FFA0     JSR   -$60(a6)           ; FindResident()   (a6 = ExecBase)
+0008: 4A80          TST.l d0
+000A: 670A          BEQ   fail
+000C: 2040          MOVEA.l d0,a0             ; a0 = the Resident node
+000E: 2068 0016     MOVEA.l $16(a0),a0        ; a0 = rt_Init  (DOS boot entry)
+0012: 7000          MOVEQ #0,d0               ; d0 = 0  -> success
+0014: 4E75          RTS
+fail:
+0016: 70FF          MOVEQ #-1,d0
+0018: 60FA          BRA   $0014
+001A: "dos.library",0
+```
+
+It calls Exec's `FindResident` (LVO `-$60`) to locate the resident `dos.library`,
+reads its `rt_Init` field (offset `$16` of the Resident node — the DOS boot
+point) into `a0`, and returns success. The ROM then calls that boot point to
+bring DOS up. There is no decryption, no custom track format, no game code here
+at all — exactly the standard bootstrap, which is why an ADF reader plus stock
+AmigaDOS knowledge is enough to get at everything (Part I).
+
+## 2. AmigaDOS startup and the Workbench launch
+
+Once DOS is running it mounts the volume and executes the boot script
+`s/startup-sequence`, which is just two lines:
+
+```
+LoadWb
+endcli > nil:
+```
+
+`LoadWb` starts Workbench; `endcli` closes the boot shell. The disk bundles its
+own `libs/icon.library` and the `.info` icon files (Part I) so it can present its
+Workbench window and icons even when booted on a bare machine. The game is then
+launched the Workbench way — by double-clicking the **`MarbleMadness!`** icon,
+which is a *tool* icon (icon type 3), so Workbench `LoadSeg`s and runs the
+`MarbleMadness!` program directly.
+
+## 3. The launcher
+
+`MarbleMadness!` is a small (5,864-byte) compiled program — 23 hunks, with a
+`HUNK_SYMBOL` table left in. Its entry point is a standard C-runtime startup that
+works out how it was launched:
+
+```
+MOVEM.l d3-d7/a0-a6,-(a7)     ; save registers
+MOVE.l  a7,$1C.l              ; stash the stack pointer
+MOVE.l  d0,$24.l / a0,$28.l   ; CLI argument length / pointer (0 from Workbench)
+MOVEA.l $4.l,a6               ; a6 = ExecBase (AbsExecBase at $0000.0004)
+SUBA.l  a1,a1
+JSR     -$126(a6)             ; FindTask(0) -> our task
+MOVEA.l d0,a4
+TST.l   $AC(a4)               ; Process.pr_CLI : zero => launched from Workbench
+BEQ     wbStartup             ; …which is the path taken here
+```
+
+The `pr_CLI` test (`$AC`) is the textbook Workbench-vs-CLI check, and because the
+game is started from its icon it takes the Workbench branch and collects the
+`WBStartup` message.
+
+What the launcher then does is read off its symbol table and data hunk rather
+than guessed: the symbols name the exact library entry points it links against —
+from `dos.library` `_LoadSeg` / `_UnLoadSeg` / `_Lock` / `_CurrentDir` /
+`_Input` / `_Output`, and from `exec.library` `_AllocMem` / `_FreeMem` /
+`_FindTask` / `_CreatePort` / `_DeletePort` / `_PutMsg` / `_GetMsg` — so it
+allocates memory, sets up message ports, and brings program segments in with
+`LoadSeg`. Its data hunk holds the asset names it pulls from the `c/` directory:
+
+| asset | what it is |
+|-------|------------|
+| `c/splash` | the title/splash screen — an IFF `FORM…ILBM` image |
+| `c/bootscr` | a boot screen (hunk object) |
+| `c/xxx` | opaque, high-entropy data (likely packed) |
+| `c/zzz` | a second small compiled stage (also links `dos.library`) |
+
+So the launcher displays the splash and then uses `LoadSeg` to load the game
+proper. The main program is `c/MarbleMadness!.dat` — the 175 KB hunk from Part I —
+with `c/zzz` and `c/xxx` as supporting loader/data pieces. Every loadable element,
+the launcher included, is an ordinary Amiga hunk object brought in through
+`LoadSeg`, which is the same mechanism the running game later uses to stream its
+per-course overlays (Parts III–IV). (The precise hand-off order between the
+launcher, `c/zzz`, `c/xxx` and the main `.dat` is compiled-C loader detail; what
+matters for the boot chain is that it is all stock `LoadSeg`, with the game code
+arriving as the relocatable `MarbleMadness!.dat` hunk.)
 
 ---
 

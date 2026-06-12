@@ -100,6 +100,23 @@ loadable object — a relocatable code/data segment that AmigaDOS brings in with
 program plus a large set of per-course overlays, each a hunk file loaded on
 demand.
 
+A **hunk file** is the Amiga's relocatable program format, produced by the linker
+and loaded by `LoadSeg`. It opens with a header (the `$3F3` magic, then the size
+of each segment) and is followed by the segments themselves — `CODE`, `DATA` and
+zero-filled `BSS` blocks — each optionally trailed by a 32-bit relocation table.
+Because a segment may be placed anywhere in memory, that table lists every
+longword inside the segment that holds an address, and `LoadSeg` adds the
+segment's real load address to each of them as it brings the file in; the program
+is therefore position-independent. The shared reader `tools/amiga/hunk` does the
+same — it lays the segments out from a chosen base, applies the relocations, and
+returns a flat image that `dis68k`/`codetrace68k` can disassemble.
+
+Two files are exceptions. `c/MarbleMadness!.dat` (the main program) and `c/xxx`
+are not plain hunks: after a `$0000_03F3 8F01…` packer header their contents are
+near-random (entropy ≈ 7.95 of 8 bits/byte), i.e. **stored crunched** and
+decompressed at load by the small `c/zzz` helper. Unpacking them — and thereby
+reaching the main game code — is a Part II/III concern.
+
 **System and boot files** — an ordinary AmigaDOS boot setup:
 
 | file | role |

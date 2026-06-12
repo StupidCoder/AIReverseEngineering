@@ -68,10 +68,12 @@ AIReverseEngineering/
 │   │   └── cmd/tapdump/        #     pulse histogram + segment listing for a .tap
 │   └── amiga/                  #   Amiga-specific tools
 │       ├── adf/                #     AmigaDOS floppy image (ADF) reader — OFS/FFS
+│       ├── hunk/               #     AmigaDOS hunk loader — relocate to a flat image
 │       ├── iff/                #     IFF ILBM bitmap decoder
 │       ├── icon/               #     Workbench .info icon decoder
 │       ├── cmd/adfdump/        #     list and extract files from an .adf
-│       └── cmd/amigapng/       #     render an IFF ILBM or .info icon to PNG
+│       ├── cmd/amigapng/       #     render an IFF ILBM or .info icon to PNG
+│       └── cmd/hunkload/       #     segment map + flat relocated image of a hunk file
 │
 ├── Elite (C64)/
 │   ├── Elite.tap               # raw tape image
@@ -136,6 +138,8 @@ per-platform subfolder (`c64/`, `amiga/`, …).
 | `c64/cmd/tapdump` | Print a pulse-width histogram and the pause-delimited segment map of a `.tap` — the usual first look at an unknown tape. |
 | `amiga/adf` | Read a standard AmigaDOS floppy image (ADF): detect OFS/FFS, walk the directory tree, and extract file contents (handles hash chains, OFS data-block headers and multi-block file-extension chains). |
 | `amiga/cmd/adfdump` | List an `.adf`'s volume, directory tree and file sizes; `-x outdir` extracts every file preserving the directory structure. |
+| `amiga/hunk` | Load an AmigaDOS hunk object/executable: place its CODE/DATA/BSS segments from a base, apply the 32-bit relocations, and return a flat image (and each segment's base) ready to disassemble. |
+| `amiga/cmd/hunkload` | Print a hunk file's segment map and, with `-o`, write its flat relocated image for `dis68k`/`codetrace68k`. |
 | `amiga/iff` | Decode an IFF `FORM…ILBM` bitmap (planar BODY, ByteRun1/uncompressed, CMAP palette) into a Go image. |
 | `amiga/icon` | Decode a Workbench `.info` icon (DiskObject + planar Image structs) into images, using the standard Workbench palette. |
 | `amiga/cmd/amigapng` | Render an IFF ILBM or a `.info` icon to PNG (auto-detects the format). |

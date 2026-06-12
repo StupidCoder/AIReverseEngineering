@@ -42,8 +42,10 @@ func main() {
 		if err != nil {
 			fail(err)
 		}
+		// Icons are drawn on the hi-res Workbench screen, whose pixels are about
+		// twice as tall as wide, so double the height to restore the aspect.
 		for _, im := range ic {
-			imgs = append(imgs, im)
+			imgs = append(imgs, doubleHeight(im))
 		}
 	default:
 		fail(fmt.Errorf("unrecognised format (not IFF ILBM or .info icon)"))
@@ -63,6 +65,21 @@ func main() {
 		b := im.Bounds()
 		fmt.Printf("%s  %dx%d\n", name, b.Dx(), b.Dy())
 	}
+}
+
+// doubleHeight scales an image 1×2 (nearest-neighbour) to correct the tall
+// hi-res Workbench pixel aspect for square-pixel display.
+func doubleHeight(src image.Image) image.Image {
+	b := src.Bounds()
+	dst := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()*2))
+	for y := 0; y < b.Dy(); y++ {
+		for x := 0; x < b.Dx(); x++ {
+			c := src.At(b.Min.X+x, b.Min.Y+y)
+			dst.Set(x, y*2, c)
+			dst.Set(x, y*2+1, c)
+		}
+	}
+	return dst
 }
 
 func write(name string, im image.Image) error {

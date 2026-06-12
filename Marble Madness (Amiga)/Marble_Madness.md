@@ -39,9 +39,8 @@ are stubs to be filled in.
   - [3. The launcher](#3-the-launcher)
 - [Part III — Game program architecture](#part-iii--game-program-architecture)
 - [Part IV — Graphics and data formats](#part-iv--graphics-and-data-formats)
-  - [1. The splash screen](#1-the-splash-screen)
-  - [2. The boot screen](#2-the-boot-screen)
-  - [3. The Workbench icons](#3-the-workbench-icons)
+  - [1. The splash (boot) screen](#1-the-splash-boot-screen)
+  - [2. The Workbench icons](#2-the-workbench-icons)
 - [Part V — Game mechanics](#part-v--game-mechanics)
 - [Appendix A — Toolchain and reproduction](#appendix-a--toolchain-and-reproduction)
 
@@ -257,19 +256,20 @@ setup, and the memory map during play.
 # Part IV — Graphics and data formats
 
 The per-course modules (`.mlb`/`.ilb`/`.vlb`/`Snd`/`Track`) are still to be
-decoded. What is done here is the *boot-time* graphics — the title splash, the
-boot screen and the Workbench icons — because they use standard Amiga formats
-that the toolchain can already read end to end.
+decoded. What is done here is the *boot-time* graphics — the title splash and
+the Workbench icons — because they use standard Amiga formats that the toolchain
+can already read end to end.
 
-## 1. The splash screen
+## 1. The splash (boot) screen
 
-`c/splash` is the title screen, stored as a standard **IFF `FORM…ILBM`** bitmap
-(the Amiga's usual image format). Its `BMHD` describes a **320×200, 4-bitplane
-(16-colour)** image; the `BODY` is **ByteRun1 (PackBits) compressed**; a `CMAP`
-chunk carries the 16-colour palette; and four `CRNG` chunks define colour-cycling
-ranges, so parts of the logo animate on the real machine. The decoder
-`tools/amiga/iff` parses those chunks, unpacks the BODY, de-interleaves the four
-bitplanes into colour indices and looks them up in the CMAP:
+The boot/title screen the player sees is `c/splash`, stored as a standard **IFF
+`FORM…ILBM`** bitmap (the Amiga's usual image format). Its `BMHD` describes a
+**320×200, 4-bitplane (16-colour)** image; the `BODY` is **ByteRun1 (PackBits)
+compressed**; a `CMAP` chunk carries the 16-colour palette; and four `CRNG`
+chunks define colour-cycling ranges, so parts of the logo animate on the real
+machine. The decoder `tools/amiga/iff` parses those chunks, unpacks the BODY,
+de-interleaves the four bitplanes into colour indices and looks them up in the
+CMAP:
 
 ![Marble Madness splash screen](rendered/splash.png)
 
@@ -278,32 +278,31 @@ Amiga conversion is credited to **Larry Reed**, under **© 1984, 1986 Atari Game
 Corp. & Electronic Arts** — facts read straight out of the image, not from any
 outside source.
 
-## 2. The boot screen
+The image is the *data*; `c/bootscr` is the *code* that puts it on screen. The
+launcher (Part II) `LoadSeg`s both, and `c/bootscr` is the overlay that displays
+this splash at boot — it is a 50-hunk compiled program (its first hunk is
+`HUNK_CODE`), not a second picture, which is why there is one bitmap here, not
+two. (A loose end alongside them, `c/sigfile`, is not graphics either: it is a
+short table of `"DOW"`+incrementing-byte entries, a disk-signature /
+copy-protection artefact.)
 
-`c/bootscr` is the other half of the boot presentation, but it is **not a stored
-image** — it is a 50-hunk compiled **program** (its first hunk is `HUNK_CODE`).
-It is the code that paints the boot/intro display and chains the load along; the
-occasional `FORM` byte-pattern inside it is incidental compiled data, not a real
-IFF chunk (the four bytes after each are random). So there is nothing to render
-here: the boot screen is drawn procedurally by this overlay rather than blitted
-from a saved bitmap. (`c/sigfile`, alongside it, is not graphics either — it is a
-short table of `"DOW"`+incrementing-byte entries, a disk-signature/copy-protection
-artefact.)
-
-## 3. The Workbench icons
+## 2. The Workbench icons
 
 The `.info` files are standard Workbench icons: a `DiskObject` header (`$E310`
 magic) followed by one or two planar `Image` structures. Icons carry no palette
 of their own — they are drawn in the Workbench screen pens — so `tools/amiga/icon`
-renders them with the standard Workbench 1.x four-colour palette (blue / black /
-white / orange).
+renders them with the standard Workbench 1.x four-colour palette (pen 0 blue,
+1 white, 2 black, 3 orange). They are also authored for the hi-res Workbench
+screen, whose pixels are about twice as tall as wide, so the renders below are
+scaled 2× vertically to restore the intended aspect.
 
 `MarbleMadness!.info` (the icon the player double-clicks, Part II) is a **64×29,
-2-plane** image — the marble itself:
+2-plane** image — the marble: a dark sphere with a white specular highlight.
 
 ![MarbleMadness! icon](rendered/icon-marblemadness.png)
 
-and `Disk.info` is the small **32×16** disk icon:
+`Disk.info` is the **32×16** disk icon — the familiar white floppy with an orange
+label.
 
 ![Disk icon](rendered/icon-disk.png)
 

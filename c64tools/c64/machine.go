@@ -16,6 +16,12 @@
 // ROM is not present. Callers register Go hooks at the ROM/RAM entry points
 // their loader calls (see SetHook and InstallKernalTapeHooks). A jump into a
 // banked-in ROM region without a hook stops emulation with a diagnostic.
+//
+// For dynamic analysis beyond loader extraction (e.g. tracing which routine
+// reads which data table), every RAM write is logged in Writes, and an
+// optional read probe (SetReadProbe) observes every read. Together they let a
+// caller answer "which code touches which memory" while running real game
+// code under the model.
 package c64
 
 import (
@@ -55,7 +61,8 @@ type Machine struct {
 	// pulse being consumed. Zero disables it.
 	Watchdog uint64
 
-	hooks map[uint16]Hook
+	hooks     map[uint16]Hook
+	readProbe func(addr, pc uint16)
 
 	// CIA state
 	latchA, latchB uint16
@@ -85,6 +92,15 @@ func New(pulses []tap.Pulse, startPulse int) *Machine {
 // SetHook installs a hook at addr, replacing any previous one.
 func (m *Machine) SetHook(addr uint16, h Hook) { m.hooks[addr] = h }
 
+// SetReadProbe installs a function called on every memory read (RAM and I/O),
+// with the effective address and the CPU's PC at that moment. It fires for
+// instruction/operand fetches as well as data loads; a fetch is distinguished
+// by addr == pc. Pass nil to disable. The probe observes only — it cannot
+// change the value returned — and is the read-side counterpart of the Writes
+// log, intended for dynamic analysis of game code (which routine reads which
+// table). It is unset by default, so it adds nothing to a plain loader run.
+func (m *Machine) SetReadProbe(f func(addr, pc uint16)) { m.readProbe = f }
+
 // HookRTS installs hooks at the given addresses that do nothing but return
 // (RTS). Useful for stubbing out harmless ROM housekeeping calls.
 func (m *Machine) HookRTS(addrs ...uint16) {
@@ -104,6 +120,9 @@ func (m *Machine) RTS() {
 
 // Read implements mos6502.Bus.
 func (m *Machine) Read(addr uint16) byte {
+	if m.readProbe != nil {
+		m.readProbe(addr, m.CPU.PC)
+	}
 	switch {
 	case addr == 0xDC0D: // CIA1 ICR: cassette FLAG in bit 4 (and bit 7)
 		m.deliverEdge()

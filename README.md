@@ -46,7 +46,6 @@ AIReverseEngineering/
 └── Fort Apocalypse (C64)/
     ├── Fort_Apocalypse.tap      # raw tape image
     ├── Fort_Apocalypse.md       # full game + tape writeup
-    ├── emu.py                   # dynamic-verification scratch emulator
     ├── extract/                 # module fortapoc/extract — extraction + gfx tools
     ├── extracted/               # generated .prg files (regenerable; git-ignored)
     └── rendered/                # generated PNGs (charsets, maps, sprites)
@@ -59,6 +58,21 @@ extraction tool is always named `extract` (not tied to tape — a future game
 could be disk- or cartridge-based, while the per-game tool keeps the same
 name).
 
+## Image files
+
+Many differing dumps of these games circulate online. All results in this
+repository were produced from these exact image files; the documentation and
+the golden extraction tests assume them byte for byte. The MD5 (and size)
+below pin the precise copy, so the work stays reproducible.
+
+| Image | Size (bytes) | MD5 |
+|-------|-------------:|-----|
+| `Elite (C64)/Elite.tap` | 801,592 | `d51b7f84fd1bec6eb24f4bf210c8cc74` |
+| `Fort Apocalypse (C64)/Fort_Apocalypse.tap` | 225,817 | `bec7409816865f3ad160af9984f127cd` |
+
+Verify a copy before reusing it, e.g. `md5 "Elite (C64)/Elite.tap"`
+(`md5sum` on Linux).
+
 ## Shared tools (`c64tools`)
 
 | Package / command | What it does |
@@ -66,7 +80,7 @@ name).
 | `tap` | Parse a TAP v0/v1 image (C64/C16) into a pulse stream; `Segmentize` splits it at pauses. |
 | `cbmtape` | Decode the standard Commodore KERNAL (ROM loader) tape encoding: blocks, headers, and paired header+data files with checksum verification. |
 | `mos6502` | One opcode table driving both a `Disassemble` function and an executable `CPU` core (all documented opcodes, binary + BCD). |
-| `c64` | A minimal C64 machine model — RAM, the `mos6502` CPU, a CIA pulse-feed tape model, a PC-hook registry and a RAM write log — for *running* a self-modifying loader instead of decoding it. Optional standard KERNAL tape hooks included. |
+| `c64` | A minimal C64 machine model — RAM, the `mos6502` CPU, a CIA pulse-feed tape model, a PC-hook registry, a RAM write log and an optional read probe — for *running* a self-modifying loader instead of decoding it, or tracing which game routine touches which memory. Optional standard KERNAL tape hooks included. |
 | `gfx` | Generic rendering: the C64 palette, multicolor characters, hires sprites, marker drawing and PNG output. |
 | `cmd/disprg` | Disassemble a `.prg` file (2-byte load address + data), optionally over an address range. |
 | `cmd/tapdump` | Print a pulse-width histogram and the pause-delimited segment map of a `.tap` — the usual first look at an unknown tape. |
@@ -88,16 +102,26 @@ are run by that full path from anywhere in the workspace (the `go.work` is
 found by walking up from the current directory), e.g.
 `go run stupidcoder.com/c64tools/cmd/tapdump ...`.
 
-Inspect an unknown tape, then extract a game:
+`tapdump` is generic — point it at any C64 `.tap` to see its pulse encoding
+and segment layout (the first step when approaching an unfamiliar tape):
 
 ```sh
-go run stupidcoder.com/c64tools/cmd/tapdump "Elite (C64)/Elite.tap"
+go run stupidcoder.com/c64tools/cmd/tapdump path/to/any.tap
+```
 
+The `extract` tools are not generic: each one is written for its game's
+specific loader, so it only runs on that game's image. Run a game's extractor
+from its own folder:
+
+```sh
 cd "Elite (C64)/extract" && go build && ./extract -o ../extracted ../Elite.tap
 
 cd "Fort Apocalypse (C64)/extract" && go build && \
     ./extract -o ../extracted -dis ../Fort_Apocalypse.tap
 ```
+
+Extracting a *new* game means writing a new per-game `extract` tool on top of
+`c64tools` (see "Two extraction strategies" below), not reusing one of these.
 
 Disassemble any extracted file with the shared tool:
 

@@ -24,10 +24,10 @@ learned in this analysis session, in reading order:
 
 Methods: a Go extraction toolchain (`extract/` plus the shared
 `c64tools/`), a table-driven 6502 disassembler (`c64tools/cmd/disprg`),
-a graphics renderer (`extract/cmd/gfxrender`), and an instrumented Python 6502 emulator
-(`emu.py`) that executed the real init/title/game path and logged all
-reads/writes to confirm the static analysis. All addresses are C64
-memory addresses; "frame" means one PAL frame.
+a graphics renderer (`extract/cmd/gfxrender`), and dynamic verification
+that ran the real init/title/game path under the shared `c64tools/c64`
+machine model, logging all reads/writes to confirm the static analysis.
+All addresses are C64 memory addresses; "frame" means one PAL frame.
 
 ---
 
@@ -1107,10 +1107,10 @@ class = 4 - (rank & 3) -> displayed as "<bird> CLASS <n>"
 
 # Appendix A — Toolchain and reproduction
 
-The game-specific tools live in the Go module `extract/` (plus
-`emu.py`); the reusable C64 building blocks live in the shared
-`c64tools` module at the repository root (see the root `README.md`).
-A `go.work` at the root ties them together.
+The game-specific tools live in the Go module `extract/`; the reusable
+C64 building blocks live in the shared `c64tools` module at the
+repository root (see the root `README.md`). A `go.work` at the root
+ties them together.
 
 ```
 # All commands are run from this game folder ("Fort Apocalypse (C64)/").
@@ -1130,20 +1130,26 @@ extract/extract -o extracted -dis Fort_Apocalypse.tap
 # 3. Render charsets, level maps (with spawn markers) and sprites
 ( cd extract && go run ./cmd/gfxrender -o ../rendered -markers -scale 2 ../extracted/FORT-fast-7000.prg )
 
-# 4. Dynamic verification: emulate init/title/game start, log all
-#    data readers and video writers, dump memory to emu_mem.bin
-python3 emu.py
-
 # run this module's tests
 ( cd extract && go test ./... )
 ```
+
+**Dynamic verification.** Many findings in Parts III–V (which routine
+reads which data table, which writes which video region) were confirmed
+by running the real init/title/game code under emulation and logging its
+memory access. The shared `c64tools/c64` machine model supports exactly
+this: load the game file into its RAM, drive it from an entry point, read
+back the `Writes` log for video/buffer writes and install a read probe
+(`machine.SetReadProbe`) to record, per program counter, which addresses
+each routine loads. (This replaced an earlier standalone Python emulator;
+the capability now lives in the tested shared model.)
 
 Package overview — game-specific (`extract/`): `fastload`
 (fastloader state machine), `fortgfx` (RLE decoder, charset/sprite/map
 extraction and PNG rendering), `cmd/gfxrender`. Shared (`c64tools/`):
 `tap` (TAP container), `cbmtape` (ROM-loader decoder), `mos6502`
-(disassembler + CPU emulator), `c64` (machine model), `gfx` (rendering
-primitives), `cmd/disprg`, `cmd/tapdump`.
+(disassembler + CPU emulator), `c64` (machine model with write log and
+read probe), `gfx` (rendering primitives), `cmd/disprg`, `cmd/tapdump`.
 
 # Appendix B — Strings and easter eggs
 

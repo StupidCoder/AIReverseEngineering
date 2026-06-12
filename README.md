@@ -47,9 +47,9 @@ AIReverseEngineering/
 ├── Elite (C64)/
 │   ├── Elite.tap               # raw tape image
 │   ├── Elite.md                # tape + loader + startup writeup (more to follow)
-│   ├── extract/                # module elite/extract — extraction + loading-screen tools
+│   ├── extract/                # module elite/extract — extraction + graphics tools
 │   ├── extracted/              # generated .prg files (regenerable; git-ignored)
-│   └── rendered/               # generated PNGs (loading screen)
+│   └── rendered/               # generated PNGs (loading screen, ship wireframes)
 │
 └── Fort Apocalypse (C64)/
     ├── Fort_Apocalypse.tap      # raw tape image
@@ -89,7 +89,7 @@ Verify a copy before reusing it, e.g. `md5 "Elite (C64)/Elite.tap"`
 | `cbmtape` | Decode the standard Commodore KERNAL (ROM loader) tape encoding: blocks, headers, and paired header+data files with checksum verification. |
 | `mos6502` | One opcode table driving both a `Disassemble` function and an executable `CPU` core (all documented opcodes, binary + BCD). |
 | `c64` | A minimal C64 machine model — RAM, the `mos6502` CPU, a CIA pulse-feed tape model, a PC-hook registry, a RAM write log and an optional read probe — for *running* a self-modifying loader instead of decoding it, or tracing which game routine touches which memory. Optional standard KERNAL tape hooks included. |
-| `gfx` | Generic rendering: the C64 palette, multicolor characters, hires sprites, multicolor bitmaps, marker drawing and PNG output. |
+| `gfx` | Generic rendering: the C64 palette, multicolor characters, hires sprites, multicolor bitmaps, line drawing, marker drawing, and still/animated PNG output. |
 | `cmd/disprg` | Disassemble a `.prg` file (2-byte load address + data), optionally over an address range. |
 | `cmd/tapdump` | Print a pulse-width histogram and the pause-delimited segment map of a `.tap` — the usual first look at an unknown tape. |
 

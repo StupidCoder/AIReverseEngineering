@@ -731,6 +731,29 @@ The view bitmap itself is at `$4000` (VIC bank 1, multicolor — Part III), the
 same RAM the loading picture used; once loading is done it becomes the live
 space view that the ship renderer draws into.
 
+### 1.6 Rendered models
+
+The `shiprender` tool (Appendix A) reads the decoded blueprints and draws them
+exactly as described above — projecting the vertices and applying the same
+back-face hidden-surface removal the game uses (an edge appears only when one of
+its two faces points towards the camera) — as white lines on black. It decodes
+32 of the 33 table entries (one slot is not a model) and writes a montage plus a
+rotating animation per ship:
+
+![All ship models](rendered/ships-montage.png)
+
+The animations spin each model around its up axis. Four examples — a faceted
+freighter hull, a flat angular hull, a sharp-nosed fighter, and a rounded
+many-faceted station-like hull (identified here only by blueprint type, since
+the in-game names are stored as encrypted text tokens not yet decoded):
+
+| ![type 10](rendered/ships/ship-10.png) | ![type 11](rendered/ships/ship-11.png) | ![type 19](rendered/ships/ship-19.png) | ![type 33](rendered/ships/ship-33.png) |
+|:--:|:--:|:--:|:--:|
+| type 10 | type 11 | type 19 | type 33 |
+
+(These are animated PNGs; they spin in any viewer that supports APNG — including
+GitHub's markdown — and show the first frame as a still everywhere else.)
+
 ---
 
 # Appendix A — Toolchain and reproduction
@@ -771,7 +794,10 @@ extract/extract -o extracted Elite.tap
 # 3. Render the multicolor-bitmap loading screen to rendered/loading-screen.png
 ( cd extract && go run ./cmd/loadingscreen -o ../rendered )
 
-# 4. Disassemble anything (shared tool, run by import path) — e.g. the
+# 4. Render the wireframe ships (rotating animated PNGs + a montage)
+( cd extract && go run ./cmd/shiprender -o ../rendered )
+
+# 5. Disassemble anything (shared tool, run by import path) — e.g. the
 #    getbit/getbyte routines at $0334 inside the boot file
 ( cd extract && go run stupidcoder.com/c64tools/cmd/disprg -start 0334 -end 0358 \
     ../extracted/00_cbm_ELITE_029f.prg )
@@ -787,8 +813,9 @@ actual program data listed in the segment table in Part I §1.
 
 Package overview — game-specific (`extract/`): `main.go` (write coalescing and
 file output), `driver.go` (the BASIC-stub driver and Elite-specific KERNAL
-hooks), `cmd/loadingscreen` (reassembles and renders the loading picture).
-Shared (`c64tools/`): `tap` (TAP container), `cbmtape` (ROM-loader decoder),
-`mos6502` (disassembler + CPU emulator), `c64` (machine model), `gfx`
-(rendering primitives, incl. the multicolor-bitmap renderer), `cmd/disprg`,
-`cmd/tapdump`.
+hooks), `shipmodel` (engine reconstruction + blueprint decoding),
+`cmd/loadingscreen` (reassembles and renders the loading picture),
+`cmd/shiprender` (wireframe ship animations). Shared (`c64tools/`): `tap` (TAP
+container), `cbmtape` (ROM-loader decoder), `mos6502` (disassembler + CPU
+emulator), `c64` (machine model), `gfx` (rendering primitives: multicolor
+bitmap, line drawing, animated-PNG output), `cmd/disprg`, `cmd/tapdump`.

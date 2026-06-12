@@ -22,9 +22,9 @@ learned in this analysis session, in reading order:
 * **Appendices** — toolchain and reproduction commands, all text
   strings and easter eggs, key routine/table reference.
 
-Methods: a Go extraction toolchain (`tapextract/`), a table-driven
-6502 disassembler (`tapextract/cmd/disprg`), a graphics renderer
-(`tapextract/cmd/gfxrender`), and an instrumented Python 6502 emulator
+Methods: a Go extraction toolchain (`extract/` plus the shared
+`c64tools/`), a table-driven 6502 disassembler (`c64tools/cmd/disprg`),
+a graphics renderer (`extract/cmd/gfxrender`), and an instrumented Python 6502 emulator
 (`emu.py`) that executed the real init/title/game path and logged all
 reads/writes to confirm the static analysis. All addresses are C64
 memory addresses; "frame" means one PAL frame.
@@ -1107,33 +1107,43 @@ class = 4 - (rank & 3) -> displayed as "<bird> CLASS <n>"
 
 # Appendix A — Toolchain and reproduction
 
-All tools live in the Go module `tapextract/` (plus `emu.py`):
+The game-specific tools live in the Go module `extract/` (plus
+`emu.py`); the reusable C64 building blocks live in the shared
+`c64tools` module at the repository root (see the root `README.md`).
+A `go.work` at the root ties them together.
 
 ```
+# All commands are run from this game folder ("Fort Apocalypse (C64)/").
+# The go.work workspace at the repository root lets the extract module find
+# the shared c64tools packages.
+
 # 1. Extract all program files from the raw tape image
-cd tapextract && go build -o tapextract . && cd ..
-tapextract/tapextract -o extracted -dis Fort_Apocalypse.tap
+( cd extract && go build -o extract . )
+extract/extract -o extracted -dis Fort_Apocalypse.tap
 #   -> extracted/FORT.prg, FORT-fast-7000.prg, FORT-fast-E000.prg,
 #      FORT-fast-EE00.prg (+ loader disassemblies with -dis)
 
-# 2. Disassemble anything
-cd tapextract && go run ./cmd/disprg -start 8927 -end 8A40 ../extracted/FORT-fast-7000.prg
+# 2. Disassemble anything (shared tool, run by import path)
+( cd extract && go run stupidcoder.com/c64tools/cmd/disprg -start 8927 -end 8A40 \
+    ../extracted/FORT-fast-7000.prg )
 
 # 3. Render charsets, level maps (with spawn markers) and sprites
-cd tapextract && go run ./cmd/gfxrender -o ../rendered -markers -scale 2 ../extracted/FORT-fast-7000.prg
+( cd extract && go run ./cmd/gfxrender -o ../rendered -markers -scale 2 ../extracted/FORT-fast-7000.prg )
 
 # 4. Dynamic verification: emulate init/title/game start, log all
 #    data readers and video writers, dump memory to emu_mem.bin
 python3 emu.py
 
-# run everything's tests
-cd tapextract && go test ./...
+# run this module's tests
+( cd extract && go test ./... )
 ```
 
-Package overview: `tap` (TAP container), `kernal` (ROM-loader
-decoder), `fastload` (fastloader state machine), `mos6502`
-(disassembler), `fortgfx` (RLE decoder, charset/sprite/map
-extraction and PNG rendering), `cmd/disprg`, `cmd/gfxrender`.
+Package overview — game-specific (`extract/`): `fastload`
+(fastloader state machine), `fortgfx` (RLE decoder, charset/sprite/map
+extraction and PNG rendering), `cmd/gfxrender`. Shared (`c64tools/`):
+`tap` (TAP container), `cbmtape` (ROM-loader decoder), `mos6502`
+(disassembler + CPU emulator), `c64` (machine model), `gfx` (rendering
+primitives), `cmd/disprg`, `cmd/tapdump`.
 
 # Appendix B — Strings and easter eggs
 

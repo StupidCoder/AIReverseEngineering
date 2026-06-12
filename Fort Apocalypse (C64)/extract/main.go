@@ -1,7 +1,7 @@
-// tapextract extracts program files from a C64 TAP tape image, including
+// extract extracts program files from a C64 TAP tape image, including
 // the payload of the Novaload-family fastloader used by Fort Apocalypse.
 //
-// Usage: tapextract [-o outdir] [-dis] [-v] file.tap
+// Usage: extract [-o outdir] [-dis] [-v] file.tap
 package main
 
 import (
@@ -11,10 +11,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"tapextract/fastload"
-	"tapextract/kernal"
-	"tapextract/mos6502"
-	"tapextract/tap"
+	"fortapoc/extract/fastload"
+	"stupidcoder.com/c64tools/cbmtape"
+	"stupidcoder.com/c64tools/mos6502"
+	"stupidcoder.com/c64tools/tap"
 )
 
 func main() {
@@ -23,11 +23,11 @@ func main() {
 	verbose := flag.Bool("v", false, "verbose block listing")
 	flag.Parse()
 	if flag.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: tapextract [-o outdir] [-dis] [-v] file.tap")
+		fmt.Fprintln(os.Stderr, "usage: extract [-o outdir] [-dis] [-v] file.tap")
 		os.Exit(2)
 	}
 	if err := run(flag.Arg(0), *outDir, *dis, *verbose); err != nil {
-		fmt.Fprintln(os.Stderr, "tapextract:", err)
+		fmt.Fprintln(os.Stderr, "extract:", err)
 		os.Exit(1)
 	}
 }
@@ -47,10 +47,10 @@ func run(path, outDir string, dis, verbose bool) error {
 	}
 
 	// Pass 1: standard KERNAL blocks (header/data pairs, each recorded twice).
-	blocks := kernal.ScanBlocks(img.Pulses)
+	blocks := cbmtape.ScanBlocks(img.Pulses)
 	lastKernalPulse := 0
 	var curName string
-	var curHeader *kernal.Header
+	var curHeader *cbmtape.Header
 	fileNo := 0
 	for _, b := range blocks {
 		if b.EndPulse > lastKernalPulse {
@@ -71,7 +71,7 @@ func run(path, outDir string, dis, verbose bool) error {
 			continue // extract from first copies only
 		}
 		if kind == "header" {
-			h, err := kernal.ParseHeader(b.Payload)
+			h, err := cbmtape.ParseHeader(b.Payload)
 			if err != nil {
 				return err
 			}
@@ -158,7 +158,7 @@ func run(path, outDir string, dis, verbose bool) error {
 	return nil
 }
 
-func copyNo(b kernal.Block) int {
+func copyNo(b cbmtape.Block) int {
 	if b.Repeat {
 		return 2
 	}

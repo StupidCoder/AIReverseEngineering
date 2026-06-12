@@ -1,0 +1,7 @@
+go 1.23
+
+use (
+	./c64tools
+	"./Elite (C64)/extract"
+	"./Fort Apocalypse (C64)/extract"
+)

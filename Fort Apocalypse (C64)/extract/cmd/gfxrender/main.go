@@ -10,7 +10,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"tapextract/fortgfx"
+	"fortapoc/extract/fortgfx"
+	"stupidcoder.com/c64tools/gfx"
 )
 
 func main() {
@@ -40,12 +41,12 @@ func run(path, outDir string, scale int, markers bool) error {
 	hudCS := game.HUDCharset()
 
 	p := filepath.Join(outDir, "charset-playfield.png")
-	if err := fortgfx.WritePNG(p, fortgfx.RenderCharset(playCS, game.MulticolorValue(0), scale*2)); err != nil {
+	if err := gfx.WritePNG(p, fortgfx.RenderCharset(playCS, game.MulticolorValue(0), scale*2)); err != nil {
 		return err
 	}
 	fmt.Println("wrote", p)
 	p = filepath.Join(outDir, "charset-hud.png")
-	if err := fortgfx.WritePNG(p, fortgfx.RenderCharset(hudCS, game.MulticolorValue(0), scale*2)); err != nil {
+	if err := gfx.WritePNG(p, fortgfx.RenderCharset(hudCS, game.MulticolorValue(0), scale*2)); err != nil {
 		return err
 	}
 	fmt.Println("wrote", p)
@@ -62,13 +63,13 @@ func run(path, outDir string, scale int, markers bool) error {
 		grid[i] = [][]byte{shapes[pair[0]-1], shapes[pair[1]-1]}
 	}
 	p = filepath.Join(outDir, "sprite-anim-helicopter.png")
-	if err := fortgfx.WritePNG(p, fortgfx.RenderSpriteGrid(grid, 7, scale*2, 2)); err != nil {
+	if err := gfx.WritePNG(p, gfx.RenderSpriteGrid(grid, 7, scale*2, 2)); err != nil {
 		return err
 	}
 	fmt.Printf("wrote %s (%d rows = banking poses full-left..full-right; each row: the pose's 2 rotor frames)\n", p, len(poses))
 
 	p = filepath.Join(outDir, "sprites-bullets.png")
-	if err := fortgfx.WritePNG(p, fortgfx.RenderSpriteSheet(game.BulletShapes(), 1, scale*2, 1)); err != nil {
+	if err := gfx.WritePNG(p, gfx.RenderSpriteSheet(game.BulletShapes(), 1, scale*2, 1)); err != nil {
 		return err
 	}
 	fmt.Println("wrote", p)
@@ -80,7 +81,7 @@ func run(path, outDir string, scale int, markers bool) error {
 		}
 		img := fortgfx.RenderMap(lm, playCS, game.MulticolorValue(level), scale, markers)
 		p := filepath.Join(outDir, fmt.Sprintf("map-level%d.png", level))
-		if err := fortgfx.WritePNG(p, img); err != nil {
+		if err := gfx.WritePNG(p, img); err != nil {
 			return err
 		}
 		fmt.Printf("wrote %s (player spawn %d,%d; %d prisoner spawn candidates; %d tank homes; %d enemy patrol points)\n",

@@ -30,7 +30,7 @@ import (
 	"fmt"
 	"sort"
 
-	"tapextract/tap"
+	"stupidcoder.com/c64tools/tap"
 )
 
 // bitThreshold mirrors the loader's timer test: timer A counts down from

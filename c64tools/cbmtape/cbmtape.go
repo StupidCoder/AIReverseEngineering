@@ -1,4 +1,4 @@
-// Package kernal decodes the standard Commodore KERNAL (ROM loader) tape
+// Package cbmtape decodes the standard Commodore KERNAL (ROM loader) tape
 // encoding from a TAP pulse stream.
 //
 // Encoding summary (PAL C64, cycles):
@@ -12,12 +12,12 @@
 //
 // Each record is: pilot (shorts), 9-byte countdown ($89..$81 first copy,
 // $09..$01 repeat copy), payload, 1 XOR checksum byte over the payload.
-package kernal
+package cbmtape
 
 import (
 	"fmt"
 
-	"tapextract/tap"
+	"stupidcoder.com/c64tools/tap"
 )
 
 // Pulse classes.
@@ -66,7 +66,7 @@ type Header struct {
 // ParseHeader interprets a 192-byte header payload.
 func ParseHeader(p []byte) (*Header, error) {
 	if len(p) != 192 {
-		return nil, fmt.Errorf("kernal: header payload is %d bytes, want 192", len(p))
+		return nil, fmt.Errorf("cbmtape: header payload is %d bytes, want 192", len(p))
 	}
 	return &Header{
 		Type:      p[0],

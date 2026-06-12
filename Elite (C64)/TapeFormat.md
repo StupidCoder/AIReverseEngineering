@@ -3,7 +3,7 @@
 Findings from a purely static analysis of `Elite.tap`. No external tools or
 references were used; everything below was derived from the bytes in the image
 and disassembly of the loader code it contains. The extraction tool in
-`tapextract/` is built directly on these findings.
+`extract/` is built directly on these findings.
 
 ## 1. TAP container
 
@@ -280,31 +280,34 @@ Net data rate of the turbo format is ≈ 190 bytes/s (9 pulses × ~570 µs
 average), roughly five times the effective rate of the ROM format with its
 duplicated blocks. There is **no checksum** on any turbo data.
 
-## 4. The extractor (`tapextract/`)
+## 4. The extractor (`extract/`)
 
 Because the wire format is rewritten on the fly by code that arrives on the
 wire itself, the extractor does not reimplement the protocol. Instead it
-**runs the actual loader** from the image:
+**runs the actual loader** from the image. Most of the machinery is shared
+with the other games in this repository via the `c64tools` module (see the
+root `README.md`); only the Elite-specific glue lives in `extract/`:
 
-1. `tap.go` parses the TAP container into pulses.
-2. `cbm.go` decodes the ROM-format boot file (checksum verified).
-3. `cpu.go`/`machine.go` run the boot code on a small 6502 emulator. The
-   only hardware modelled is what the loader touches: CIA1 FLAG edges fed
-   from the TAP pulse stream, and CIA2 timers A/B as pulse-width
-   discriminators against their latches. The handful of ROM entry points the
-   code calls are intercepted by PC and emulated in Go ($FCDB, $FCD1, $FCCA,
-   $FFD5/ILOAD, $FF90, and the BASIC statement loop $A7EA which drives the
-   `LOAD`/`LOAD`/`SYS` stub).
-4. Every memory write performed while tape pulses are being consumed is
-   logged; contiguous runs are coalesced into blocks and written out as
-   `.prg` files (one per contiguous region per tape segment), plus
+1. `c64tools/tap` parses the TAP container into pulses.
+2. `c64tools/cbmtape` decodes the ROM-format boot file (checksum verified).
+3. `c64tools/mos6502` (CPU) and `c64tools/c64` (machine model) run the boot
+   code on a small 6502 emulator. The only hardware modelled is what the
+   loader touches: CIA1 FLAG edges fed from the TAP pulse stream, and CIA2
+   timers A/B as pulse-width discriminators against their latches. The
+   standard KERNAL tape entry points ($FCDB, $FCD1, $FCCA, $FF90) are
+   provided by `c64tools/c64`; the Elite-specific hooks in `extract/driver.go`
+   add KERNAL LOAD ($FFD5/ILOAD) and the BASIC statement loop $A7EA, which
+   drives the loaded `LOAD`/`LOAD`/`SYS` stub.
+4. `extract/main.go` logs every memory write performed while tape pulses are
+   being consumed; contiguous runs are coalesced into blocks and written out
+   as `.prg` files (one per contiguous region per tape segment), plus
    `memory_final.bin` (the full 64 KB RAM image at the end) and `report.txt`
    (every block in load order).
 
 Usage:
 
 ```
-cd tapextract && go build && ./tapextract -o ../extracted ../Elite.tap
+cd extract && go build && ./extract -o ../extracted ../Elite.tap
 ```
 
 The run consumes all 801,536 pulses of the image; the emulated game ends up

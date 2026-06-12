@@ -4,9 +4,9 @@ import (
 	"os"
 	"testing"
 
-	"tapextract/fastload"
-	"tapextract/kernal"
-	"tapextract/tap"
+	"fortapoc/extract/fastload"
+	"stupidcoder.com/c64tools/cbmtape"
+	"stupidcoder.com/c64tools/tap"
 )
 
 // TestFortApocalypse verifies extraction of the real tape image end to end.
@@ -21,7 +21,7 @@ func TestFortApocalypse(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blocks := kernal.ScanBlocks(img.Pulses)
+	blocks := cbmtape.ScanBlocks(img.Pulses)
 	if len(blocks) != 4 {
 		t.Fatalf("got %d kernal blocks, want 4 (header+data, two copies each)", len(blocks))
 	}
@@ -30,7 +30,7 @@ func TestFortApocalypse(t *testing.T) {
 			t.Errorf("kernal block %d: checksum failed", i)
 		}
 	}
-	h, err := kernal.ParseHeader(blocks[0].Payload)
+	h, err := cbmtape.ParseHeader(blocks[0].Payload)
 	if err != nil {
 		t.Fatal(err)
 	}

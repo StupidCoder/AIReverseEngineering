@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"stupidcoder.com/c64tools/gfx"
 )
 
 func loadTestGame(t *testing.T) *Game {
@@ -164,7 +166,7 @@ func TestSprites(t *testing.T) {
 			t.Fatalf("shape %d: %d bytes", n, len(blk))
 		}
 		nonzero := false
-		for row := 0; row < SpriteH; row++ {
+		for row := 0; row < gfx.SpriteH; row++ {
 			if blk[row*3+2] != 0 {
 				t.Fatalf("shape %d row %d: third column not empty", n, row)
 			}
@@ -208,8 +210,8 @@ func TestSprites(t *testing.T) {
 			t.Errorf("pose %d: rotor frames identical (%v)", i, p)
 		}
 	}
-	grid := RenderSpriteGrid([][][]byte{{shapes[0], shapes[1]}, {shapes[2]}}, 7, 1, 1)
-	if grid.Bounds().Dx() != 2*SpriteW || grid.Bounds().Dy() != 2*SpriteH {
+	grid := gfx.RenderSpriteGrid([][][]byte{{shapes[0], shapes[1]}, {shapes[2]}}, 7, 1, 1)
+	if grid.Bounds().Dx() != 2*gfx.SpriteW || grid.Bounds().Dy() != 2*gfx.SpriteH {
 		t.Fatalf("grid bounds %v", grid.Bounds())
 	}
 
@@ -218,16 +220,16 @@ func TestSprites(t *testing.T) {
 		t.Errorf("bullet blocks wrong: % X / % X", bullets[0][:12], bullets[1][:12])
 	}
 
-	img := RenderSpriteSheet(shapes, 7, 1, 2)
-	if img.Bounds().Dx() != NumShapes*SpriteW*2 || img.Bounds().Dy() != SpriteH {
+	img := gfx.RenderSpriteSheet(shapes, 7, 1, 2)
+	if img.Bounds().Dx() != NumShapes*gfx.SpriteW*2 || img.Bounds().Dy() != gfx.SpriteH {
 		t.Fatalf("sheet bounds %v", img.Bounds())
 	}
 	// Shape 0 row 0 is empty -> background; some pixel of the
 	// helicopter body must be the sprite colour.
-	want := c64Palette[7]
+	want := gfx.Palette[7]
 	found := false
-	for x := 0; x < SpriteW*2 && !found; x++ {
-		for y := 0; y < SpriteH && !found; y++ {
+	for x := 0; x < gfx.SpriteW*2 && !found; x++ {
+		for y := 0; y < gfx.SpriteH && !found; y++ {
 			r, gg, b, _ := img.At(x, y).RGBA()
 			if byte(r>>8) == want.R && byte(gg>>8) == want.G && byte(b>>8) == want.B {
 				found = true
@@ -253,7 +255,7 @@ func TestRenderPNG(t *testing.T) {
 	}
 	dir := t.TempDir()
 	p := filepath.Join(dir, "map.png")
-	if err := WritePNG(p, img); err != nil {
+	if err := gfx.WritePNG(p, img); err != nil {
 		t.Fatal(err)
 	}
 	if fi, err := os.Stat(p); err != nil || fi.Size() == 0 {

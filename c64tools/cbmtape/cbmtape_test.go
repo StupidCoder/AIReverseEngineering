@@ -1,9 +1,9 @@
-package kernal
+package cbmtape
 
 import (
 	"testing"
 
-	"tapextract/tap"
+	"stupidcoder.com/c64tools/tap"
 )
 
 const (

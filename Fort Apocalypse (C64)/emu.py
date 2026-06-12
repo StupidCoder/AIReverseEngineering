@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Instrumented 6502 emulator to trace Fort Apocalypse game init."""
+"""Instrumented 6502 emulator to trace Fort Apocalypse game init.
+
+Kept as the documented dynamic-verification scratch tool used while writing
+Fort_Apocalypse.md (it logs every data reader and video writer along the real
+init/title/game path). For new work prefer the shared, tested Go core in
+c64tools/mos6502 (CPU) + c64tools/c64 (machine model); this script predates it
+and remains only to reproduce the trace cited in the documentation.
+"""
 import random, sys
 
 mem = bytearray(0x10000)

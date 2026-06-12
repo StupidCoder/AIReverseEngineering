@@ -14,8 +14,9 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/png"
 	"os"
+
+	"stupidcoder.com/c64tools/gfx"
 )
 
 const loadAddr = 0x7000
@@ -42,13 +43,8 @@ const (
 	heliAnimTable   = 0xA320 // 18 bytes: tilt -> sprite block (player & enemy)
 )
 
-const (
-	// NumShapes is the number of packed sprite shapes ($870F-$8906).
-	NumShapes = 14
-	// SpriteW/SpriteH are VIC hardware sprite dimensions in pixels.
-	SpriteW = 24
-	SpriteH = 21
-)
+// NumShapes is the number of packed sprite shapes ($870F-$8906).
+const NumShapes = 14
 
 const (
 	// MapWidth is the storage width: one 256-byte page per map row.
@@ -331,80 +327,13 @@ func (g *Game) HelicopterPoses() [][2]byte {
 	return poses
 }
 
-// c64Palette is the Pepto C64 palette.
-var c64Palette = [16]color.RGBA{
-	{0x00, 0x00, 0x00, 0xFF}, {0xFF, 0xFF, 0xFF, 0xFF}, {0x68, 0x37, 0x2B, 0xFF}, {0x70, 0xA4, 0xB2, 0xFF},
-	{0x6F, 0x3D, 0x86, 0xFF}, {0x58, 0x8D, 0x43, 0xFF}, {0x35, 0x28, 0x79, 0xFF}, {0xB8, 0xC7, 0x6F, 0xFF},
-	{0x6F, 0x4F, 0x25, 0xFF}, {0x43, 0x39, 0x00, 0xFF}, {0x9A, 0x67, 0x59, 0xFF}, {0x44, 0x44, 0x44, 0xFF},
-	{0x6C, 0x6C, 0x6C, 0xFF}, {0x9A, 0xD2, 0x84, 0xFF}, {0x6C, 0x5E, 0xB5, 0xFF}, {0x95, 0x95, 0x95, 0xFF},
-}
-
 // multicolor pixel-pair palette indices for the playfield:
 // 00 = $D021 (black), 01 = $D022 (per level), 10 = $D023 (white),
 // 11 = colour RAM (the playfield rows are mostly $0D = green).
 func mcPalette(d022 byte) [4]color.RGBA {
 	return [4]color.RGBA{
-		c64Palette[0], c64Palette[d022&0x0F], c64Palette[1], c64Palette[5],
+		gfx.Palette[0], gfx.Palette[d022&0x0F], gfx.Palette[1], gfx.Palette[5],
 	}
-}
-
-// drawChar renders one 8x8 multicolor char at (px,py), scale s.
-func drawChar(img *image.RGBA, glyph []byte, px, py, s int, pal [4]color.RGBA) {
-	for row := 0; row < 8; row++ {
-		b := glyph[row]
-		for pair := 0; pair < 4; pair++ {
-			c := pal[(b>>(6-2*pair))&3]
-			for dy := 0; dy < s; dy++ {
-				for dx := 0; dx < 2*s; dx++ {
-					img.SetRGBA(px+(pair*2)*s+dx, py+row*s+dy, c)
-				}
-			}
-		}
-	}
-}
-
-// RenderSpriteSheet renders sprite frames next to each other in one
-// row. Sprites are hires (1 bit per pixel) in this game; colorIdx is
-// the C64 sprite colour (the game uses 7 for the helicopters via
-// $D027, 1 for bullets via $D029-$D02B). xExpand stretches pixels
-// horizontally, matching the in-game X-expansion of sprites 0/1
-// ($D01D = $03). Scale s applies on top.
-func RenderSpriteSheet(frames [][]byte, colorIdx byte, s, xExpand int) *image.RGBA {
-	return RenderSpriteGrid([][][]byte{frames}, colorIdx, s, xExpand)
-}
-
-// RenderSpriteGrid renders several sprite-frame rows as a grid: within
-// a row the frames sit next to each other, rows are stacked. Used for
-// animation sheets where each row is one animation sequence.
-func RenderSpriteGrid(rows [][][]byte, colorIdx byte, s, xExpand int) *image.RGBA {
-	fw := SpriteW * xExpand * s
-	cols := 0
-	for _, r := range rows {
-		if len(r) > cols {
-			cols = len(r)
-		}
-	}
-	img := image.NewRGBA(image.Rect(0, 0, fw*cols, SpriteH*s*len(rows)))
-	c := c64Palette[colorIdx&0x0F]
-	bg := c64Palette[0]
-	for ri, frames := range rows {
-		for i, blk := range frames {
-			for row := 0; row < SpriteH; row++ {
-				for bit := 0; bit < SpriteW; bit++ {
-					px := bg
-					if blk[row*3+bit/8]&(0x80>>(bit%8)) != 0 {
-						px = c
-					}
-					for dy := 0; dy < s; dy++ {
-						for dx := 0; dx < xExpand*s; dx++ {
-							img.SetRGBA(i*fw+bit*xExpand*s+dx, (ri*SpriteH+row)*s+dy, px)
-						}
-					}
-				}
-			}
-		}
-	}
-	return img
 }
 
 // RenderCharset renders all 128 chars as a 16x8 grid, scale s.
@@ -412,7 +341,7 @@ func RenderCharset(charset []byte, d022 byte, s int) *image.RGBA {
 	pal := mcPalette(d022)
 	img := image.NewRGBA(image.Rect(0, 0, 16*8*s, 8*8*s))
 	for ch := 0; ch < 128; ch++ {
-		drawChar(img, charset[ch*8:ch*8+8], (ch%16)*8*s, (ch/16)*8*s, s, pal)
+		gfx.DrawChar(img, charset[ch*8:ch*8+8], (ch%16)*8*s, (ch/16)*8*s, s, pal)
 	}
 	return img
 }
@@ -430,77 +359,34 @@ func RenderMap(lm *LevelMap, charset []byte, d022 byte, s int, markers bool) *im
 	img := image.NewRGBA(image.Rect(0, 0, width*8*s, MapHeight*8*s))
 	for r := 0; r < MapHeight; r++ {
 		seam := int(lm.Cells[r][MapWidth-1])
-		drawChar(img, charset[seam*8:seam*8+8], 0, r*8*s, s, pal)
+		gfx.DrawChar(img, charset[seam*8:seam*8+8], 0, r*8*s, s, pal)
 		for c := 0; c < ContentWidth; c++ {
 			ch := int(lm.Cells[r][c])
-			drawChar(img, charset[ch*8:ch*8+8], (c+1)*8*s, r*8*s, s, pal)
+			gfx.DrawChar(img, charset[ch*8:ch*8+8], (c+1)*8*s, r*8*s, s, pal)
 		}
 	}
 	if markers {
-		cyan, yellow, lightRed := c64Palette[3], c64Palette[7], c64Palette[10]
+		cyan, yellow, lightRed := gfx.Palette[3], gfx.Palette[7], gfx.Palette[10]
 		for _, p := range lm.PrisonerSpawns {
 			// the floor pattern is 2 cells wide; the prisoner himself
 			// is 2 chars tall (torso drawn one row above the leg cell)
-			frameCell(img, p.Col+1, p.Row-1, 2, 2, s, yellow)
+			gfx.FrameCell(img, p.Col+1, p.Row-1, 2, 2, s, yellow)
 		}
 		for _, p := range lm.TankHomes {
 			// 3-cell body plus the turret row above
-			frameCell(img, p.Col+1, p.Row-1, 3, 2, s, lightRed)
+			gfx.FrameCell(img, p.Col+1, p.Row-1, 3, 2, s, lightRed)
 		}
-		lightGreen := c64Palette[13]
+		lightGreen := gfx.Palette[13]
 		for _, p := range lm.EnemySpawns {
-			frameCell(img, p.Col+1, p.Row, 4, 3, s, lightGreen)
+			gfx.FrameCell(img, p.Col+1, p.Row, 4, 3, s, lightGreen)
 		}
-		white := c64Palette[1]
+		white := gfx.Palette[1]
 		for _, p := range lm.DropPoints {
-			drawCircle(img, ((p.Col+1)*8+4)*s, (p.Row*8+4)*s, 6*s, s, white)
+			gfx.DrawCircle(img, ((p.Col+1)*8+4)*s, (p.Row*8+4)*s, 6*s, s, white)
 		}
 		// The helicopter's visual footprint: 16x18 used sprite pixels,
 		// X-expanded = 4 chars wide, ~3 chars tall, from the left edge.
-		frameCell(img, lm.PlayerSpawn.Col+1, lm.PlayerSpawn.Row, 4, 3, s, cyan)
+		gfx.FrameCell(img, lm.PlayerSpawn.Col+1, lm.PlayerSpawn.Row, 4, 3, s, cyan)
 	}
 	return img
-}
-
-// drawCircle draws a hollow circle of radius r px and line thickness t
-// centered at (cx,cy), matching the frame markers' line weight.
-func drawCircle(img *image.RGBA, cx, cy, r, t int, c color.RGBA) {
-	inner := (r - t) * (r - t)
-	for dy := -r; dy <= r; dy++ {
-		for dx := -r; dx <= r; dx++ {
-			d := dx*dx + dy*dy
-			if d <= r*r && d >= inner {
-				img.SetRGBA(cx+dx, cy+dy, c)
-			}
-		}
-	}
-}
-
-// frameCell draws a rectangle around a w x h cell area at (col,row).
-func frameCell(img *image.RGBA, col, row, w, h, s int, c color.RGBA) {
-	x0, y0 := col*8*s-s, row*8*s-s
-	x1, y1 := (col+w)*8*s+s-1, (row+h)*8*s+s-1
-	for t := 0; t < s; t++ {
-		for x := x0; x <= x1; x++ {
-			img.SetRGBA(x, y0+t, c)
-			img.SetRGBA(x, y1-t, c)
-		}
-		for y := y0; y <= y1; y++ {
-			img.SetRGBA(x0+t, y, c)
-			img.SetRGBA(x1-t, y, c)
-		}
-	}
-}
-
-// WritePNG encodes img to path.
-func WritePNG(path string, img image.Image) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if err := png.Encode(f, img); err != nil {
-		return err
-	}
-	return f.Close()
 }

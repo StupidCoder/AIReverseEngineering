@@ -55,7 +55,9 @@ AIReverseEngineering/
 ├── README.md                   # this file
 ├── tools/                      # shared tooling (module stupidcoder.com/tools)
 │   ├── mos6502/                #   6502 disassembler + executable CPU core (any 6502 platform)
+│   ├── m68k/                   #   Motorola 68000 disassembler (any 68k platform)
 │   ├── cmd/disprg/             #   linear disassembler for a .prg file (6502)
+│   ├── cmd/dis68k/             #   linear disassembler for a raw 68000 blob
 │   ├── cmd/codetrace/          #   recursive-descent disassembler (code/data separation)
 │   ├── c64/                    #   C64-specific tools
 │   │   ├── tap/                #     TAP container parser + segmentation
@@ -113,7 +115,9 @@ per-platform subfolder (`c64/`, `amiga/`, …).
 | Package / command | What it does |
 |-------------------|--------------|
 | `mos6502` | One opcode table driving both a `Disassemble` function and an executable `CPU` core (all documented opcodes, binary + BCD) — usable by any 6502 platform. |
+| `m68k` | Motorola 68000 disassembler with the same surface as `mos6502`: a `Decode` returning one classified instruction (length, text, and a `Flow` category for recursive-descent tracing) plus a `Disassemble` helper. Covers the documented 68000 instruction set and all addressing modes; usable by any 68k platform (Amiga, ST, Genesis, …). |
 | `cmd/disprg` | Linear disassembler for a `.prg` file (2-byte load address + data), optionally over an address range. |
+| `cmd/dis68k` | Linear disassembler for a raw 68000 code blob loaded at a given base address (`-skip` steps past an AmigaDOS hunk header). |
 | `cmd/codetrace` | Recursive-descent disassembler: from given entry points (and seeded jump tables) it follows every branch/jump/call, marks reachable code vs data, lists routines and unresolved indirect jumps — so tables and graphics aren't mis-decoded as instructions. |
 | `c64/tap` | Parse a TAP v0/v1 image (C64/C16) into a pulse stream; `Segmentize` splits it at pauses. |
 | `c64/cbmtape` | Decode the standard Commodore KERNAL (ROM loader) tape encoding: blocks, headers, and paired header+data files with checksum verification. |
@@ -169,11 +173,14 @@ cd "Fort Apocalypse (C64)/extract" && go build && \
 Extracting a *new* game means writing a new per-game `extract` tool on top of
 `tools` (see "Two extraction strategies" below), not reusing one of these.
 
-Disassemble any extracted file with the shared tool:
+Disassemble any extracted file with the shared tools — `disprg` for 6502,
+`dis68k` for 68000 (`-skip` steps past an Amiga hunk header):
 
 ```sh
 go run stupidcoder.com/tools/cmd/disprg -start 8927 -end 8A40 \
     "Fort Apocalypse (C64)/extracted/FORT-fast-7000.prg"
+
+go run stupidcoder.com/tools/cmd/dis68k -skip 36 amiga-code-hunk.bin
 ```
 
 ## Two extraction strategies

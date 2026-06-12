@@ -2,8 +2,9 @@
 
 A reverse-engineering reference for `Elite.tap` (the tape carries a single
 autostarting file named "ELITE"). So far it covers the tape image, the
-self-modifying copy-protection loader and the game program's startup, with the
-graphics and mechanics parts to follow, in reading order:
+self-modifying copy-protection loader, the game program's startup and the ship
+graphics, with the remaining data formats and mechanics to follow, in reading
+order:
 
 * **Part I** — the TAP container and both tape encodings (standard KERNAL and
   the custom fastloader), enough to extract every byte from the raw image;
@@ -13,7 +14,9 @@ graphics and mechanics parts to follow, in reading order:
 * **Part III** — the game program's startup: the layered decryption, the
   relocation of the engine, the hardware and interrupt setup, and the memory
   map after loading;
-* *(Parts IV onward — graphics and game mechanics — to come.)*
+* **Part IV** — graphics and data formats; so far the wireframe ship models
+  (their blueprint structure and the vector-drawing pipeline);
+* *(more of Part IV, and game mechanics, to come.)*
 * **Appendices** — toolchain and reproduction.
 
 Methods: purely static analysis of the image bytes — no external tools or
@@ -534,6 +537,199 @@ bitmap RAM for the game, restores the KERNAL vectors and jumps to `$1D1F`.
 
 The image above was produced by the `loadingscreen` tool (Appendix A), which
 reassembles the three segments and renders the multicolor bitmap.
+
+---
+
+# Part IV — Graphics and data formats
+
+## 1. Ship models
+
+Elite's ships are filled-edge **wireframe vector models**: each is a list of
+3-D vertices joined by edges, with face normals used to hide the back. All of
+the model data lives in the engine block that the loader hid under the I/O area
+at `$D000–$EFFF` (Part III §1), so the routines that read it bank ROM/I-O out
+first.
+
+### 1.1 The blueprint table
+
+A pointer table of 16-bit little-endian addresses, indexed by ship type × 2,
+sits at `$CFFE` (so type *T*'s blueprint address is at `$CFFE + T*2`; type 1 is
+the first real entry, at `$D000`). There are **33 ship types**, with blueprints
+packed from `$D0A5` to about `$EE2D`:
+
+```
+type  1: $D0A5     type 12: $DA4B     type 23: $E45B
+type  2: $D1A3     type 13: $DB3D     type 24: $E50B
+...                ...                ...
+type 11: $D8C3     type 22: $E395     type 33: $EE2D
+```
+
+The table is read by the spawn routine (`$855B`, NWSHP) and the per-ship draw
+path (`$2030` → `$ABA0`), each doing `LDA $CFFE,Y / STA $57 ; LDA $CFFF,Y / STA
+$58` to point a zero-page vector (`$57/$58`) at the chosen blueprint.
+
+### 1.2 Blueprint layout
+
+Each blueprint is a 20-byte header followed by three packed arrays — vertices,
+edges, faces:
+
+```
++0           flags (laser/missile/AI bits)
++1 +2        targetable area (16-bit: bounding-radius², for laser hits)
++3           EDGES offset  (byte offset from blueprint start to the edge array)
++4           FACES offset  (low byte of the offset to the face array)
++5           visibility distance / model "size" (drawn as a dot beyond this)
++9           number of edges (NE)
++0E +0F      level-of-detail / max-size attributes (read by NWSHP and MVEIT)
++13          AI / energy attributes
+... (remaining bytes: scaling and AI/economy attributes)
+```
+
+The header carries no explicit vertex or face count; both are derived from the
+offsets, because every array has a fixed record size:
+
+```
+vertices start at offset 20           NV = (EDGES_offset − 20) / 6
+edges    start at EDGES_offset         NE = header[+9]   (= FACES_offset − EDGES_offset, /4)
+faces    start at FACES_offset         NF = (blueprint_length − FACES_offset) / 4
+```
+
+This was confirmed two ways. First, **header[+9] equals (FACES−EDGES)/4** on
+26 of the 33 ships (the other seven are large models whose face offset exceeds
+255, so the single header byte at +4 holds only the low byte — the true offset
+is still `EDGES_offset + NE*4`). Second, the resulting vertex/edge/face counts
+satisfy **Euler's polyhedron formula V − E + F = 2** for every model that is
+stored contiguously, e.g.:
+
+| type | NV | NE | NF | V−E+F |
+|------|----|----|----|-------|
+| 1    | 17 | 24 | 9  | 2     |
+| 2    | 16 | 28 | 14 | 2     |
+| 9    | 19 | 30 | 13 | 2     |
+| 13   | 13 | 24 | 13 | 2     |
+
+**Vertex record — 6 bytes:**
+
+```
++0  |x|        magnitude of the x coordinate
++1  |y|        magnitude of the y coordinate
++2  |z|        magnitude of the z coordinate (depth; ships point along +z)
++3  %sss vvvvv bits 7-5 = sign of x,y,z; bits 4-0 = visibility distance
++4  %aaaa bbbb two face numbers (nibbles) this vertex belongs to
++5  %cccc dddd two more face numbers
+```
+
+The four face references let the projector decide a vertex is visible if **any**
+of its faces is visible. The visibility-distance field is level-of-detail: fine
+detail vertices carry a small value and are only drawn close up.
+
+**Edge record — 4 bytes:**
+
+```
++0  visibility distance (skip the edge when the ship is further than this)
++1  %aaaa bbbb the two faces on either side of the edge (nibbles)
++2  vertex 1 number × 4
++3  vertex 2 number × 4
+```
+
+Vertex numbers are pre-multiplied by 4 because the projected screen coordinates
+are stored 4 bytes per vertex (x and y as 16-bit words) in a work buffer, so the
+stored value indexes that buffer directly. An edge is drawn only if at least one
+of its two faces is currently visible.
+
+**Face record — 4 bytes:**
+
+```
++0  %sss vvvvv bits 7-5 = sign of the normal's x,y,z; low bits = visibility/illum
++1  |normal_x|
++2  |normal_y|
++3  |normal_z|
+```
+
+The signed normal vector is dotted with the vector from the ship to the viewer;
+a positive result means the face points towards the camera and is visible. This
+back-face test is what makes the wireframe look solid — only the front edges are
+drawn.
+
+### 1.3 Worked example — type 1
+
+```
+header:  00 40 06 7a da 55 00 0a 66 18 00 00 24 0e 02 2c 00 00 02 00
+         └+0   └+1+2  └+3 └+4 └+5       └+9
+```
+
+`+3 = $7A (122)` → vertices = (122−20)/6 = **17**.
+`+4 = $DA (218)`, `+9 = $18 (24)` → edges = (218−122)/4 = **24**.
+blueprint is 254 bytes → faces = (254−218)/4 = **9**.  17 − 24 + 9 = 2. ✓
+
+```
+vertex 0:  00 00 44 1f 10 32   (0, 0, 68); signs +,+,+; vis 31; faces {1,0,3,2}
+vertex 1:  08 08 24 5f 21 54   (8, -8, 36); sign of y set; vis 31; faces {2,1,5,4}
+edge 0:    1f 21 00 04         vis 31; faces 2,1; vertices 0 and 1 (00/4, 04/4)
+face 0:    9f 40 00 10         normal (-64, 0, 16) (x sign set); always visible
+```
+
+Vertex 0 at (0, 0, 68) sits on the +z axis — the model's nose — shared by four
+faces, exactly as expected for a pointed ship.
+
+### 1.4 The rendering pipeline
+
+Drawing one ship runs through these stages (all addresses below are also in the
+table in §1.5):
+
+1. **Per-ship setup (`$2030`).** The ship's 37-byte state block is copied from
+   its universe slot into the zero-page workspace at `$0009`, and its blueprint
+   pointer is loaded into `$57/$58`.
+2. **Rotate & cull-by-distance (`$ABA0`, MVEIT).** The ship's orientation
+   vectors are applied; the model "size" is clamped against header byte `+0F`
+   for level-of-detail, and far ships are dropped or reduced.
+3. **Project & build the line heap (`$A3A0`, LL9).** Each vertex is rotated into
+   view space and perspective-projected (the depth divide) to a screen x,y,
+   stored 4 bytes per vertex. Faces are back-face tested with their normals;
+   each edge whose face(s) are visible and whose visibility distance passes is
+   appended to the ship's **line heap at `$0580`** as a 4-byte record
+   `(x1, y1, x2, y2)`. The heap begins with a length byte.
+4. **Draw the heap.** The line-list drawer (`$AA72`) walks the heap — a count
+   followed by 4-byte endpoint records — calling the **LINE** routine for each.
+5. **LINE (`$B49D`).** A Bresenham line drawn into the multicolor space-view
+   bitmap at `$4000`. The major/minor axis split is handled at `$B814`; the
+   gradient comes from the reciprocal tables at `$9C00–$9F00`; the bitmap byte
+   address is formed from the row tables `$A000` (low) / `$A100` (high) plus
+   `(x & $F8)`; the inner plot loop EORs pixels (relocated, at `$8888`).
+   Single points (stars, distant ships) instead use **PIXEL (`$2911`)**, which
+   plots a 1-, 2- or 4-pixel dot depending on distance (`$A1`), using the
+   2-bit multicolor masks at `$28C5`.
+
+Because lines are plotted with EOR, the previous frame's ship can be erased by
+drawing the same line heap again before the new one is built — the standard
+Elite flicker-free redraw.
+
+### 1.5 Routine and data map (ship rendering)
+
+| address | name | role |
+|---------|------|------|
+| `$CFFE` | XX21 | blueprint pointer table (33 ships, word per type×2) |
+| `$D0A5–$EE2D` | — | the 33 ship blueprints (under I/O) |
+| `$0580` | line heap | per-ship list of projected line segments |
+| `$0009–$002D` | workspace | the active ship's 37-byte state block (INWK) |
+| `$2030` | — | per-ship processor: slot↔workspace copy, fetch blueprint, call MVEIT |
+| `$ABA0` | MVEIT | rotate ship, level-of-detail/visibility, dispatch draw |
+| `$A3A0` | LL9 | project vertices, back-face cull, build the line heap |
+| `$855B` | NWSHP | create a ship in a universe slot (reads blueprint attrs +5,+0E,+0F,+13) |
+| `$AA72` | — | draw a line list (count + 4-byte `x1,y1,x2,y2` records) via `$2A` |
+| `$B49D` | LINE | draw one Bresenham line into the view bitmap (multicolor) |
+| `$B814` | — | LINE's steep-axis (dy>dx) variant |
+| `$8888` | — | LINE inner EOR plot loop (relocated under I/O) |
+| `$2911` | PIXEL | plot a distance-scaled point (1/2/4 px) to the view bitmap |
+| `$9C00–$9F00` | — | reciprocal/gradient tables used by LINE |
+| `$A000 / $A100` | — | bitmap scanline address tables (low / high byte) |
+| `$28B7` | — | 8-bit hires pixel-mask table |
+| `$28C5` | — | multicolor 2-bit dot-mask table (used by PIXEL) |
+| `$8DBB` | DORND | random-number generator |
+
+The view bitmap itself is at `$4000` (VIC bank 1, multicolor — Part III), the
+same RAM the loading picture used; once loading is done it becomes the live
+space view that the ship renderer draws into.
 
 ---
 

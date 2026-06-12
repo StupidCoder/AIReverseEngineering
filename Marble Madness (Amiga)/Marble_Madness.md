@@ -22,8 +22,8 @@ built for it in the shared `tools/` module — the AmigaDOS reader
 (`tools/amiga/adf`), the disassemblers (`tools/cmd/dis68k`,
 `tools/cmd/codetrace68k`) and an instruction-level 68000 execution core
 (`tools/m68k`) for dynamic verification. All addresses are 68000 addresses;
-sizes are `.b`/`.w`/`.l` (8/16/32-bit). Only Part I is written so far; the rest
-are stubs to be filled in.
+sizes are `.b`/`.w`/`.l` (8/16/32-bit). Parts I and II are complete and Part IV
+is under way; Parts III and V are still stubs.
 
 ---
 
@@ -41,6 +41,7 @@ are stubs to be filled in.
 - [Part IV — Graphics and data formats](#part-iv--graphics-and-data-formats)
   - [1. The splash (boot) screen](#1-the-splash-boot-screen)
   - [2. The Workbench icons](#2-the-workbench-icons)
+  - [3. The per-course sprite banks (`.ilb`)](#3-the-per-course-sprite-banks-ilb)
 - [Part V — Game mechanics](#part-v--game-mechanics)
 - [Appendix A — Toolchain and reproduction](#appendix-a--toolchain-and-reproduction)
 
@@ -255,10 +256,10 @@ setup, and the memory map during play.
 
 # Part IV — Graphics and data formats
 
-The per-course modules (`.mlb`/`.ilb`/`.vlb`/`Snd`/`Track`) are still to be
-decoded. What is done here is the *boot-time* graphics — the title splash and
-the Workbench icons — because they use standard Amiga formats that the toolchain
-can already read end to end.
+The boot-time graphics use standard Amiga formats the toolchain already reads end
+to end — the title splash (§1) and the Workbench icons (§2). §3 starts on the
+game's own formats with the per-course sprite banks (`.ilb`); the remaining
+per-course modules (`.mlb`, `.vlb`, `Snd`, `Track`) are still to be decoded.
 
 ## 1. The splash (boot) screen
 
@@ -306,9 +307,71 @@ label.
 
 ![Disk icon](rendered/icon-disk.png)
 
+## 3. The per-course sprite banks (`.ilb`)
+
+Each course carries an `.ilb` (an "image library") holding its sprites — the
+marble and that course's creatures and objects. Their sizes track how much each
+course needs: the Silly and Ultimate courses share a minimal four-sprite set
+(466 bytes), while Aerial packs sixty-three (35 KB).
+
+**The container.** Every `.ilb` has the same layout, confirmed across all six
+files: a 4-byte header, a table of fixed 15-byte image descriptors, then the
+packed bitmap data.
+
+```
++0   byte   flag (9 on the lighter banks, 13 on the heavier)
++1   word   image count (big-endian)
++3   byte   $01
++4   …      count × 15-byte descriptor records
+            └ data section begins at 4 + count*15
+```
+
+The image count drives the layout — Silly/Ultimate 4, Practice 10, Beginner 21,
+Intermediate 23, Aerial 63 — and in every file the data section begins exactly at
+`4 + count×15`, opening with the tell-tale left-aligned bitmap ramp
+(`80 C0 E0 F0 F8 FC FE FF`):
+
+```
+silly.ilb  (count 4):  data @64  = 00 C0 00 C0 00 80 00 E0 …
+aerial.ilb (count 63): data @949 = C0 00 80 00 FE FF E0 00 …
+```
+
+**The descriptors.** Each 15-byte record describes one sprite. The first four of
+`silly.ilb`:
+
+```
+01 00  01 00  21 00 42  FE 00  00 52  F9  00  FF 01
+05 00  01 00  21 00 42  FE 00  00 D6  F9  00  FF 01
+09 00  01 00  21 00 42  00 00  01 5A  F9  00  FF 01
+09 00  01 00  21 00 42  00 00  01 DE  D9  00  08 80
+```
+
+Two things stand out. Bytes 9–10 hold a 16-bit value that increases by a constant
+**132** from one record to the next (`$0052 → $00D6 → $015A → $01DE`); a constant
+stride means a fixed-size slot. And the recurring `21 00 42` is `$21`=**33** and
+`$42`=**66** = 2×33. Together they pin the sprite geometry: a 16-pixel-wide object
+**33 rows tall at 2 bitplanes** is 33 × 2 bytes × 2 planes = **132 bytes** — a
+small blitter object, one per slot. (A 16×16, 4-plane object is also 132; the
+descriptor's 33/66 favour the taller form.) The remaining descriptor fields — a
+small index that steps `01/05/09…`, a signed `FE 00`, and the trailing flag bytes
+— read provisionally as the sprite's placement and draw flags.
+
+**The bitmap data is run-length packed.** The data section is not raw planar
+bytes: it interleaves the bitmap ramps with `FE`-prefixed escape codes
+(`FE 00 53`, `FE FF E0`, …), so each object is compressed and its packed record is
+variable length — which is why the per-sprite byte cost differs so much between
+courses. Rendering the data at any fixed width shows recognisable sprite fragments
+broken up by those control bytes, confirming it is sprite graphics rather than,
+say, a display list.
+
+So the container, the per-sprite 132-byte slot and the object geometry are
+established; the one remaining piece is the exact unpacking rule for the
+run-length stream, which is what would let each sprite be extracted pixel-perfect
+and rendered the way the splash and icons are above.
+
 ---
 
-*The per-course `.mlb`/`.ilb`/`.vlb` and `Snd`/`Track` formats are to follow.*
+*The per-course `.mlb`, `.vlb`, `Snd` and `Track` formats are to follow.*
 
 ---
 

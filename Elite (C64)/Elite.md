@@ -842,17 +842,41 @@ the length, then each pair is chosen by five seed-derived bits indexing the
 first 32 pairs of the digram table. "Lave" = pairs `LA` + `VE`; "Diso" =
 `DI` + `SO`; the bits come straight from the system's seed.
 
-### 2.5 The rest of a system
+### 2.5 Coordinates — the same seed/generator
 
-The same seed/generator produces the system's other attributes. The galaxy-chart
-routine at `$81C6` reseeds `$02–$05` from the system seed and derives the map
-coordinates through `$8264` (DORND, then a signed scale via `$39E7` and the
-`$9B/$9C` accumulator), plotting each system as a dot with the `PIXEL` routine
-(`$2937`). Economy, government, tech level, population and productivity are
-extracted the same way — successive bit-fields pulled from the twisting seed —
-so two players on different machines explore byte-for-byte identical galaxies.
+The seeded-dot routines at `$81C6` and `$8300` show the same machinery used for
+position: each reseeds `$02–$05` from a stored seed (the bytes EOR-`$AA`), then
+derives an on-screen coordinate through `$8264` (DORND followed by a signed
+scale via `$39E7` and the `$9B/$9C` accumulator) and plots it with `PIXEL`
+(`$2937`). This is how the deterministic star/dust field — and the dots on the
+star charts — are produced from a seed rather than stored.
 
-### 2.6 Routine and data map (universe generation)
+### 2.6 Not yet traced: the enumeration and the galaxy transform
+
+Two parts of the universe generator resisted static tracing in this pass and are
+**not** claimed here:
+
+- **System enumeration** — the step that advances from one system's seed to the
+  next, walking out the 256 systems of a galaxy. A useful *negative* result: the
+  C64 port does **not** use the classic 6-byte seed-shift twist — that
+  instruction cascade is absent from the entire 64 KB image. Generation instead
+  runs through the 4-byte DORND RNG (§2.3), but the exact fixed advance per
+  system was not pinned down.
+- **The per-galaxy transform** — how the galactic hyperdrive turns one galaxy's
+  seed into the next.
+- The bit-field extraction of the non-name attributes (economy, government, tech
+  level, population, productivity) was likewise not verified.
+
+The seed flow is deliberately hard to follow: the seed is never referenced by
+its address (the commander block is copied wholesale), generation shares the
+general-purpose RNG rather than a dedicated twist, text uses self-modifying token
+dispatch, and the core logic was relocated under the I/O area (Part III §1) next
+to data that disassembles into misleading instructions. Pinning these down most
+likely needs **dynamic** tracing — running the loaded game under the emulator to
+the star-chart screen and watching the seed reads/writes with the `c64`
+read-probe — which is a separate effort.
+
+### 2.7 Routine and data map (universe generation)
 
 | address | role |
 |---------|------|
@@ -866,11 +890,12 @@ so two players on different machines explore byte-for-byte identical galaxies.
 | `$24CB` | planet-name generator (1–4 digram pairs from the seed) |
 | `$8111` | recursive message-token expander (EOR `$23` at `$813B`) |
 | `$8100` | digram-token expander (pairs from `$2563`) |
-| `$81C6` | galaxy chart: reseed per system (`$81F3`), derive coordinates, plot dots |
+| `$81C6`, `$8300` | seeded-dot plotters (star/dust field, chart dots): reseed `$02–$05` (`$81F3`/`$832B`), derive coordinates, plot via `PIXEL` |
 
 So the answer to "are the names stored or generated?" is firmly **generated**:
-six seed bytes and a Fibonacci twist, with a 90-byte letter-pair table as the
-only stored fragment of any name.
+the seed plus a Fibonacci RNG, with a 90-byte letter-pair table as the only
+stored fragment of any name. The deeper enumeration and per-galaxy transform are
+flagged as open in §2.6.
 
 ---
 

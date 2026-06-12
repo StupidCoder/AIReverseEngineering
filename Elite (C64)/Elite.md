@@ -987,10 +987,37 @@ Decoding each byte in turn:
 | `$00` | end of string | — |
 
 Concatenated: `RA·DI·O·A·C·TI·VE·S` → **RADIOACTIVES**. Four digram tokens and
-three literals encode a twelve-letter word in eight bytes — the same trick that
-makes the planet names (§2) and the mission briefings (Part V §12) compact. The
-briefings additionally use the control-code inserts of the `$0E00` table; the
-tool `extract/cmd/missiontext` expands them end to end.
+three literals encode a twelve-letter word in eight bytes.
+
+**A recursive example — "MULTI-GOVERNMENT".** RADIOACTIVES used only digrams and
+literals; recursion appears when a token's bytes reference *another* token. The
+government type at `$077B` is six stored bytes:
+
+```
+stored:  6E 76 6F B4 0E 81
+EOR $23: 4D 55 4C 97 2D A2
+```
+
+| byte | rule | output |
+|------|------|--------|
+| `$4D` `$55` `$4C` | literals | `M` `U` `L` |
+| `$97` | digram `23` | `TI` |
+| `$2D` | literal | `-` |
+| `$A2` | nested token `$A2 − $A0 = 2` | → expand token #2 here |
+
+The last byte is ≥ `$A0`, so rather than a letter it names **token #2**, and the
+printer recurses into it. Token #2 at `$070A` is itself stored (after EOR-`$23`)
+as `47 4F 96 52 4E 4D 92 54` = `G·O·`+digram `VE`+`R·N·M·`+digram `EN`+`T` →
+**GOVERNMENT**. So the whole expansion is `MUL` + `TI` + `-` + ⟨token 2⟩ →
+**MULTI-GOVERNMENT**: fifteen characters from six stored bytes, because the
+common word "GOVERNMENT" is stored once (token #2, also used on its own as a
+screen label) and merely *referenced* here. That reference-and-recurse is what
+lets one shared fragment — "GOVERNMENT", or the "COM" that begins COMMANDER,
+COMMUNIST and COMPUTERS — serve many entries at once.
+
+This is the same trick that makes the planet names (§2) and the mission briefings
+(Part V §12) compact. The briefings additionally use the control-code inserts of
+the `$0E00` table; the tool `extract/cmd/missiontext` expands them end to end.
 
 ### 3.2 The game's vocabulary
 

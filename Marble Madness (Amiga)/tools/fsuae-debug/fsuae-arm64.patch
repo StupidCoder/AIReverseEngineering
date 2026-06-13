@@ -34,10 +34,25 @@ index 607ff32..c38bd32 100644
  #define CPU_arm 1
  #elif defined(__powerpc__) || defined(__ppc__) || defined(_M_PPC)
 diff --git a/src/remote_debug/remote_debug.cpp b/src/remote_debug/remote_debug.cpp
-index 54f2684..2246d2a 100644
+index 54f2684..d73932e 100644
 --- a/src/remote_debug/remote_debug.cpp
 +++ b/src/remote_debug/remote_debug.cpp
-@@ -2776,6 +2776,15 @@ static void remote_debug_ (void)
+@@ -309,8 +309,12 @@ static void remote_debug_init_ (int port, int time_out)
+ 
+ 	fs_log("[REMOTE_DEBUGGER] remote debugger active\n");
+ 
+-	debugmem_enable_stackframe(true);
+-	debugmem_trace = true;
++	// Stack-frame tracking and debugmem tracing hook every call/return and add
++	// heavy per-instruction overhead that slows emulation enough to stall the
++	// floppy boot. Not needed for memory/register/breakpoint capture, so leave
++	// them off (can be re-enabled if a stack view is ever required).
++	debugmem_enable_stackframe(false);
++	debugmem_trace = false;
+ 	remote_debugging = 1;
+ 	// if time_out > 0 we wait that number of seconds for a connection to be made. If
+ 	// none has been done within the given time-frame we just continue
+@@ -2776,6 +2780,15 @@ static void remote_debug_ (void)
  					break;
  				}
  
@@ -53,3 +68,17 @@ index 54f2684..2246d2a 100644
  				if (is_quiting())
  				{
  					if (log_remote_protocol_enabled) {
+@@ -2847,6 +2860,13 @@ static void remote_debug_update_ (void)
+     remote_activate_debugger ();
+ 	//exception_debugging = 0;
+ 
++	// remote_debug_() can tear down the connection (is_quiting path destroys
++	// s_conn and sets it to 0). Without re-checking, the rconn_poll_read below
++	// dereferences a NULL rconn* -> SIGSEGV (KERN_INVALID_ADDRESS at 0x8). This
++	// is the crash that fired on every emulator shutdown/disconnect.
++	if (!s_conn)
++		return;
++
+ 	if (rconn_poll_read(s_conn)) {
+ 		remote_activate_debugger ();
+ 		//exception_debugging = 0;

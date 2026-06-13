@@ -71,9 +71,37 @@ if (s_state == Running) {   // continue requested -> resume the CPU/chipset
 }
 ```
 
-With this, `c` resumes the emulation thread, the chipset runs, and the floppy
-boots through under debugger control. Verified: after the fix, `LoadSeg`'d
-`HUNK_HEADER`/`HUNK_CODE` blocks appear in chip RAM and disk I/O proceeds.
+With this, `c` resumes the emulation thread and the chipset runs again
+(verified: chip RAM changes across a continue).
+
+### Two more stability fixes — `remote_debug.cpp`
+
+**Speed.** `remote_debug_init_()` enables `debugmem_trace = true` and
+`debugmem_enable_stackframe(true)` ("Full stack frame tracking enabled"), which
+hook every call/return and slow emulation badly. Not needed for
+memory/register/breakpoint capture — disabled (`false`/`false`) so emulation
+runs at a usable speed.
+
+**Crash on disconnect/shutdown (SIGSEGV).** `remote_debug_update_()` (called
+every vsync) checks `s_conn` once at the top, then calls `remote_debug_()` —
+which on the `is_quiting()` path does `rconn_destroy(s_conn); s_conn = 0;`.
+Control returns and the function then calls `rconn_poll_read(s_conn)` →
+`rconn_connected(NULL)` → dereferences `0x8` → `EXC_BAD_ACCESS`. This fired on
+every emulator quit/disconnect (visible as macOS "fs-uae crashed" reports).
+Fix: re-check `if (!s_conn) return;` after `remote_debug_()`. Verified: clean
+connect/continue/disconnect now produces no crash report.
+
+## Known open issue
+
+With the debugger **enabled**, the Marble Madness floppy does not autoboot to
+Workbench — Kickstart 1.2 sits at its insert-disk idle (`STOP` @ `$FC0F58`, all
+`$8–$BC` vectors still ROM `$00FCxxxx`). The same ROM+ADF boots to Workbench
+fine when fs-uae is run **without** `--remote_debugger`. Likely a disk-change
+detection / cycle-timing interaction introduced by the per-vsync debug hook;
+not yet root-caused. Reaching the c/zzz decrypt (to capture the decode-time
+vector/task state) is blocked on this. Workaround paths to try: trigger a fresh
+DF0 disk-change (eject/insert) or a warm reset after boot; or launch the game
+by interacting with the emulator window directly.
 
 The patch only touches `src/include/sysdeps.h` and `src/cpuboard.cpp`; the
 narrowing/implicit-decl issues are handled by the `make` flags, and the

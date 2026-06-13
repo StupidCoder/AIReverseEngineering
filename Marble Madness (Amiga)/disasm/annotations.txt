@@ -46,7 +46,8 @@
 504FC  ld_name_zzz       point at the string "c/zzz" (the decrypter).
 50506  ld_loadseg_zzz    LoadSeg("c/zzz") -> the decrypter's seglist (-$46(a6)). c/zzz is a clean hunk, so AmigaDOS loads it normally.
 5051E  ld_run_zzz_xxx    call_seglist: run c/zzz with the control block and the filename "c/xxx" — i.e. decrypt and load the second-stage loader c/xxx. Its returned seglist is kept in -$32(a6).
-5059C  ld_mutate_key     XOR-mutate the key array in place before the next decrypt pass (the 16-bit constant computed just above).
+50560  ld_checksum_xxx   call checksum_seglist on the just-decrypted c/xxx (-$32) -> a 16-bit EOR checksum of all its hunk words; folded with -$4C and kept in -$42 as the key-mutation constant.
+5059C  ld_mutate_key     XOR-mutate the key array in place with the c/xxx checksum (-$42) before the next decrypt pass — integrity-chaining: a tampered c/xxx changes the checksum and so corrupts the key the rest of the load depends on.
 505E2  ld_name_bootscr   point at the string "c/bootscr".
 505E8  ld_loadseg_bootscr  LoadSeg("c/bootscr") -> the boot-screen overlay's seglist (-$3A(a6)). bootscr is also a clean, unencrypted hunk, so it loads through plain LoadSeg — this is the load the question asks about.
 505F4  ld_bootscr_check  if LoadSeg returned 0 the boot screen is missing: exit(1).
@@ -61,18 +62,27 @@
 506A0  ld_unload_bootscr  UnLoadSeg the boot-screen overlay now that it has done its job.
 506BC  ld_unload_zzz     UnLoadSeg the decrypter c/zzz.
 
-# --- embedded copy of the c/zzz decrypt engine (hunks 7,10,11) ---
-# These mirror c/zzz exactly (same source, linked into both binaries) but are
-# UNREFERENCED by the launcher, which decrypts via the LoadSeg'd c/zzz instead.
-# Documented in Marble_Madness.md Part III.
-50A34  zz_seed_table     [embedded, unused] build the 55-entry table from seed $57319753 by the ×31 hash (mirror of c/zzz sub_BEC).
-50A9C  zz_key_init       [embedded, unused] AllocMem the table, seed it, XOR in the key array, run the protection (mirror of c/zzz sub_D06).
-50B4E  zz_free_key       [embedded, unused] FreeMem the key table.
-50BC0  zz_freemem        [embedded, unused] FreeMem wrapper.
-50BDA  zz_byte_hi        [embedded, unused] return (arg>>16)&0xFF (mirror of c/zzz sub_D92).
-50BF2  zz_protection     [embedded, unused] THE COPY PROTECTION: XOR the host's CPU exception/TRAP vectors ($8-$38, $80-$BC) and the running task's tc_ExceptCode/tc_TrapCode into table entries 10-16 / 30-31 / 32-47 (mirror of c/zzz sub_DAA). Binds the decode to live machine state.
-50CF4  zz_keystream      [embedded, unused] the additive lagged-Fibonacci keystream generator over the table (mirror of c/zzz sub_$EAC): table[p]+=table[q]; p+=1; q+=2; mod 55.
-50D2C  zz_decrypt_word   [embedded, unused] read one longword and XOR it with the keystream.
+# --- embedded copy of the c/zzz decrypt engine (hunks 7,10) ---
+# This is the SAME compiled code as the c/zzz file on disk: e.g. the keystream
+# generator below is byte-identical to c/zzz's apart from the 15 bytes of its
+# three relocated global-table pointers. It is DEAD CODE here — verified: zero
+# control-flow references from anywhere outside the cluster. The launcher does
+# the real decryption by LoadSeg-ing and CALLING c/zzz from disk (see the load
+# sequence above); the disk file is NOT leftover junk, this embedded copy is.
+# It was dragged in by the linker because checksum_seglist (below), which main
+# DOES call, lives in the same object module. Documented in Marble_Madness.md.
+50A34  zz_seed_table     [embedded, DEAD] build the 55-entry table from seed $57319753 by the ×31 hash (= c/zzz sub_BEC).
+50A9C  zz_key_init       [embedded, DEAD] AllocMem the table, seed it, XOR in the key array, run the protection (= c/zzz sub_D06).
+50B4E  zz_free_key       [embedded, DEAD] FreeMem the key table.
+50BC0  zz_freemem        [embedded, DEAD] FreeMem wrapper.
+50BDA  zz_byte_hi        [embedded, DEAD] return (arg>>16)&0xFF (= c/zzz sub_D92).
+50BF2  zz_protection     [embedded, DEAD] THE COPY PROTECTION: XOR the host's CPU exception/TRAP vectors ($8-$38, $80-$BC) and the running task's tc_ExceptCode/tc_TrapCode into table entries 10-16 / 30-31 / 32-47 (= c/zzz sub_DAA). Binds the decode to live machine state.
+50CF4  zz_keystream      [embedded, DEAD] the additive lagged-Fibonacci keystream generator over the table (= c/zzz sub_$EAC, byte-identical bar the relocated table pointers): table[p]+=table[q]; p+=1; q+=2; mod 55.
+
+# --- seglist checksum (hunk 11) — this IS used by main (ld_checksum_xxx) ---
+50D2C  seglist_hunksize  return the longword stored just before a seglist node ($-4(node)) — the hunk's size.
+50D3C  bptr_to_addr      convert a BCPL pointer to a byte address (BPTR << 2).
+50D4A  checksum_seglist  walk a LoadSeg'd seglist and EOR-fold all of its hunk words into a 16-bit checksum; main runs this over the decrypted c/xxx and uses the result as a key-mutation constant (anti-tamper).
 
 # --- AmigaDOS / Exec call stubs (hunks 10,11,15,16,18,19) ---
 # Thin "JSR -offset(libbase)" wrappers; names from the program's HUNK_SYMBOL table.

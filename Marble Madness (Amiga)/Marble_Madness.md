@@ -318,11 +318,25 @@ seglist-call thunk `call_seglist` (which converts the `LoadSeg` BPTR to an addre
 and `JSR`s into the first hunk with `d0`/`a0` arguments) — handing it the image
 filename so the overlay loads the IFF and displays it — and then runs once more
 with `(0, 0)` to dismiss it before `UnLoadSeg`ing it. The same `call_seglist`
-thunk is how `c/zzz` and the decrypted `c/xxx` are entered. (The launcher binary
-also contains a complete but *unreferenced* copy of `c/zzz`'s decrypt engine —
-the key-table builder, the keystream generator, and the vector-keyed protection
-of Part III — linked in from shared source; the launcher itself decrypts through
-the `LoadSeg`'d `c/zzz`.)
+thunk is how `c/zzz` and the decrypted `c/xxx` are entered.
+
+One detail is worth pinning down because it looks suspicious: the launcher binary
+**also** carries a complete copy of `c/zzz`'s decrypt engine — the key-table
+builder, the keystream generator and the vector-keyed protection of Part III. The
+copy is the *same compiled code* (the keystream generator, for instance, is
+byte-identical to `c/zzz`'s but for the 15 bytes of its three relocated global
+pointers). It is tempting to wonder whether the disk `c/zzz` is leftover junk and
+this embedded copy is what runs — but it is the other way round. The embedded
+decrypt engine is **dead code**: a scan of the whole binary finds *zero*
+control-flow references into it. The launcher does the real decryption by
+`LoadSeg`-ing `c/zzz` from disk and `JSR`-ing into it (twice — to decrypt `c/xxx`,
+then to bring the game in — before `UnLoadSeg`-ing it). What drags the dead engine
+in is one routine main genuinely uses, `checksum_seglist`: it EOR-folds the
+decrypted `c/xxx`'s hunks into a 16-bit checksum and feeds that into the key array
+for the next decrypt — so tampering with `c/xxx` corrupts the key, a small
+integrity chain. That checksum routine sits in the same linker object module as
+the decrypt engine, so the linker pulled the whole module in even though only the
+checksum is called.
 
 ## 4. The decruncher (`c/zzz`)
 

@@ -294,6 +294,8 @@
 050556  70 14                         MOVEQ #$14,d0
 050558  2D 40 FF DA                   MOVE.l d0,-$26(a6)
 05055C  2F 2E FF CE                   MOVE.l -$32(a6),-(a7)
+
+; --- ld_checksum_xxx  $050560 — call checksum_seglist on the just-decrypted c/xxx (-$32) -> a 16-bit EOR checksum of all its hunk words; folded with -$4C and kept in -$42 as the key-mutation constant. ---
 050560  4E B9 00 05 0D 4A             JSR $50D4A.l
 050566  58 8F                         ADDQ.l #4,a7
 050568  48 C0                         EXT.L d0
@@ -311,7 +313,7 @@
 050594  4E B9 00 05 0E 38             JSR $50E38.l
 05059A  58 8F                         ADDQ.l #4,a7
 
-; --- ld_mutate_key  $05059C — XOR-mutate the key array in place before the next decrypt pass (the 16-bit constant computed just above). ---
+; --- ld_mutate_key  $05059C — XOR-mutate the key array in place with the c/xxx checksum (-$42) before the next decrypt pass — integrity-chaining: a tampered c/xxx changes the checksum and so corrupts the key the rest of the load depends on. ---
 05059C  42 AE FF C2                   CLR.l -$3E(a6)
 0505A0  20 2E FF C2                   MOVE.l -$3E(a6),d0
 0505A4  B0 AE FF DA                   CMP.l -$26(a6),d0
@@ -675,7 +677,7 @@
 050A2A  4C DF                         .dc.w $4CDF
 050A2C  .dc.b 7C FE 4E 75 4E 71 00 00                         ; |.NuNq..
 
-; ==== zz_seed_table  $050A34  (2 callers) — [embedded, unused] build the 55-entry table from seed $57319753 by the ×31 hash (mirror of c/zzz sub_BEC). ====
+; ==== zz_seed_table  $050A34  (2 callers) — [embedded, DEAD] build the 55-entry table from seed $57319753 by the ×31 hash (= c/zzz sub_BEC). ====
 050A34  4E 56 FF FC                   LINK a6,#-$4
 050A38  20 6E 00 08                   MOVEA.l $8(a6),a0
 050A3C  20 BC 57 31 97 53             MOVE.l #$57319753,(a0)
@@ -707,7 +709,7 @@
 050A98  4E 5E                         UNLK a6
 050A9A  4E 75                         RTS
 
-; --- zz_key_init  $050A9C — [embedded, unused] AllocMem the table, seed it, XOR in the key array, run the protection (mirror of c/zzz sub_D06). ---
+; --- zz_key_init  $050A9C — [embedded, DEAD] AllocMem the table, seed it, XOR in the key array, run the protection (= c/zzz sub_D06). ---
 050A9C  4E 56 FF F4                   LINK a6,#-$C
 050AA0  2F 3C 00 01 00 02             MOVE.l #$10002,-(a7)
 050AA6  2F 3C 00 00 00 DC             MOVE.l #$DC,-(a7)
@@ -761,7 +763,7 @@
 050B4A  4E 5E                         UNLK a6
 050B4C  4E 75                         RTS
 
-; --- zz_free_key  $050B4E — [embedded, unused] FreeMem the key table. ---
+; --- zz_free_key  $050B4E — [embedded, DEAD] FreeMem the key table. ---
 050B4E  4E 56 FF F8                   LINK a6,#-$8
 050B52  2F 3C 00 01 00 02             MOVE.l #$10002,-(a7)
 050B58  2F 3C 00 00 00 DC             MOVE.l #$DC,-(a7)
@@ -797,7 +799,7 @@
 050BBC  4E 5E                         UNLK a6
 050BBE  4E 75                         RTS
 
-; --- zz_freemem  $050BC0 — [embedded, unused] FreeMem wrapper. ---
+; --- zz_freemem  $050BC0 — [embedded, DEAD] FreeMem wrapper. ---
 050BC0  4E 56 00 00                   LINK a6,#$0
 050BC4  2F 3C 00 00 00 DC             MOVE.l #$DC,-(a7)
 050BCA  2F 2E 00 08                   MOVE.l $8(a6),-(a7)
@@ -806,7 +808,7 @@
 050BD6  4E 5E                         UNLK a6
 050BD8  4E 75                         RTS
 
-; ==== zz_byte_hi  $050BDA  (5 callers) — [embedded, unused] return (arg>>16)&0xFF (mirror of c/zzz sub_D92). ====
+; ==== zz_byte_hi  $050BDA  (5 callers) — [embedded, DEAD] return (arg>>16)&0xFF (= c/zzz sub_D92). ====
 050BDA  4E 56 00 00                   LINK a6,#$0
 050BDE  70 10                         MOVEQ #$10,d0
 050BE0  22 2E 00 08                   MOVE.l $8(a6),d1
@@ -816,7 +818,7 @@
 050BEE  4E 5E                         UNLK a6
 050BF0  4E 75                         RTS
 
-; ==== zz_protection  $050BF2  (2 callers) — [embedded, unused] THE COPY PROTECTION: XOR the host's CPU exception/TRAP vectors ($8-$38, $80-$BC) and the running task's tc_ExceptCode/tc_TrapCode into table entries 10-16 / 30-31 / 32-47 (mirror of c/zzz sub_DAA). Binds the decode to live machine state. ====
+; ==== zz_protection  $050BF2  (2 callers) — [embedded, DEAD] THE COPY PROTECTION: XOR the host's CPU exception/TRAP vectors ($8-$38, $80-$BC) and the running task's tc_ExceptCode/tc_TrapCode into table entries 10-16 / 30-31 / 32-47 (= c/zzz sub_DAA). Binds the decode to live machine state. ====
 050BF2  4E 56 FF EC                   LINK a6,#-$14
 050BF6  91 C8                         SUBA.l a0,a0
 050BF8  2F 08                         MOVE.l a0,-(a7)
@@ -896,7 +898,7 @@
 050CE6  4E 75                         RTS
 050CE8  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00             ; ............
 
-; ==== zz_keystream  $050CF4  (1 caller) — [embedded, unused] the additive lagged-Fibonacci keystream generator over the table (mirror of c/zzz sub_$EAC): table[p]+=table[q]; p+=1; q+=2; mod 55. ====
+; ==== zz_keystream  $050CF4  (1 caller) — [embedded, DEAD] the additive lagged-Fibonacci keystream generator over the table (= c/zzz sub_$EAC, byte-identical bar the relocated table pointers): table[p]+=table[q]; p+=1; q+=2; mod 55. ====
 050CF4  20 79 00 05 0C E8             MOVEA.l $50CE8.l,a0
 050CFA  22 79 00 05 0C EC             MOVEA.l $50CEC.l,a1
 050D00  22 39 00 05 0C F0             MOVE.l $50CF0.l,d1
@@ -914,21 +916,21 @@
 050D28  20 10                         MOVE.l (a0),d0
 050D2A  4E 75                         RTS
 
-; ==== zz_decrypt_word  $050D2C  (1 caller) — [embedded, unused] read one longword and XOR it with the keystream. ====
+; ==== seglist_hunksize  $050D2C  (1 caller) — return the longword stored just before a seglist node ($-4(node)) — the hunk's size. ====
 050D2C  4E 56 00 00                   LINK a6,#$0
 050D30  20 6E 00 08                   MOVEA.l $8(a6),a0
 050D34  20 28 FF FC                   MOVE.l -$4(a0),d0
 050D38  4E 5E                         UNLK a6
 050D3A  4E 75                         RTS
 
-; ==== sub_050D3C (2 callers) ====
+; ==== bptr_to_addr  $050D3C  (2 callers) — convert a BCPL pointer to a byte address (BPTR << 2). ====
 050D3C  4E 56 00 00                   LINK a6,#$0
 050D40  20 2E 00 08                   MOVE.l $8(a6),d0
 050D44  E5 80                         ASL.l #2,d0
 050D46  4E 5E                         UNLK a6
 050D48  4E 75                         RTS
 
-; ==== sub_050D4A (1 caller) ====
+; ==== checksum_seglist  $050D4A  (1 caller) — walk a LoadSeg'd seglist and EOR-fold all of its hunk words into a 16-bit checksum; main runs this over the decrypted c/xxx and uses the result as a key-mutation constant (anti-tamper). ====
 050D4A  4E 56 FF F2                   LINK a6,#-$E
 050D4E  48 E7 03 04                   MOVEM.l d6-d7/a5,-(a7)
 050D52  7C 00                         MOVEQ #$0,d6

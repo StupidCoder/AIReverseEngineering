@@ -411,23 +411,30 @@ and decodes the header cleanly: `c/xxx` is a `HUNK_HEADER` with **22 hunks**
 ## 3. The copy protection
 
 The teeth are in `sub_DAA`, run during key setup. After `sub_BEC` seeds the
-table, `sub_DAA` folds bytes from the host's **CPU exception/TRAP vector table**
-into specific entries:
+table, `sub_DAA` folds bytes from two pieces of **live machine state** into
+specific table entries.
 
-- it reads *absolute low memory* — the 68000 vector table at `$0`–`$3FF` — at
-  `$8,$C,…,$20` (into table entries 10–16), at `$28`–`$38` (entries 10–14
-  again), and at `$80`–`$BC`, the 16 `TRAP` vectors (entries 32–47);
+From the host's **CPU exception/TRAP vector table** (absolute low memory, the
+68000 vectors at `$0`–`$3FF`):
+
+- `$8,$C,…,$20` → table entries 10–16; `$28`–`$38` → entries 10–14 again;
+  `$80`–`$BC`, the 16 `TRAP` vectors → entries 32–47;
 - from each vector it extracts `(vector >> 16) & 0xFF` (the byte-extractor
   `sub_D92`: `ASR.l #16` then mask) and XORs it into the table entry.
 
-(It also calls `_FindTask`, but — contrary to a first reading — the result is
-**unused**; the key is purely the vector table.)
+Then from the **running task** (`_FindTask` is called for exactly this — its
+result is *not* unused): it reads the task's `tc_ExceptCode` (`$2A(task)`) and
+`tc_TrapCode` (`$32(task)`) handler pointers, takes `(ptr >> 16) & 0xFF` of each
+(the second further `ASR.l #4`), and XORs them into **table entries 30 and 31**
+(`$78`/`$7C` of the buffer). So 25 of the 55 entries are perturbed — and two of
+them depend on the address of the process's `Task` structure, which is allocated
+at run time.
 
 Because those entries feed the lagged-Fibonacci generator, **the keystream past
-its first stretch depends on the vector table**. The header and the first hunk
-decode regardless — their keystream words are drawn before the perturbed entries
-propagate — which is exactly why the structure stays legible while the bodies
-scramble.
+its first stretch depends on the vector table and the task structure**. The
+header and the first hunk decode regardless — their keystream words are drawn
+before the perturbed entries propagate — which is exactly why the structure
+stays legible while the bodies scramble.
 
 What is in those vectors? Booting `kick12.rom` on the same 68000 core
 (`extract/cmd/bootrom`) shows that at Kickstart 1.x **cold-start** every
@@ -460,23 +467,26 @@ Recovered from the disk alone:
 Not recovered — the bodies. Two independent attacks were pushed to their limits:
 
 1. **Known-plaintext linear algebra.** The keystream's low byte is linear
-   (mod 256) in the 23 protection-perturbed table bytes; the plaintext structure
+   (mod 256) in the 25 protection-perturbed table bytes; the plaintext structure
    (type markers, symbol names, marker-derived hunk sizes, the `0` that
    terminates every `RELOC32` block) yields known keystream values at indices
    that are themselves computable from the marker layout. But only ~14 of those
-   equations fall in the region with reliable indices, against 23 unknowns —
+   equations fall in the region with reliable indices, against 25 unknowns —
    underdetermined.
 2. **The ROM vector table.** The cold-start values (uniform `$FC`) decode
    `c/xxx`'s first three hunks; a different uniform value decodes eleven of the
    twenty-two; but no uniform or sparsely-corrected table decodes all of it,
-   because the real decode-time table is the post-AmigaDOS one — reproducible
-   only by emulating the entire boot → AmigaDOS → Workbench → launcher path,
-   which the minimal CPU core cannot do.
+   because the real decode-time table is the post-AmigaDOS one — and two of the
+   25 perturbed entries depend on the running `Task` structure, not the vectors
+   at all. Reproducing the key means emulating the entire boot → AmigaDOS →
+   Workbench → launcher path *and* the runtime allocation of the launcher's
+   process, which the minimal CPU core cannot do.
 
 So the protection meets its goal against a static unpack: the payload's
-decryption is bound to live machine state the disk does not contain. The
-mechanism is wholly understood; the bytes stay gated behind a running Amiga of
-the right vintage.
+decryption is bound to live machine state the disk does not contain — the
+Kickstart-1.x exception vectors *and* the running process's handler pointers.
+The mechanism is wholly understood; the bytes stay gated behind a running,
+booted Amiga of the right vintage.
 
 ---
 

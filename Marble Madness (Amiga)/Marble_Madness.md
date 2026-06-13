@@ -22,8 +22,8 @@ built for it in the shared `tools/` module — the AmigaDOS reader
 (`tools/amiga/adf`), the disassemblers (`tools/cmd/dis68k`,
 `tools/cmd/codetrace68k`) and an instruction-level 68000 execution core
 (`tools/m68k`) for dynamic verification. All addresses are 68000 addresses;
-sizes are `.b`/`.w`/`.l` (8/16/32-bit). Parts I and II are complete and Part IV
-is under way; Parts III and V are still stubs.
+sizes are `.b`/`.w`/`.l` (8/16/32-bit). Parts I–III are complete and Part IV is
+under way; Part V is still a stub.
 
 ---
 
@@ -39,6 +39,10 @@ is under way; Parts III and V are still stubs.
   - [3. The launcher](#3-the-launcher)
   - [4. The decruncher (`c/zzz`)](#4-the-decruncher-czzz)
 - [Part III — Game program architecture](#part-iii--game-program-architecture)
+  - [1. The multi-stage load](#1-the-multi-stage-load)
+  - [2. The decoder](#2-the-decoder)
+  - [3. The copy protection](#3-the-copy-protection)
+  - [4. What the static analysis recovers — and where it stops](#4-what-the-static-analysis-recovers--and-where-it-stops)
 - [Part IV — Graphics and data formats](#part-iv--graphics-and-data-formats)
   - [1. The splash (boot) screen](#1-the-splash-boot-screen)
   - [2. The Workbench icons](#2-the-workbench-icons)
@@ -313,26 +317,166 @@ disassembly:
   block is handled by its own arm exactly as `LoadSeg` would, producing a normal
   relocated segment list (the `ANDI.l #$3FFFFFFF` on the hunk sizes at `$B62` is
   the header pass).
-- The decoding itself is layered and **keyed**. A 0x37-entry lookup table is
-  built from the seed `$57319753` by a ×31 hash (`sub_BEC`); an XOR pass folds the
-  input into it (`sub_D06`); and a further routine (`sub_DAA`) walks the data
-  XOR-ing in a stream whose key is derived through `_FindTask` (via the
-  byte-extractor `sub_D92`). Mixing a task-derived key into the unpack is a
-  copy-protection flourish layered on top of the compression.
+- The decoding is a **keystream XOR**, not compression — the bodies are stored at
+  full size; the high entropy is encryption. A 55-entry table is built from the
+  seed `$57319753` by a ×31 hash (`sub_BEC`, `sub_D06`); the stream is then an
+  additive lagged-Fibonacci generator over that table (`sub_$EAC`). On top of that
+  sits a copy-protection routine (`sub_DAA`) that perturbs the table from the
+  host's **CPU exception/TRAP vector table** — so the decryption is bound to
+  machine state, not just the disk. Part III §2–3 reverses this in full.
 
-So `c/zzz` is where the real game reaches memory: it reads the crunched `.dat`,
-undoes the compression and the keyed XOR, relocates the hunks, and hands the
-loaded segments back to the launcher, which runs them. Reproducing it as a
-standalone unpacker — the prerequisite for disassembling the main game in Part III
-— means re-implementing that keyed decode. The structure is now mapped; the
-byte-exact reproduction is the next step.
+So `c/zzz` is where the real game reaches memory: it reads the encrypted `.dat`,
+undoes the keyed XOR, relocates the hunks, and hands the loaded segments back to
+the launcher, which runs them. Reproducing it as a standalone unpacker — the
+prerequisite for disassembling the main game — is the subject of Part III, which
+also explains why the copy protection stops a purely static unpack short.
 
 ---
 
 # Part III — Game program architecture
 
-*To follow.* The 68000 startup of the main program, the interrupt/copper/blitter
-setup, and the memory map during play.
+The main program (`c/MarbleMadness!.dat`) and the second-stage loader (`c/xxx`)
+are encrypted, so reaching the game's own 68000 code means getting through
+`c/zzz`'s decoder (Part II §4) and the copy protection wrapped around it. This
+part reverses both completely, then reports what that buys: the load
+architecture and the program's shape are fully recovered, but the encrypted
+bodies are held behind a key that is not on the disk. The startup/copper/blitter
+detail this section was meant to hold lives inside those bodies and is therefore
+out of reach of a purely static analysis — for a reason that is itself worth
+documenting.
+
+## 1. The multi-stage load
+
+The launcher (Part II §3) does not load the game in one step. From its
+disassembly the sequence is:
+
+1. `LoadSeg` `c/zzz` (a clean hunk).
+2. Call `c/zzz` through the seglist-call thunk at `$50A10` — which converts the
+   `LoadSeg` BPTR to an address and jumps in with `d0` = a control block and
+   `a0` = a filename — to decrypt **`c/xxx`**. The control block here has its
+   key-array count set to **0**.
+3. The decrypted `c/xxx` seglist is then *run as code*: it is the real
+   second-stage loader. Just before that call the launcher mutates the control
+   block's key array — count becomes `$14` (20 longwords), each XORed with a
+   16-bit constant.
+4. `c/xxx`, now running, drives the rest and pulls in `c/MarbleMadness!.dat`
+   (the 175 KB main hunk) using the count-20 key array.
+
+So the chain is launcher → (`c/zzz`) → `c/xxx` → (`c/zzz`) → `.dat`, with the
+key array changing between the two decrypt passes. The first pass — `c/xxx`
+with an empty key array — is the one this part can read.
+
+## 2. The decoder
+
+`c/zzz`'s `LoadSeg` replacement, fully reversed. Its entry point (hunk 0) saves
+`d0`→control block and `a0`→filename, opens a library, and calls `main`
+(`$400B4`); `main` calls the key setup (`sub_$D06`), then the decode-and-load
+(`sub_$2C8`), then frees the table.
+
+**Key setup** (`sub_$D06`): `_AllocMem` 220 bytes; `sub_BEC` seeds a 55-entry
+table — `table[0] = $57319753`, `table[i] = table[i-1] × 31 + i` (mod 2³²) — then
+XORs in the caller's key array (the launcher's, `count` longwords), then runs the
+protection (§3), and records the pointers (`$40EA0/4/8`) the generator reads.
+
+The on-disk format is the key to reading it: a **standard AmigaDOS hunk with
+selective encryption**.
+
+- The first longword (`$000003F3`, `HUNK_HEADER`) and every hunk-block **type**
+  marker — `$3E9` `CODE`, `$3EA` `DATA`, `$3EB` `BSS`, `$3EC` `RELOC32`, `$3F0`
+  `SYMBOL`, `$3F2` `END` — are stored in **plaintext** (read raw, bypassing the
+  keystream).
+- `SYMBOL`-block symbol **names** are plaintext too — `_AllocMem`, `_FreeMem`,
+  `_FindTask`, … sit there as readable ASCII inside the "encrypted" file.
+- Everything else — hunk sizes, the relocation tables, and the `CODE`/`DATA`
+  bodies — is XORed with the keystream, one keystream longword per stored
+  longword, in file order.
+
+There is **no compression**. The bodies occupy their full size on disk; the
+apparent size mismatch with the header's hunk table is simply the `BSS` hunks,
+which carry a size but no data. The ≈7.95 bits/byte entropy is the encryption,
+not packing — so "decruncher" is a slight misnomer; it is a decryptor.
+
+The keystream (`sub_$EAC`) is an **additive lagged-Fibonacci generator** over the
+table: two indices `p` (start 0) and `q` (start 27); each call does
+`table[p] += table[q]; p += 1; q += 2` (both mod 55) and returns the updated
+`table[p]`. Being purely additive, the **low byte of every output is a linear
+function (mod 256) of the table's low bytes** — the lever §4 pulls.
+
+`extract/cmd/unpack` runs this real code on the `tools/m68k` core, trapping the
+six AmigaDOS/Exec stubs and streaming the packed bytes through `_Read`. It
+reproduces the keystream bit-exact (verified against an independent generator)
+and decodes the header cleanly: `c/xxx` is a `HUNK_HEADER` with **22 hunks**
+(`first_hunk = 0`, `last_hunk = 21`) followed by its size/flags table.
+
+## 3. The copy protection
+
+The teeth are in `sub_DAA`, run during key setup. After `sub_BEC` seeds the
+table, `sub_DAA` folds bytes from the host's **CPU exception/TRAP vector table**
+into specific entries:
+
+- it reads *absolute low memory* — the 68000 vector table at `$0`–`$3FF` — at
+  `$8,$C,…,$20` (into table entries 10–16), at `$28`–`$38` (entries 10–14
+  again), and at `$80`–`$BC`, the 16 `TRAP` vectors (entries 32–47);
+- from each vector it extracts `(vector >> 16) & 0xFF` (the byte-extractor
+  `sub_D92`: `ASR.l #16` then mask) and XORs it into the table entry.
+
+(It also calls `_FindTask`, but — contrary to a first reading — the result is
+**unused**; the key is purely the vector table.)
+
+Because those entries feed the lagged-Fibonacci generator, **the keystream past
+its first stretch depends on the vector table**. The header and the first hunk
+decode regardless — their keystream words are drawn before the perturbed entries
+propagate — which is exactly why the structure stays legible while the bodies
+scramble.
+
+What is in those vectors? Booting `kick12.rom` on the same 68000 core
+(`extract/cmd/bootrom`) shows that at Kickstart 1.x **cold-start** every
+exception/TRAP vector points at a single ROM handler, `$00FC05B4`, so
+`(vector>>16)&0xFF` is a uniform **`$FC`** — the `$FC0000` ROM page. Kickstart
+2.0+ moved the ROM to `$F80000` (byte `$F8`), so the protection is implicitly
+tied to the 1.x ROM layout. That is both ordinary for a 1986 title and a clean
+explanation of why such games are Kickstart-version-locked: the decryption key
+*is* the ROM page.
+
+But cold-start is not decode time. By the time the launcher runs, AmigaDOS has
+redirected many of those vectors to its own handlers, so the bytes are no longer
+a uniform `$FC`. This is the crux of the protection: the decryption key is not
+the ROM, and not any byte on the disk — it is the **live exception-vector table
+at the instant the game decrypts itself**, a piece of deep runtime state.
+
+## 4. What the static analysis recovers — and where it stops
+
+Recovered from the disk alone:
+
+- the complete decode and protection mechanism above;
+- `c/xxx`'s shape — a 22-hunk, exec-heavy second-stage loader. Its plaintext
+  `SYMBOL` blocks name the calls it imports: `_AllocMem`, `_FreeMem`,
+  `_FindTask`, `_AllocSignal`, `_FreeSignal`, `_AddPort`, `_RemPort`,
+  `_OpenDevice`, `_DoIO` — a loader that allocates memory and signals, makes a
+  message port, and talks to a device (the disk) to stream the game in;
+- the `.dat`'s own `HUNK_HEADER` (hunk count and sizes), which decodes the same
+  way once its key array is supplied.
+
+Not recovered — the bodies. Two independent attacks were pushed to their limits:
+
+1. **Known-plaintext linear algebra.** The keystream's low byte is linear
+   (mod 256) in the 23 protection-perturbed table bytes; the plaintext structure
+   (type markers, symbol names, marker-derived hunk sizes, the `0` that
+   terminates every `RELOC32` block) yields known keystream values at indices
+   that are themselves computable from the marker layout. But only ~14 of those
+   equations fall in the region with reliable indices, against 23 unknowns —
+   underdetermined.
+2. **The ROM vector table.** The cold-start values (uniform `$FC`) decode
+   `c/xxx`'s first three hunks; a different uniform value decodes eleven of the
+   twenty-two; but no uniform or sparsely-corrected table decodes all of it,
+   because the real decode-time table is the post-AmigaDOS one — reproducible
+   only by emulating the entire boot → AmigaDOS → Workbench → launcher path,
+   which the minimal CPU core cannot do.
+
+So the protection meets its goal against a static unpack: the payload's
+decryption is bound to live machine state the disk does not contain. The
+mechanism is wholly understood; the bytes stay gated behind a running Amiga of
+the right vintage.
 
 ---
 

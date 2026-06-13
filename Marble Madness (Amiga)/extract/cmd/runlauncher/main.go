@@ -14,6 +14,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"stupidcoder.com/tools/amiga/adf"
 	"stupidcoder.com/tools/amiga/hunk"
@@ -96,6 +98,16 @@ func (m *machine) logf(f string, a ...interface{}) {
 func main() {
 	trace := flag.Bool("trace", false, "log every trapped call as it happens")
 	steps := flag.Int("steps", 60_000_000, "instruction budget")
+	// The decoder's copy protection reads the host CPU exception/TRAP vectors
+	// ($8-$BC) and the running task's tc_ExceptCode/tc_TrapCode. We leave those
+	// at 0 (the launcher never writes them) which is why the body decode fails.
+	// Supplying them from a real booted-AmigaDOS capture lets the decode succeed:
+	//   -lowmem   a binary dump of low memory ($0..) — the exception/TRAP vectors
+	//   -except   the task's tc_ExceptCode pointer value (hex)
+	//   -trap     the task's tc_TrapCode pointer value (hex)
+	lowmem := flag.String("lowmem", "", "binary dump of low memory ($0..) to seed the vector table")
+	exCode := flag.String("except", "", "task tc_ExceptCode pointer (hex) for the protection")
+	trCode := flag.String("trap", "", "task tc_TrapCode pointer (hex) for the protection")
 	flag.Parse()
 	if flag.NArg() < 1 {
 		fmt.Fprintln(os.Stderr, "usage: runlauncher disk.adf [-trace]")
@@ -125,6 +137,21 @@ func main() {
 	m.w32(wbArg+0, 0)        // wa_Lock (0 = root)
 	m.w32(wbArg+4, wbName)   // wa_Name
 	copy(m.ram[wbName:], "MarbleMadness!\x00")
+
+	// Optional real machine state for the protection (from a UAE/booted capture).
+	if *lowmem != "" {
+		dump, err := os.ReadFile(*lowmem)
+		must(err)
+		copy(m.ram[0:], dump) // overlay the vector table at $0 (keep $4=ExecBase below)
+		m.w32(4, execBase)
+		fmt.Fprintf(os.Stderr, "seeded %d bytes of low memory from %s\n", len(dump), *lowmem)
+	}
+	if *exCode != "" {
+		m.w32(taskAddr+0x2A, hexv(*exCode))
+	}
+	if *trCode != "" {
+		m.w32(taskAddr+0x32, hexv(*trCode))
+	}
 
 	cpu := m68k.NewCPU(m)
 	// AmigaDOS enters the program at hunk 0; d0/a0 are the CLI arg length/ptr (0 for WB)
@@ -334,6 +361,13 @@ func (m *machine) placeSeg(base uint32, code []byte) {
 	m.w32(base-4, 0)
 	m.w32(base-8, uint32(len(code)))
 	m.seg = base + uint32(len(code)) + 16
+}
+
+func hexv(s string) uint32 {
+	s = strings.TrimPrefix(strings.TrimPrefix(s, "$"), "0x")
+	v, err := strconv.ParseUint(s, 16, 32)
+	must(err)
+	return uint32(v)
 }
 
 func must(err error) {

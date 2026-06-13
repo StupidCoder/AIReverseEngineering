@@ -299,7 +299,7 @@ game's main file is *crunched* (Part I §3), that load does not go through plain
 
 The full annotated disassembly is in
 [`disasm/MarbleMadness.asm`](disasm/MarbleMadness.asm) (with the names and notes
-in [`disasm/annotations.txt`](disasm/annotations.txt)). The boot-screen path is
+in [`disasm/MarbleMadness.annotations.txt`](disasm/MarbleMadness.annotations.txt)). The boot-screen path is
 worth following concretely, because `c/bootscr` is one of the unencrypted hunks
 and so loads the ordinary way:
 
@@ -370,7 +370,9 @@ So `c/zzz` is where the real game reaches memory: it reads the encrypted `.dat`,
 undoes the keyed XOR, relocates the hunks, and hands the loaded segments back to
 the launcher, which runs them. Reproducing it as a standalone unpacker — the
 prerequisite for disassembling the main game — is the subject of Part III, which
-also explains why the copy protection stops a purely static unpack short.
+also explains why the copy protection stops a purely static unpack short. The
+full annotated disassembly is in [`disasm/zzz.asm`](disasm/zzz.asm)
+([`zzz.annotations.txt`](disasm/zzz.annotations.txt)).
 
 ---
 
@@ -584,9 +586,14 @@ The image is the *data*; `c/bootscr` is the *code* that puts it on screen. The
 launcher (Part II) `LoadSeg`s both, and `c/bootscr` is the overlay that displays
 this splash at boot — it is a 50-hunk compiled program (its first hunk is
 `HUNK_CODE`), not a second picture, which is why there is one bitmap here, not
-two. (A loose end alongside them, `c/sigfile`, is not graphics either: it is a
-short table of `"DOW"`+incrementing-byte entries, a disk-signature /
-copy-protection artefact.)
+two. `c/bootscr` keeps its full `HUNK_SYMBOL` table, so its annotated
+disassembly ([`disasm/bootscr.asm`](disasm/bootscr.asm)) reads almost like
+source: it is built from the **EA IFF reader** (`_GetFoILBM`, `_GetBODY`,
+`_UnPackRow` = ByteRun1), a **trackdisk mini-filesystem** that reads the disk's
+sectors directly (`_MFOpen`/`ReadSecs`/`_MGetDir`), and **graphics.library**
+display setup (`_MakeVPort`/`_LoadRGB4`/`_LoadView`). (A loose end alongside
+them, `c/sigfile`, is not graphics either: it is a short table of
+`"DOW"`+incrementing-byte entries, a disk-signature / copy-protection artefact.)
 
 ## 2. The Workbench icons
 

@@ -1,0 +1,69 @@
+# Marble Madness (Amiga) — c/zzz (decrypting LoadSeg replacement) annotations.
+# Consumed by codetrace68k -annotate; format: ADDR  name  description.
+# Relocatable hunk; laid out from an arbitrary base $040000. Names derived from
+# behaviour. Reversed in detail in Marble_Madness.md Parts II §4 / III.
+#
+# Regenerate (from repo root; .adf not committed):
+#   adfdump -x /tmp/mm "Marble Madness (Amiga)/Marble_Madness.adf"
+#   go run ./tools/amiga/cmd/hunkload -base 40000 -o /tmp/zzz.bin /tmp/mm/c/zzz
+#   go run ./tools/cmd/codetrace68k -base 40000 \
+#     -entry 40000,4017A,40422,40430,4043E,40458,40472,4048C,4049E,404AC,404BA,404C8,404DA,404E8,404F6,40522,40530,4053C,4060A,40632,40764,4081C,4085C,4089C,408AA,408F4,4091C,40924,40974,409AA,40A62,40A6A,40AC0,40EAC,40EE4,40F00,40F14,40F30,40F48,40F60 \
+#     -annotate "Marble Madness (Amiga)/disasm/zzz.annotations.txt" \
+#     -o "Marble Madness (Amiga)/disasm/zzz.asm" /tmp/zzz.bin
+# (The extra entries are the 16 arms of the JMP-table dispatch at $403DE, which
+#  codetrace cannot follow, plus their handlers and the library stubs.)
+
+# --- C runtime + entry ---
+40000  cstart            entry: AmigaDOS/the launcher enters here. Save the d0/a0 args (control block, filename) to globals, OldOpenLibrary a library, then call main with (control-block, filename).
+4003A  exit              return to the caller (restore the saved stack, MOVEM the regs, RTS); error paths jump here with a code.
+40046  open_lib          OldOpenLibrary the library named at the data pointer (exec -$198); store the base.
+400B4  main              main(control, filename): build the keystream table (key_init), decrunch+load the file (decrunch), free the table, return the seglist.
+
+# --- seglist / hunk allocation ---
+4010C  bptr_helper       small BPTR/seglist helper used while building the loaded segment list.
+40120  hunk_base         look hunk N up in the per-hunk pointer table ($40BC0) and return its allocated address (as an address-pointer).
+4014E  hunk_size_cell    fetch a hunk's size/cell from the hunk table.
+4017A  alloc_hunk        AllocMem one hunk (size+2 longwords, MEMF flags from the 2-bit size tag), link it into the growing seglist, and record it in the $40BC0 table.
+
+# --- the byte/longword input layer ---
+40208  fillbytes         buffered reader: copy N raw bytes from the 512-byte input buffer into a destination, refilling via _Read in $200-byte blocks. Raw — does NOT consume the keystream.
+40298  readlong          read one longword via fillbytes, then (if the decrypt flag $40BC8 is set) XOR it with the next keystream word. This is the only thing that advances the keystream.
+40A6A  read_skip         read/consume N bytes through fillbytes in $80-byte chunks (used to skip library-name strings in the header).
+
+# --- the decrunch core ---
+402C8  decrunch          decode-and-load: _Open the file (or use a preopened handle), allocate the work + 512-byte stream buffers, then loop reading each block's TYPE longword RAW, masking ($3FFFFFFF), subtracting $3E7, range-checking, and dispatching through the JMP table at $403DE to the per-type arm. Returns the loaded seglist (BCPL).
+4060A  blk_unit          HUNK_UNIT ($3E7) arm handler: read and discard the unit longword.
+40632  blk_name          HUNK_NAME ($3E8) arm handler.
+4065A  blk_code          HUNK_CODE ($3E9) handler: read the size, get the hunk's memory (hunk_base), fillbytes the body (size*4 raw bytes), then XOR-decrypt each longword in place with the keystream.
+406D4  blk_data          HUNK_DATA ($3EA) handler: as blk_code, for data hunks.
+4074E  blk_bss           HUNK_BSS ($3EB) handler: read the size; no body (BSS is zero-filled, not stored).
+40764  blk_reloc32       HUNK_RELOC32 ($3EC) handler: loop { count; if 0 stop; target-hunk; count offsets } applying each 32-bit relocation (add the target hunk's base) into this hunk; also folds a word checksum into $40BD8.
+4081C  blk_reloc16       HUNK_RELOC16 ($3ED) handler.
+4085C  blk_reloc_a       relocation sub-handler (offset application).
+4089C  blk_reloc_b       relocation sub-handler.
+408AA  blk_symbol        HUNK_SYMBOL ($3F0) handler: loop { name-length; read name (length longwords, RAW); value } until a 0 length. The names stay plaintext on disk.
+408F4  blk_debug         HUNK_DEBUG ($3F1) handler: read a length and skip that many longwords.
+4091C  blk_end           HUNK_END ($3F2) handler: no-op (per-hunk terminator).
+40924  hdr_liblist       HUNK_HEADER pre-pass: read the resident-library list (length-prefixed names, skipped RAW) and return the following table_size.
+40974  hdr_helper1       HUNK_HEADER sub-helper.
+409AA  hdr_helper2       HUNK_HEADER sub-helper.
+40A14  blk_misc          minor block/seglist helper.
+40A62  blk_idx15         arm 15 handler (block type $3F6).
+40AC0  hdr_alloc         HUNK_HEADER allocation pass: read first/last hunk and the size table (each "size" carries a 2-bit mem-type tag in the top bits), and AllocMem every hunk via alloc_hunk, recording them in $40BC0.
+404F6  arm_header        HUNK_HEADER ($3F3) arm: call hdr_liblist then hdr_alloc.
+
+# --- the key schedule and the keystream ---
+40BEC  seed_table        build the 55-entry table from seed $57319753 by the ×31 hash: table[0]=$57319753, table[i]=table[i-1]*31+i; record the table pointers in the globals ($40EA0/4/8) the keystream reads.
+40D06  key_init          AllocMem 220 bytes; seed_table; XOR in the caller's key array (count longwords from the control block); run the protection; return the table.
+40D78  free_key          FreeMem the key table when decoding is done.
+40D92  byte_hi           return (arg >> 16) & 0xFF — extracts a vector/handler page byte.
+40DAA  protection        THE COPY PROTECTION: XOR byte_hi of the host's CPU exception/TRAP vectors (absolute low memory $8-$38, $80-$BC) into table entries 10-16/10-14/32-47, then FindTask and XOR byte_hi of the task's tc_ExceptCode ($2A) and tc_TrapCode ($32) into entries 30/31. Binds the keystream to live OS state. (Part III.)
+40EAC  keystream         additive lagged-Fibonacci generator over the 55-entry table: read q-pointer, table[p]+=table[q], advance p by 1 entry and q by 2 (mod 220 bytes), return the updated table[p].
+
+# --- AmigaDOS / Exec stubs (named from the HUNK_SYMBOL table) ---
+40EE4  _Open             dos Open(name, mode)
+40F00  _Close            dos Close(handle)
+40F14  _Read             dos Read(handle, buf, length)
+40F30  _AllocMem         exec AllocMem(size, flags)
+40F48  _FreeMem          exec FreeMem(addr, size)
+40F60  _FindTask         exec FindTask(name|0)

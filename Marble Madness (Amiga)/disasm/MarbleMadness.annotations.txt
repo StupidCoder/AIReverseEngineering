@@ -9,7 +9,7 @@
 #   go run ./tools/amiga/cmd/hunkload -base 50000 -o /tmp/mm.bin "/tmp/mm/MarbleMadness!"
 #   go run ./tools/cmd/codetrace68k -base 50000 \
 #     -entry 50000,5035C,5038C,50A10,50A34,50A9C,50B4E,50BC0,50BDA,50BF2,50CF4,50D2C,50DA4,50E4C,50F0C,50F20 \
-#     -annotate "Marble Madness (Amiga)/disasm/annotations.txt" \
+#     -annotate "Marble Madness (Amiga)/disasm/MarbleMadness.annotations.txt" \
 #     -o "Marble Madness (Amiga)/disasm/MarbleMadness.asm" /tmp/mm.bin
 # (The extra entry points past 50000 reach the library-call stubs and the
 #  unreferenced embedded c/zzz decrypt engine, which the trace can't fall into

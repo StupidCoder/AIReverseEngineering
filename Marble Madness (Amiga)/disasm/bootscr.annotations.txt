@@ -1,0 +1,124 @@
+# Marble Madness (Amiga) — c/bootscr (boot-screen overlay) annotations.
+# Consumed by codetrace68k -annotate; format: ADDR  name  description.
+# bootscr is the overlay the launcher LoadSegs and runs (call_seglist) to put up
+# the splash and later to dismiss it (Part II §3, Part IV §1). It is a clean C
+# program with its full HUNK_SYMBOL table intact, so most names below ARE its own
+# symbols; descriptions are added for the key flow. It is built from the EA IFF
+# reader (the _Get*ILBM / _*RIFF / _UnPackRow routines), a custom trackdisk-based
+# mini-filesystem (_MF* / ReadSecs / _MGetDir — it reads the disk directly rather
+# than through AmigaDOS), and graphics.library display setup.
+# Relocatable hunk laid out from an arbitrary base $070000.
+#
+# Regenerate (from repo root; .adf not committed):
+#   adfdump -x /tmp/mm "Marble Madness (Amiga)/Marble_Madness.adf"
+#   go run ./tools/amiga/cmd/hunkload -base 70000 -o /tmp/bootscr.bin -syms /tmp/bs.syms /tmp/mm/c/bootscr
+#   go run ./tools/cmd/codetrace68k -base 70000 -entry <function symbol addrs> \
+#     -annotate "Marble Madness (Amiga)/disasm/bootscr.annotations.txt" \
+#     -o "Marble Madness (Amiga)/disasm/bootscr.asm" /tmp/bootscr.bin
+
+70000  _ovstart  overlay entry — the launcher enters here via call_seglist with d0=mode, a0=image filename. mode 1: set up graphics and display the splash; mode 0: tear the display back down.
+7005C  noDOS  dos.library failed to open: abort.
+7003A  done
+70046  openDOS  OpenLibrary("dos.library") into _DOSBase.
+7003A  _exit
+7005E  _XCEXIT
+70068  _SP
+700A0  dosCmdLen
+700A4  dosCmdBuf
+70088  _mbase
+700AC  DOSName
+70064  _SysBase
+70060  NULL
+7008C  _mnext
+70090  _msize
+700A8  _DOSBase
+7009C  __oserr
+70098  StackFrame
+70094  _tsize
+700B8  _IffErr
+700CC  _GetFoILBM  open the First Of an ILBM FORM in the file (EA IFF reader).
+7034E  _GetPrILBM  get the PROPerties of an ILBM (BMHD/CMAP).
+70428  _GetLiILBM  iterate the chunks of an ILBM LIST.
+70456  _GetPicture  load an ILBM into memory: open the IFF, walk it for BMHD/CMAP/BODY, and fill the bitmap planes.
+704CC  _main0  C main wrapper.
+7070A  _main  boot-screen driver: open the libraries, load the picture (_GetPicture), build a viewport/bitmap and show it (graphics calls below).
+70720  _WIDTH
+70724  _HEIGHT
+70728  _DEPTH
+7072C  _plsize
+70730  _aqNColorReg
+70738  _colors
+70878  _GetCMAP  read the CMAP chunk — the colour map — into _colors.
+7090E  _GetBODY  read the BODY chunk: per-row, per-plane, decompressing with _UnPackRow into the bitplanes.
+70B6C  _UnPackRow  ByteRun1 (PackBits) row decompressor — the standard IFF ILBM run-length scheme.
+70BB0  LUP.4
+70BD8  LUP.6
+70BE0  UP.1
+70BE4  UP.2
+70BB8  UP.3
+70B94  UP.5
+70BFC  _OpenRIFF  EA IFF: open a read context on a file.
+70CA4  _OpenRGroup  EA IFF: descend into a FORM/LIST/CAT group.
+70D14  _CloseRGroup  EA IFF: leave a group.
+70D46  _SkipFwd  EA IFF: skip forward over chunk data.
+70D8E  _GetChunkHdr  EA IFF: read the next chunk's id + size.
+70F12  _IFFReadBytes  EA IFF: read raw bytes from the current chunk.
+70F8C  _SkipGroup
+70F94  _ReadIFF  EA IFF: top-level reader dispatch (FORM/LIST/CAT).
+71036  _ReadIList
+7115C  _ReadICat
+71170  _GetFChunkHdr
+711A0  _GetF1ChunkHdr
+71232  _GetPChunkHdr
+71294  _MFOpen  mini-filesystem: open a file by reading the disk directly through trackdisk.device (bypasses AmigaDOS).
+71486  _MFClose
+715D6  _MFRead  mini-filesystem: read bytes, refilling from raw disk sectors.
+716B2  _MFWrite
+7176C  _MFSeek  mini-filesystem: seek within a file.
+717EA  _MFillBuf
+71844  _MFlushBuf
+718C8  _MFDrive
+718DA  _MGetDir  mini-filesystem: read the volume directory off the disk.
+71998  _MFlushDir
+719BE  _MCloseDir
+71A22  _MFindEntry  mini-filesystem: look a name up in the directory.
+71A7A  _MAddEntry
+71B10  _toupper
+71B52  _strcmp
+71BC2  _strcopy
+71BF8  _MERR
+71BFC  _mf_ios
+71C00  _minidir
+71C04  _MF_UseDrive
+71C1C  CreateStdIO  allocate an IORequest for trackdisk.device.
+71C72  DeleteStdIO
+71CBE  ReadSecs  read raw sectors via trackdisk.device (CMD_READ + DoIO).
+71D04  WriteSecs  write raw sectors via trackdisk.device.
+71D4A  UpdateTD
+71C1C  MotorOff  spin the floppy motor down.
+71DA8  _Open
+71DC4  _Close
+71DD8  _Read
+71DF4  _Seek
+71E10  _AllocMem
+71E28  _FreeMem
+71E40  _FindTask
+71E54  _AllocSignal
+71E68  _FreeSignal
+71E7C  _OpenLibrary  exec OpenLibrary (graphics.library / intuition for the display).
+71E94  _CloseLibrary
+71EA8  _OpenDevice  exec OpenDevice — opens trackdisk.device for the mini-filesystem.
+71EC8  _CloseDevice
+71EDC  _DoIO  exec DoIO — synchronous device request (trackdisk reads).
+71EF0  _LoadRGB4  graphics LoadRGB4 — load the colour registers from _colors.
+71F0C  _InitRastPort  graphics InitRastPort.
+71F20  _InitVPort  graphics InitVPort.
+71F34  _MrgCop  graphics MrgCop — merge the copper lists.
+71F48  _MakeVPort  graphics MakeVPort — build the copper list for the viewport.
+71F60  _LoadView  graphics LoadView — install the View, putting the splash on screen.
+71F74  _WaitBlit
+71F84  _WaitTOF  graphics WaitTOF — sync to vertical blank.
+71F94  _InitView  graphics InitView.
+71FA8  _InitBitMap  graphics InitBitMap for the splash bitplanes.
+71FC8  _FreeVPortCopLists  graphics: free the viewport copper lists (teardown).
+71FDC  _FreeCprList  graphics: free a copper list (teardown).

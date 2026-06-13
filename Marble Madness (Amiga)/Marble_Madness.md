@@ -937,18 +937,23 @@ colourful course floor and walls, by contrast, are the **`.mlb` level modules,
 which are 4 bitplanes (16 colours)** — the `.mlb` loader (`$7F38`) relocates four
 plane pointers and a palette pointer at the head of its work buffer.
 
-**The `.mlb` tile bitmap is only partially decoded.** Its header (four plane
-pointers + a palette pointer, relocated by the loader `$7F38`) and its 16-colour
-palette (offset `0x17`) are pinned, and a **2-plane view** of the tile data shows
-*recognisable shapes* — the isometric tile faces with diagonal edges — but
-**stretched ~2× vertically**: two of those 2-bit rows belong together as one real
-4-bit row, so the playfield is genuinely 4 bitplanes. The catch is that combining
-the rows as four interleaved planes (the obvious fix) scrambles into colour-correct
-noise, and so does every planar/width variant tried — the planes are evidently
-*separated*, not row-paired, and the exact plane/width layout (plus a likely
-tile-index map) is still unknown. So [`rendered/`](rendered) ships the honest
-2-plane partial (`<course>.mlb.png`, greyscale, vertically stretched) as the
-closest result, with the full 4-plane colour decode left as the open task.
+**The `.mlb` tile set, decoded from the consumer.** Tracing the tile blitter
+(`$9910` → `$99C0`) gives the exact format: the course is built from **8×8 tiles,
+4 bitplanes (16 colours)**, and a **tilemap**. The loader (`$7F38`) PackBits-
+unpacks the bitmap (from `0x37`, after the palette) into its work buffer and
+relocates four plane pointers and the tilemap pointer; the four header longwords
+(`0x07/0x0b/0x0f/0x13`) bound the planes, so the four planes sit at unpacked
+offsets `off[i]−off[0]` (plane 0 at 0), each `off[1]−off[0]` bytes (6512 for
+practice → 814 tiles). The blitter reads each tile as eight 1-byte rows at
+`plane[(i>>1)*16 + (i&1) + 2*r]` — i.e. **even/odd tiles are byte-interleaved**
+within 16-byte groups, and rows are at the even byte offsets — then composites the
+four planes through the course palette. [`extract/cmd/sprites`](extract/cmd/sprites)
+now decodes this and emits the colour tile set per course to
+[`rendered/`](rendered) (`<course>.mlb.png`): the practice course resolves into its
+grey isometric floor tiles (diagonal shading), red walls, and yellow/orange
+railings — the real colours. Assembling the full course image from the tilemap
+(`buffer+$12`, a word-stream of tile indices) is the remaining step; this emits the
+tile *set*, not the laid-out course.
 
 A second `.ilb`/`.vlb` refinement remains. **Exact cell boundaries:** the loader
 expands each

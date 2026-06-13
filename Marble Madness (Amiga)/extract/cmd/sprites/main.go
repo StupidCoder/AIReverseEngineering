@@ -75,6 +75,35 @@ func mlbPalette(d []byte) color.Palette {
 	return p
 }
 
+// mlbTiles renders a .mlb tile set: 8x8, 4 bitplanes, the four planes starting at
+// planes[0..3] in the unpacked buffer. Tile i's row r is the byte at
+// plane[(i>>1)*16 + (i&1) + 2*r]. Tiles are laid out cols-per-row with a 1px gap.
+func mlbTiles(up []byte, planes [4]int, nTiles, cols int) *image.Paletted {
+	rows := (nTiles + cols - 1) / cols
+	W := cols*9 + 1
+	H := rows*9 + 1
+	img := image.NewPaletted(image.Rect(0, 0, W, H), pal)
+	for t := 0; t < nTiles; t++ {
+		cx := (t%cols)*9 + 1
+		cy := (t/cols)*9 + 1
+		b0 := (t>>1)*16 + (t & 1)
+		for r := 0; r < 8; r++ {
+			var bp [4]byte
+			for p := 0; p < 4; p++ {
+				if o := planes[p] + b0 + 2*r; o < len(up) {
+					bp[p] = up[o]
+				}
+			}
+			for x := 0; x < 8; x++ {
+				bit := uint(7 - x)
+				v := bp[0]>>bit&1 | (bp[1]>>bit&1)<<1 | (bp[2]>>bit&1)<<2 | (bp[3]>>bit&1)<<3
+				img.SetColorIndex(cx+x, cy+r, v)
+			}
+		}
+	}
+	return img
+}
+
 // planarCell renders one 16-wide, h-row, 2-plane (row-interleaved) cell starting
 // at byte off in buf into a paletted image. Out-of-range bytes read as 0.
 func planarCell(buf []byte, off, h int) *image.Paletted {
@@ -205,19 +234,25 @@ func main() {
 		out := filepath.Join(outdir, base+".png")
 
 		if ext == ".mlb" {
-			// The .mlb playfield is 4 bitplanes / 16 colours (palette at 0x17), but
-			// its true tile layout is NOT decoded. This 2-plane view is the closest
-			// partial result so far: recognisable tile shapes (the isometric faces)
-			// appear, but vertically stretched ~2x — i.e. two of these 2-bit rows
-			// belong together as one real 4-bit row. Combining them as 4 interleaved
-			// planes scrambles, so the planes are evidently separated, not row-paired,
-			// and the exact plane/width layout is the open problem. Rendered greyscale
-			// (palette colours 0..3) as an honest "partial decode" marker.
+			// The .mlb (map library) tile set, decoded from the consumer ($99C0):
+			// 8x8 tiles, 4 bitplanes (16 colours, palette at 0x17). The bitmap is
+			// PackBits-packed from 0x37; the four header longwords (0x07/0x0b/0x0f/
+			// 0x13) are the plane bounds, so the four planes are at unpacked offsets
+			// off[i]-off[0] (plane 0 at 0), each (off[1]-off[0]) bytes. Tile i: row
+			// r (0..7) = plane[(i>>1)*16 + (i&1) + 2*r] (even/odd tiles byte-
+			// interleaved, 1 byte = 8px per row). The course itself is then a tilemap
+			// of these (at buffer+$12) — not assembled here; this emits the tile set.
 			pal = greys
-			raw := unpackByteRun1(d[24:])
-			writePNG(out, scale(sheet(raw, 16, 16), 2))
-			fmt.Printf("%-14s flag=$%02X  .mlb 2-plane PARTIAL (true layout is 4-plane, undecoded) -> %s\n",
-				base, d[0], out)
+			if p, ok := palettes[course]; ok {
+				pal = p
+			}
+			off := func(o int) int { return int(d[o])<<24 | int(d[o+1])<<16 | int(d[o+2])<<8 | int(d[o+3]) }
+			o0, o1, o2, o3 := off(0x07), off(0x0b), off(0x0f), off(0x13)
+			planes := [4]int{0, o1 - o0, o2 - o0, o3 - o0}
+			up := unpackByteRun1(d[0x37:])
+			nTiles := (o1 - o0) / 8
+			writePNG(out, scale(mlbTiles(up, planes, nTiles, 40), 3))
+			fmt.Printf("%-14s flag=$%02X  %d 8x8x4 tiles  pal=%s -> %s\n", base, d[0], nTiles, course, out)
 			return nil
 		}
 

@@ -53,6 +53,8 @@
 # --- display + palette ---
 0248F0  gfx_setrgb4      graphics.library SetRGB4 wrapper (-$120 via the graphics base at $1F4); applies colours into a ViewPort.
 01F5CC  apply_palette    sets the playfield ViewPort's colours (calls gfx_setrgb4 with the ViewPort at $1FA82). The colour VALUES come from the loaded course .mlb, not from the .dat — the program holds no colour table.
+009910  mlb_draw_column  draw a column/region of the course from the tilemap: reads the tilemap (buffer+$12 via $83E4) and the 4 tile-graphic plane pointers, indexing tiles by (index*36); calls draw_tile per tilemap entry.
+0099C0  draw_tile        blit one 8x8 4-plane tile into the screen bitmap: tile source = plane[(index>>1)*16 + (index&1)] (even/odd tiles byte-interleaved); copies 8 rows (1 byte each, at even source offsets 0,2,..,$E) for each of the 4 planes to the destination at row stride $24=36. So .mlb tiles are 8x8, 16-colour.
 # The per-course palette lives in each course's .mlb level module at offset 0x17:
 # 16 big-endian $0RGB words (playfield colours 0-15; 0-6 = shared grey scenery
 # ramp, 7-15 = per-course object colours). Confirmed by reading $DFF180 live under

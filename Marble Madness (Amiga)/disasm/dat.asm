@@ -6962,7 +6962,7 @@
 0098FC  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
 00990C  .dc.b 00 00 00 00                                     ; ....
 
-; ==== sub_009910 (2 callers) ====
+; ==== mlb_draw_column  $009910  (2 callers) — draw a column/region of the course from the tilemap: reads the tilemap (buffer+$12 via $83E4) and the 4 tile-graphic plane pointers, indexing tiles by (index*36); calls draw_tile per tilemap entry. ====
 009910  4E 56 FF D4                   LINK a6,#-$2C
 009914  48 E7 02 3C                   MOVEM.l d6/a2-a5,-(a7)
 009918  20 79 00 00 83 E4             MOVEA.l $83E4.l,a0
@@ -7026,7 +7026,7 @@
 0099B8  4C DF                         .dc.w $4CDF
 0099BA  .dc.b 3C 40 4E 5E 4E 75                               ; <@N^Nu
 
-; ==== sub_0099C0 (1 caller) ====
+; ==== draw_tile  $0099C0  (1 caller) — blit one 8x8 4-plane tile into the screen bitmap: tile source = plane[(index>>1)*16 + (index&1)] (even/odd tiles byte-interleaved); copies 8 rows (1 byte each, at even source offsets 0,2,..,$E) for each of the 4 planes to the destination at row stride $24=36. So .mlb tiles are 8x8, 16-colour. ====
 0099C0  4E 56 00 00                   LINK a6,#$0
 0099C4  48 E7 00 18                   MOVEM.l a3-a4,-(a7)
 0099C8  43 F9 00 00 83 54             LEA $8354.l,a1

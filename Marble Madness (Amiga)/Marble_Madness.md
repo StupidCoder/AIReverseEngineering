@@ -937,36 +937,52 @@ colourful course floor and walls, by contrast, are the **`.mlb` level modules,
 which are 4 bitplanes (16 colours)** — the `.mlb` loader (`$7F38`) relocates four
 plane pointers and a palette pointer at the head of its work buffer.
 
-**The `.mlb` tile set, decoded from the consumer.** Tracing the tile blitter
-(`$9910` → `$99C0`) gives the exact format: the course is built from **8×8 tiles,
-4 bitplanes (16 colours)**, and a **tilemap**. The loader (`$7F38`) PackBits-
-unpacks the bitmap (from `0x37`, after the palette) into its work buffer and
-relocates four plane pointers and the tilemap pointer; the four header longwords
-(`0x07/0x0b/0x0f/0x13`) bound the planes, so the four planes sit at unpacked
-offsets `off[i]−off[0]` (plane 0 at 0), each `off[1]−off[0]` bytes (6512 for
-practice → 814 tiles). The blitter reads each tile as eight 1-byte rows at
-`plane[(i>>1)*16 + (i&1) + 2*r]` — i.e. **even/odd tiles are byte-interleaved**
-within 16-byte groups, and rows are at the even byte offsets — then composites the
-four planes through the course palette.
+**The `.mlb` format, decoded from the consumer.** The whole file is **one
+ByteRun1/PackBits stream**. The loader (`$7F38`) unpacks it into a work buffer and
+relocates four plane pointers and the tilemap pointer that sit in the buffer's
+header; the tile blitter (`$9910` → `$99C0`) then draws the course. The unpacked
+buffer's layout (silly.mlb shown):
 
-**The full courses, assembled.** The tilemap (`buffer+$12`) is a row-major stream
-of big-endian tile-index words; the blitter's 72-byte row stride fixes the course
+| Buffer offset | Field | silly value |
+|---|---|---|
+| `+0x00` word | tile count | `0x008F` (143) |
+| `+0x02` long | plane-0 offset | `0x000036` |
+| `+0x06` long | plane-1 offset | `0x001D76` |
+| `+0x0A` long | plane-2 offset | `0x003AB6` |
+| `+0x0E` long | plane-3 offset | `0x0057F6` |
+| `+0x12` long | tilemap offset | `0x007536` |
+| `+0x16 … +0x36` (32 B) | **palette** | 16 `$0RGB` words (also raw at file `0x17`) |
+| `+0x36 … +0x1D76` | **plane 0** (7488 B) | tile bitplane 0 |
+| `+0x1D76 … +0x3AB6` | plane 1 | tile bitplane 1 |
+| `+0x3AB6 … +0x57F6` | plane 2 | tile bitplane 2 |
+| `+0x57F6 … +0x7536` | plane 3 | tile bitplane 3 |
+| `+0x7536 … +0x9DB6` | **tilemap** (10368 B) | 144 × 36 tile-index words |
+
+(The four plane offsets differ per course but the plane-0 offset is always `0x36`,
+and the planes are a constant stride apart — that stride is the plane size, so the
+tile count = stride/8. The header palette appears raw in the file at `0x17` because
+it is stored as a PackBits literal run.)
+
+**Tiles** are **8×8, 4 bitplanes (16 colours)**. The blitter reads each tile as
+eight 1-byte rows at `plane[(i>>1)*16 + (i&1) + 2*r]` — i.e. **even/odd tiles are
+byte-interleaved** within 16-byte groups, rows at the even byte offsets — and
+composites the four planes through the course palette. Tile 0 is the all-black
+tile in every course.
+
+**The full courses, assembled.** The **tilemap** is a row-major stream of
+big-endian tile-index words; the blitter's 72-byte row stride fixes the course
 **width at 36 tiles (288 px)**, and because Marble Madness scrolls vertically that
-width is constant while the height varies — practice is 36×75, up through ultimate
-at 36×198. The tilemap is **end-aligned** in the unpacked buffer: most courses
-have it immediately after the four planes, but beginner and silly leave a small
-gap (56 and 50 bytes) there, so the tilemap is taken as the *last* `height×72`
-bytes. Those same two courses also **omit the leading black tile**: every other
-course stores an all-black tile at graphic index 0, but beginner's and silly's
-stored tile 0 is a real tile, so their tile indices run one high — detected by
-testing whether tile 0 is black, and corrected with a −1 index bias (index 0 →
-the implicit black tile). Placing each 8×8 tile by its index
-reproduces each **complete course**: [`extract/cmd/sprites`](extract/cmd/sprites)
-emits the course to [`rendered/`](rendered) as `<course>.png` and the tile set as
-`<course>.tiles.png`. The practice course renders as its grey isometric checkered
-floor, red walls, yellow/orange railings and the `GOAL` banner; all six courses
-come out in their real per-course colours. Cracked end to end: container →
-ByteRun1 → 8×8×4 tiles → palette → tilemap → course image.
+width is constant while the height varies — practice 36×75 up through ultimate
+36×198. Placing each 8×8 tile by its index reproduces each **complete course**:
+[`extract/cmd/sprites`](extract/cmd/sprites) emits the course to
+[`rendered/`](rendered) as `<course>.png` and the tile set as `<course>.tiles.png`.
+The practice course renders as its grey isometric checkered floor, red walls,
+yellow/orange railings and the `GOAL` banner; all six courses come out in their
+real per-course colours. (Reading the offsets and tilemap pointer from the proper
+*whole-file-unpacked* buffer header — rather than guessing them from the raw file —
+is what makes every course correct; an earlier model that unpacked only from `0x37`
+mis-aligned beginner and silly.) Cracked end to end: container → ByteRun1 →
+8×8×4 tiles → palette → tilemap → course image.
 
 A second `.ilb`/`.vlb` refinement remains. **Exact cell boundaries:** the loader
 expands each

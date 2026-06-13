@@ -94,31 +94,12 @@ func blitTile(img *image.Paletted, up []byte, planes [4]int, idx, px, py int) {
 	}
 }
 
-// tile0Black reports whether tile 0 is the all-black tile. Most courses store a
-// black tile at index 0; a couple (beginner, silly) omit it, so their stored tile
-// 0 is a real tile and every tilemap index is one too high (bias -1 below).
-func tile0Black(up []byte, planes [4]int) bool {
-	for p := 0; p < 4; p++ {
-		for r := 0; r < 8; r++ {
-			if o := planes[p] + 2*r; o < len(up) && up[o] != 0 {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-// tileSheet renders nTiles 8x8 tiles in a cols-wide grid (1px gaps). bias shifts
-// the stored-tile index so the sheet's positions match the in-game tile indices
-// (position 0 = the implicit black tile when bias is -1).
-func tileSheet(up []byte, planes [4]int, nTiles, cols, bias int) *image.Paletted {
-	n := nTiles - bias
-	rows := (n + cols - 1) / cols
+// tileSheet renders all nTiles 8x8 tiles in a cols-wide grid (1px gaps).
+func tileSheet(up []byte, planes [4]int, nTiles, cols int) *image.Paletted {
+	rows := (nTiles + cols - 1) / cols
 	img := image.NewPaletted(image.Rect(0, 0, cols*9+1, rows*9+1), pal)
-	for t := 0; t < n; t++ {
-		if e := t + bias; e >= 0 {
-			blitTile(img, up, planes, e, (t%cols)*9+1, (t/cols)*9+1)
-		}
+	for t := 0; t < nTiles; t++ {
+		blitTile(img, up, planes, t, (t%cols)*9+1, (t/cols)*9+1)
 	}
 	return img
 }
@@ -126,17 +107,15 @@ func tileSheet(up []byte, planes [4]int, nTiles, cols, bias int) *image.Paletted
 // mlbCourse assembles the full course image from the tilemap: a row-major stream
 // of big-endian tile-index words, courseW tiles wide (the game scrolls vertically,
 // so width is fixed and height varies). Returns the image and its tile height.
-func mlbCourse(up []byte, planes [4]int, tilemap []byte, courseW, bias int) (*image.Paletted, int) {
+func mlbCourse(up []byte, planes [4]int, tilemap []byte, courseW int) (*image.Paletted, int) {
 	n := len(tilemap) / 2
 	H := n / courseW
 	img := image.NewPaletted(image.Rect(0, 0, courseW*8, H*8), pal)
 	for ty := 0; ty < H; ty++ {
 		for tx := 0; tx < courseW; tx++ {
 			o := (ty*courseW + tx) * 2
-			idx := (int(tilemap[o])<<8 | int(tilemap[o+1])) + bias
-			if idx >= 0 { // idx < 0 is the implicit black tile (leave palette index 0)
-				blitTile(img, up, planes, idx, tx*8, ty*8)
-			}
+			idx := int(tilemap[o])<<8 | int(tilemap[o+1])
+			blitTile(img, up, planes, idx, tx*8, ty*8)
 		}
 	}
 	return img, H
@@ -272,42 +251,33 @@ func main() {
 		out := filepath.Join(outdir, base+".png")
 
 		if ext == ".mlb" {
-			// The .mlb (map library) tile set, decoded from the consumer ($99C0):
-			// 8x8 tiles, 4 bitplanes (16 colours, palette at 0x17). The bitmap is
-			// PackBits-packed from 0x37; the four header longwords (0x07/0x0b/0x0f/
-			// 0x13) are the plane bounds, so the four planes are at unpacked offsets
-			// off[i]-off[0] (plane 0 at 0), each (off[1]-off[0]) bytes. Tile i: row
-			// r (0..7) = plane[(i>>1)*16 + (i&1) + 2*r] (even/odd tiles byte-
-			// interleaved, 1 byte = 8px per row). The course itself is then a tilemap
-			// of these (at buffer+$12) — not assembled here; this emits the tile set.
+			// The .mlb (map library) is one ByteRun1/PackBits stream over the whole
+			// file. Unpacked, its work buffer begins:
+			//   +0   word   tile count (not always used)
+			//   +2   long   plane-0 offset ($36 — the four planes follow the header)
+			//   +6/+10/+14  long  plane-1/2/3 offsets (the loader $7F38 relocates
+			//                     these four and the tilemap pointer to absolute)
+			//   +$12 long   tilemap offset
+			// Tiles are 8x8, 4 bitplanes (16 colours, course palette from .mlb 0x17).
+			// Tile i row r (0..7) = plane[(i>>1)*16 + (i&1) + 2*r] (even/odd tiles
+			// byte-interleaved). The tilemap is a row-major stream of tile-index
+			// words, 36 tiles (288px) wide; the game scrolls vertically so the width
+			// is fixed and the height varies.
 			pal = greys
 			if p, ok := palettes[course]; ok {
 				pal = p
 			}
-			off := func(o int) int { return int(d[o])<<24 | int(d[o+1])<<16 | int(d[o+2])<<8 | int(d[o+3]) }
-			o0, o1, o2, o3 := off(0x07), off(0x0b), off(0x0f), off(0x13)
-			planes := [4]int{0, o1 - o0, o2 - o0, o3 - o0}
-			up := unpackByteRun1(d[0x37:])
-			nTiles := (o1 - o0) / 8
-			planeEnd := (o3 - o0) + (o1 - o0) // four planes, then the tilemap
-			const courseW = 36               // 72-byte tilemap row stride (blitter $9910)
-			// The tilemap is END-aligned in the unpacked buffer: a few courses
-			// (beginner, silly) have a small gap between the planes and the tilemap,
-			// so reading from planeEnd would shift every tile. Take the last
-			// height*72 bytes instead.
-			ht := (len(up) - planeEnd) / courseW / 2
-			tilemap := up[len(up)-ht*courseW*2:]
-			// Courses whose stored tile 0 isn't black omit the implicit black tile,
-			// so every tilemap index is one too high.
-			bias := 0
-			if !tile0Black(up, planes) {
-				bias = -1
-			}
-			img, _ := mlbCourse(up, planes, tilemap, courseW, bias)
+			buf := unpackByteRun1(d)
+			lw := func(o int) int { return int(buf[o])<<24 | int(buf[o+1])<<16 | int(buf[o+2])<<8 | int(buf[o+3]) }
+			planes := [4]int{lw(2), lw(6), lw(10), lw(14)}
+			tmOff := lw(0x12)
+			nTiles := (planes[1] - planes[0]) / 8
+			const courseW = 36
+			img, ht := mlbCourse(buf, planes, buf[tmOff:], courseW)
 			writePNG(filepath.Join(outdir, course+".png"), scale(img, 2))
-			writePNG(filepath.Join(outdir, course+".tiles.png"), scale(tileSheet(up, planes, nTiles, 40, bias), 3))
-			fmt.Printf("%-14s flag=$%02X  %d tiles bias=%d, course %dx%d (%dx%d px)  pal=%s\n",
-				base, d[0], nTiles, bias, courseW, ht, courseW*8, ht*8, course)
+			writePNG(filepath.Join(outdir, course+".tiles.png"), scale(tileSheet(buf, planes, nTiles, 40), 3))
+			fmt.Printf("%-14s flag=$%02X  %d tiles, course %dx%d (%dx%d px)  pal=%s\n",
+				base, d[0], nTiles, courseW, ht, courseW*8, ht*8, course)
 			return nil
 		}
 

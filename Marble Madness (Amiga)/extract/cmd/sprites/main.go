@@ -75,33 +75,40 @@ func mlbPalette(d []byte) color.Palette {
 	return p
 }
 
-// mlbTiles renders a .mlb tile set: 8x8, 4 bitplanes, the four planes starting at
-// planes[0..3] in the unpacked buffer. Tile i's row r is the byte at
-// plane[(i>>1)*16 + (i&1) + 2*r]. Tiles are laid out cols-per-row with a 1px gap.
-func mlbTiles(up []byte, planes [4]int, nTiles, cols int) *image.Paletted {
-	rows := (nTiles + cols - 1) / cols
-	W := cols*9 + 1
-	H := rows*9 + 1
-	img := image.NewPaletted(image.Rect(0, 0, W, H), pal)
-	for t := 0; t < nTiles; t++ {
-		cx := (t%cols)*9 + 1
-		cy := (t/cols)*9 + 1
-		b0 := (t>>1)*16 + (t & 1)
-		for r := 0; r < 8; r++ {
-			var bp [4]byte
-			for p := 0; p < 4; p++ {
-				if o := planes[p] + b0 + 2*r; o < len(up) {
-					bp[p] = up[o]
-				}
-			}
-			for x := 0; x < 8; x++ {
-				bit := uint(7 - x)
-				v := bp[0]>>bit&1 | (bp[1]>>bit&1)<<1 | (bp[2]>>bit&1)<<2 | (bp[3]>>bit&1)<<3
-				img.SetColorIndex(cx+x, cy+r, v)
+// blitTile draws 8x8 tile idx at (px,py) into img, reading the four planes from
+// the unpacked buffer: tile row r is the byte at plane[(idx>>1)*16 + (idx&1) + 2*r].
+func blitTile(img *image.Paletted, up []byte, planes [4]int, idx, px, py int) {
+	b0 := (idx>>1)*16 + (idx & 1)
+	for r := 0; r < 8; r++ {
+		var bp [4]byte
+		for p := 0; p < 4; p++ {
+			if o := planes[p] + b0 + 2*r; o >= 0 && o < len(up) {
+				bp[p] = up[o]
 			}
 		}
+		for x := 0; x < 8; x++ {
+			bit := uint(7 - x)
+			v := bp[0]>>bit&1 | (bp[1]>>bit&1)<<1 | (bp[2]>>bit&1)<<2 | (bp[3]>>bit&1)<<3
+			img.SetColorIndex(px+x, py+r, v)
+		}
 	}
-	return img
+}
+
+// mlbCourse assembles the full course image from the tilemap: a row-major stream
+// of big-endian tile-index words, courseW tiles wide (the game scrolls vertically,
+// so width is fixed and height varies). Returns the image and its tile height.
+func mlbCourse(up []byte, planes [4]int, tilemap []byte, courseW int) (*image.Paletted, int) {
+	n := len(tilemap) / 2
+	H := n / courseW
+	img := image.NewPaletted(image.Rect(0, 0, courseW*8, H*8), pal)
+	for ty := 0; ty < H; ty++ {
+		for tx := 0; tx < courseW; tx++ {
+			o := (ty*courseW + tx) * 2
+			idx := int(tilemap[o])<<8 | int(tilemap[o+1])
+			blitTile(img, up, planes, idx, tx*8, ty*8)
+		}
+	}
+	return img, H
 }
 
 // planarCell renders one 16-wide, h-row, 2-plane (row-interleaved) cell starting
@@ -250,9 +257,12 @@ func main() {
 			o0, o1, o2, o3 := off(0x07), off(0x0b), off(0x0f), off(0x13)
 			planes := [4]int{0, o1 - o0, o2 - o0, o3 - o0}
 			up := unpackByteRun1(d[0x37:])
-			nTiles := (o1 - o0) / 8
-			writePNG(out, scale(mlbTiles(up, planes, nTiles, 40), 3))
-			fmt.Printf("%-14s flag=$%02X  %d 8x8x4 tiles  pal=%s -> %s\n", base, d[0], nTiles, course, out)
+			planeEnd := (o3 - o0) + (o1 - o0) // four planes, then the tilemap
+			const courseW = 36               // 72-byte tilemap row stride (blitter $9910)
+			img, ht := mlbCourse(up, planes, up[planeEnd:], courseW)
+			writePNG(out, scale(img, 2))
+			fmt.Printf("%-14s flag=$%02X  course %dx%d tiles (%dx%d px)  pal=%s -> %s\n",
+				base, d[0], courseW, ht, courseW*8, ht*8, course, out)
 			return nil
 		}
 

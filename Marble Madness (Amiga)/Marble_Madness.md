@@ -947,13 +947,19 @@ offsets `off[i]−off[0]` (plane 0 at 0), each `off[1]−off[0]` bytes (6512 for
 practice → 814 tiles). The blitter reads each tile as eight 1-byte rows at
 `plane[(i>>1)*16 + (i&1) + 2*r]` — i.e. **even/odd tiles are byte-interleaved**
 within 16-byte groups, and rows are at the even byte offsets — then composites the
-four planes through the course palette. [`extract/cmd/sprites`](extract/cmd/sprites)
-now decodes this and emits the colour tile set per course to
-[`rendered/`](rendered) (`<course>.mlb.png`): the practice course resolves into its
-grey isometric floor tiles (diagonal shading), red walls, and yellow/orange
-railings — the real colours. Assembling the full course image from the tilemap
-(`buffer+$12`, a word-stream of tile indices) is the remaining step; this emits the
-tile *set*, not the laid-out course.
+four planes through the course palette.
+
+**The full courses, assembled.** The tilemap (after the four planes in the
+unpacked buffer — `buffer+$12`) is a row-major stream of big-endian tile-index
+words; the blitter's 72-byte row stride fixes the course **width at 36 tiles
+(288 px)**, and because Marble Madness scrolls vertically, that width is constant
+while the height varies — practice is 36×75, up through ultimate at 36×198.
+Placing each 8×8 tile by its index reproduces each **complete course**:
+[`extract/cmd/sprites`](extract/cmd/sprites) emits them to [`rendered/`](rendered)
+(`<course>.mlb.png`) — the practice course renders as its grey isometric checkered
+floor, red walls, yellow/orange railings and the `GOAL` banner, in the real
+per-course colours. Six files cracked end to end: container → ByteRun1 →
+8×8×4 tiles → palette → tilemap → course image.
 
 A second `.ilb`/`.vlb` refinement remains. **Exact cell boundaries:** the loader
 expands each

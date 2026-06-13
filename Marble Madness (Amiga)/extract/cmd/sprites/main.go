@@ -9,7 +9,7 @@
 // palette is a copper list not yet decoded.
 //
 // Usage: sprites <disk.adf> <outdir>
-//   writes <outdir>/<bankname>/sheet.png (+ cells/NNN.png) per bank.
+//   writes <outdir>/<bankname>.png — one tiled sheet of all cells per bank.
 package main
 
 import (
@@ -182,18 +182,10 @@ func main() {
 			return nil
 		}
 		raw := unpackByteRun1(d[hdr:])
-		dir := filepath.Join(outdir, base)
-		writePNG(filepath.Join(dir, "sheet.png"), scale(sheet(raw, h, 16), 3))
-		// individual cells (16 x h, one per cell-stride). Alignment is approximate
-		// for masked banks (e.g. the marble), exact for the opaque course scenery.
-		cellBytes := 4 * h
-		n := (len(raw) + cellBytes - 1) / cellBytes
-		for i := 0; i < n; i++ {
-			writePNG(filepath.Join(dir, "cells", fmt.Sprintf("%03d.png", i)),
-				scale(planarCell(raw, i*cellBytes, h), 4))
-		}
-		fmt.Printf("%-14s flag=$%02X hdr=%d packed=%d unpacked=%d  cell=16x%d  %d cells -> %s/\n",
-			base, d[0], hdr, len(d)-hdr, len(raw), h, n, dir)
+		out := filepath.Join(outdir, base+".png")
+		writePNG(out, scale(sheet(raw, h, 16), 3))
+		fmt.Printf("%-14s flag=$%02X hdr=%d packed=%d unpacked=%d  cell=16x%d -> %s\n",
+			base, d[0], hdr, len(d)-hdr, len(raw), h, out)
 		return nil
 	}))
 }

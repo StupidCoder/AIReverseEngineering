@@ -907,11 +907,11 @@ load path, so they share the codec; only their wrapper differs.
 So the container, the slot geometry (132-byte course cells, 68-byte moving-object
 cells), the file roster, **and the compression** are all established. With the
 codec in hand, [`extract/cmd/sprites`](extract/cmd/sprites) unpacks every bank and
-renders its cells as 2-bitplane (4-colour), 16-px-wide, row-interleaved PNGs into
-`extracted/sprites/<bank>/` (a tiled `sheet.png` plus individual `cells/`). The
-output confirms the decode visually: the course `.ilb` banks resolve into the
-recognisable **isometric scenery tiles** (diagonal block faces), and `marbdat.vlb`
-into the **marble's rotation frames** (16-px spheres with a shading plane).
+renders its cells as 2-bitplane (4-colour), 16-px-wide, row-interleaved PNGs — one
+tiled sheet per bank in [`rendered/`](rendered) (`<bank>.png`). The output confirms
+the decode visually: the course `.ilb` banks resolve into the recognisable
+**isometric scenery tiles** (diagonal block faces), and `marbdat.vlb` into the
+**marble's rotation frames** (16-px spheres with a shading plane).
 
 Two refinements remain. **Colour:** the renders are placeholder greys; the
 per-course palette is set from a copper list / runtime table not yet located (no

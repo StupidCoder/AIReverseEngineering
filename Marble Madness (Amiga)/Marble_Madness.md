@@ -38,6 +38,7 @@ under way; Part V is still a stub.
   - [2. AmigaDOS startup and the Workbench launch](#2-amigados-startup-and-the-workbench-launch)
   - [3. The launcher](#3-the-launcher)
   - [4. The decruncher (`c/zzz`)](#4-the-decruncher-czzz)
+  - [5. The track loader (`c/xxx`)](#5-the-track-loader-cxxx)
 - [Part III — Game program architecture](#part-iii--game-program-architecture)
   - [1. The multi-stage load](#1-the-multi-stage-load)
   - [2. The decoder](#2-the-decoder)
@@ -374,6 +375,47 @@ also explains why the copy protection stops a purely static unpack short. The
 full annotated disassembly is in [`disasm/zzz.asm`](disasm/zzz.asm)
 ([`zzz.annotations.txt`](disasm/zzz.annotations.txt)).
 
+## 5. The track loader (`c/xxx`)
+
+Once `c/zzz` is reproduced (Part III) the second-stage file `c/xxx` can be
+decrypted and disassembled. Decrypted it is **a small compiled-C program whose
+job is to be a custom floppy *track loader* — a "fast loader"** — and it turns
+out to be the most interesting piece of code on the disk.
+
+`c/xxx` does **not** read its data through AmigaDOS or even through
+`trackdisk.device`'s normal commands. It opens only `dos.library` (for the
+allocation/exit plumbing), `FindTask`s itself, then **drives the floppy hardware
+directly**:
+
+* **CIA-B PRB (`$BFD100`)** — the drive control port: motor on/off, `/SEL0`
+  drive-select, `/SIDE`, and the `/STEP`/`DIR` lines. `seek_track0` ($6055E)
+  pulses `/STEP` here to recalibrate the head.
+* **CIA-A PRA (`$BFE001`)** — the drive-status inputs: `/RDY`, `/TK0` (track 0),
+  `/WPRO`, `/CHNG`. The loader polls these to know when a seek is done and the
+  disk is ready, and CIA-A DDRA (`$BFE201`) is set up for them in `disk_hw_init`
+  ($6046E).
+* **Paula disk DMA (`$DFF000` base)** — `dma_setup` ($6050C) programs `DMACON`
+  (`$DFF09A`) and `ADKCON` (`$DFF09E`) for MFM/word-sync mode, and `read_track`
+  ($607CA) points `DSKPT` (`$DFF020`) at a track buffer and writes `DSKLEN`
+  (`$DFF024`) `= (len/2)|$8000` **twice** — the canonical Amiga "arm disk DMA"
+  sequence — to pull a full **`$36F2` (14 066) byte raw MFM track** in one DMA
+  burst (with a 200 000-iteration timeout and a `DSKBLK` clear on `INTREQ`).
+
+So `c/xxx` reads raw MFM straight off the platter and decodes it in the CPU,
+bypassing the filesystem entirely. That is a classic fast-loader/streaming
+design (and a copy-protection hook: a custom track reader can require
+non-standard track formats a file copier won't reproduce). Its `main` first
+`AllocMem`s the load area sized from the control block the launcher passes, then
+`load_session` ($603A2) allocates the `$38`-byte IO struct plus a 512-byte CHIP
+sector buffer and walks the track reads. The full annotated disassembly is in
+[`disasm/cxxx.asm`](disasm/cxxx.asm)
+([`cxxx.annotations.txt`](disasm/cxxx.annotations.txt)); it is produced by the
+pure-Go reimplementation of the `c/zzz` decode in
+[`extract/cmd/decode`](extract/cmd/decode), which turns the encrypted `c/xxx`
+back into a clean 22-hunk AmigaDOS object — using the `c/zzz` copy-protection
+inputs captured live from a Kickstart 1.2 machine (the values that defeated a
+purely static unpack in Part III §4; the capture method is noted there).
+
 ---
 
 # Part III — Game program architecture
@@ -552,6 +594,25 @@ decryption is bound to live machine state the disk does not contain — the
 Kickstart-1.x exception vectors *and* the running process's handler pointers.
 The mechanism is wholly understood; the bytes stay gated behind a running,
 booted Amiga of the right vintage.
+
+**Update — the gate, opened.** Rather than emulate the full boot in the minimal
+core, the missing machine state was read off a real **Kickstart 1.2** under a
+GDB-controllable FS-UAE build (see [`tools/fsuae-debug/`](tools/fsuae-debug)). A
+CLI auto-run disk (`modadf.go` rewrites the `s/startup-sequence` in place and
+fixes the OFS block checksum) boots straight to the decrypt, and the launcher
+runs as the `Initial CLI` task — so its `FindTask(0)` `tc_ExceptCode`/`tc_TrapCode`
+read directly off the live task *are* the values `sub_DAA` folds in. The captured
+inputs are uniform: **every CPU exception/TRAP vector page byte `$FC`**, launcher
+`tc_ExceptCode` page `$FC`, `tc_TrapCode` page `$FF`. With those baked in, a
+**pure-Go reimplementation** ([`extract/cmd/decode`](extract/cmd/decode)) — seed
+table → key-array XOR → `sub_DAA` perturbation → lagged-Fibonacci keystream →
+structure-aware field/body decrypt — turns `c/xxx` (empty key array) into a clean
+22-hunk object, verified by the hunk loader applying every `RELOC32` and by the
+key array deriving to all-zeros against the known header plaintext. `c/xxx`
+proves to be the disk's fast loader (Part II §5). The game `.dat` is the same
+decode with a 20-long key array the launcher XOR-mutates with the `c/xxx`
+checksum; recovering that key array (capturing the second `key_init` pass) is the
+remaining step.
 
 ---
 

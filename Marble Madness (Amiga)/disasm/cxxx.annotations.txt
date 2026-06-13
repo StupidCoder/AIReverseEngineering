@@ -1,0 +1,60 @@
+# Marble Madness (Amiga) — c/xxx (DECRYPTED) annotations.
+# c/xxx is the game's second stage: a custom DIRECT-HARDWARE FLOPPY TRACK LOADER
+# (a "fast loader"). It is shipped on the disk c/zzz-encrypted; the launcher runs
+# c/zzz to decrypt it. Decrypted, it is a small compiled-C program that drives the
+# floppy hardware itself (Paula disk DMA + the two CIAs) instead of going through
+# AmigaDOS / trackdisk.device, so it can pull raw MFM tracks straight off the disk.
+# Names derived from behaviour. Reversed 2026-06-13.
+#
+# Regenerate (from repo root; .adf not committed):
+#   adfdump -x /tmp/mm "Marble Madness (Amiga)/Marble_Madness.adf"
+#   go run "./Marble Madness (Amiga)/extract/cmd/decode" \
+#       "Marble Madness (Amiga)/Marble_Madness.adf" c/xxx /tmp/cxxx.hunk
+#   go run ./tools/amiga/cmd/hunkload -base 60000 -o /tmp/cxxx.bin /tmp/cxxx.hunk
+#   go run ./tools/cmd/codetrace68k -base 60000 -entry 60000 \
+#       -annotate "Marble Madness (Amiga)/disasm/cxxx.annotations.txt" \
+#       -o "Marble Madness (Amiga)/disasm/cxxx.asm" /tmp/cxxx.bin
+# (Loaded contiguously from base $60000; the bulk of the loader is hunk 5,
+#  $60108..$60DE0. No HUNK_SYMBOL table — the file is stripped.)
+
+# --- C runtime + entry (hunk 0) ---
+60000  cstart            C runtime entry: save d0/a0 (the CLI/control-block args) to globals, cache ExecBase ($4.w -> $60064), MOVEM the regs, save SP; OpenLibrary dos.library; call main(arg0,arg1); fall through to exit.
+6003A  exit              restore the saved SP, MOVEM the regs back, RTS to AmigaDOS.
+60046  open_dos          OldOpenLibrary("dos.library") (exec -$228); store the base at $600A8.
+
+# --- top-level loader (hunk 5) ---
+600B8  main              main(ctrl): AllocMem a work buffer of ctrl->8 * 4 bytes (the load area), record it at ctrl->C, then call run_loader(ctrl); clear ctrl->10 on return.
+60108  run_loader        the loader's real entry: pull the source/dest descriptors out of the control block and call load_session; the spine that walks the request and reads each track.
+603A2  load_session      one load session: AllocMem a $38-byte device/IO control struct (the loader's IORequest-like block) and a 512-byte CHIP sector buffer, set up the drive, run the track reads (read_track / mfm chain), then FreeMem both. Returns 0 on success, 1 on alloc failure.
+
+# --- the direct floppy hardware driver (hunk 5) ---
+6046E  disk_hw_init      bring up the raw floppy hardware: copy a 20-byte parameter/identity table ($60E08) into the IO struct, set CIA-A DDRA ($BFE201) for the drive-status inputs, and idle CIA-B PRB ($BFD100 = $FF: all /SELx high, motor off). $DFF000 kept as the custom-chip base.
+6050C  dma_setup         program Paula for a disk transfer: write DMACON ($DFF09A) — clear all ($7FFF) then set the requested bits|$8000 — and ADKCON ($DFF09E) the same way (MFM/word-sync/precomp). Args are the DMACON/ADKCON masks; tail-calls $6075E.
+6055E  seek_track0       recalibrate: motor/select on, then pulse /STEP via CIA-B PRB ($BFD100, toggling the step/dir bits) while polling CIA-A PRA ($BFE001) /TK0 until the head reaches track 0; $3A98 (15000) head-settle delay.
+607CA  read_track        read one raw MFM track via Paula disk DMA: clear INTREQ DSKBLK ($DFF09C #2), set DSKPT ($DFF020) to the track buffer, check CIA-A PRA /RDY ($BFE001), then write DSKLEN ($DFF024) = (len/2)|$8000 TWICE — the standard Amiga "arm disk DMA" sequence — pulling a full $36F2-byte (14066) MFM track; $30D40 (200000) read timeout.
+6071C  drive_select      select drive 0 and turn the motor on via CIA-B PRB ($BFD100).
+6079E  step_wait         a short busy-wait used between drive-status polls while seeking.
+6075E  dma_wait          wait for the disk-DMA / blit to finish (paired with dma_setup).
+
+# --- helpers (hunk 5/8) ---
+60E1C  io_init           initialise the $38 IO control struct (zero it / link the message port).
+60E40  io_free           tear down / FreeMem the IO control struct.
+60E70  io_doio           drive a trackdisk-style request through the IO struct (motor/seek/read) — uses the exec DoIO stub.
+60F9E  load_finish       finish a load session (flush / stop the motor).
+61098  parse_request     validate the load request out of the control block before allocating buffers.
+61248  div_helper        small arithmetic helper (track/offset split; d0/d1 in).
+
+# --- exec.library stubs (hunk 12/15/19/20/21; a6 = ExecBase) ---
+61004  _AllocMem         exec AllocMem(size, flags) (-$C6)
+6101C  _FreeMem          exec FreeMem(addr, size) (-$D2)
+61034  _FindTask         exec FindTask(name|0) (-$126)
+61048  _AllocSignal      exec AllocSignal(signum) (-$14A) — for the IO reply port
+6105C  _FreeSignal       exec FreeSignal(signum) (-$150)
+61070  _AddPort          exec AddPort(port) (-$162) — public message port for the IORequest
+61084  _RemPort          exec RemPort(port) (-$168)
+610B8  _DoIO             exec DoIO(ioreq) (-$1C8) — synchronous device request
+
+# --- data ---
+600AC  s_dos_library     the string "dos.library".
+60E08  disk_params       20-byte parameter/identity table copied into the IO struct by disk_hw_init (drive timing / unit data).
+60DE0  load_descriptor   the static source/destination descriptor passed to load_session.

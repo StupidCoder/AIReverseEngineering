@@ -1,0 +1,8 @@
+.DS_Store
+
+# compiled extraction tools (build with: cd "<Game>/extract" && go build)
+*/extract/extract
+
+# regenerable extraction output
+*/extracted/
+*/extract/unpacked/

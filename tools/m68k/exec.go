@@ -95,6 +95,47 @@ func (c *CPU) execMoveq(op uint16) {
 
 func (c *CPU) execImmediate(op uint16) {
 	mode, reg, reg2, size := fields(op)
+	// Bit operations (BTST/BCHG/BCLR/BSET) live in group 0:
+	//   static  0000 1000 ttmmmrrr  (bit number in the immediate word)
+	//   dynamic 0000 rrr1 ttmmmrrr  (bit number in Dn), mode!=001 (else MOVEP)
+	static := op&0xFF00 == 0x0800
+	dynamic := op&0x0100 != 0 && mode != 1
+	if static || dynamic {
+		var bit uint32
+		if static {
+			bit = c.fetch16()
+		} else {
+			bit = c.D[reg2]
+		}
+		which := (op >> 6) & 3 // 0=BTST 1=BCHG 2=BCLR 3=BSET
+		if mode == 0 {         // register: 32-bit, bit mod 32
+			bit &= 31
+			d := c.D[reg]
+			c.Z = d&(1<<bit) == 0
+			switch which {
+			case 1:
+				c.D[reg] = d ^ (1 << bit)
+			case 2:
+				c.D[reg] = d &^ (1 << bit)
+			case 3:
+				c.D[reg] = d | (1 << bit)
+			}
+		} else { // memory: byte, bit mod 8
+			bit &= 7
+			ea := c.resolveEA(mode, reg, 0)
+			d := c.load(ea, 0)
+			c.Z = d&(1<<bit) == 0
+			switch which {
+			case 1:
+				c.store(ea, 0, d^(1<<bit))
+			case 2:
+				c.store(ea, 0, d&^(1<<bit))
+			case 3:
+				c.store(ea, 0, d|(1<<bit))
+			}
+		}
+		return
+	}
 	if op&0x0100 != 0 || size == 3 {
 		c.Halt("unimplemented bit/movep opcode $%04X at $%06X", op, c.PC-2)
 		return
@@ -192,6 +233,19 @@ func (c *CPU) execLogic(op uint16, kind byte) {
 		return
 	}
 	if op&0x0130 == 0x0100 && (op&0x00C0) != 0x00C0 { // ABCD/SBCD/EXG region
+		if kind == '&' { // EXG lives in the AND ($Cxxx) group
+			switch (op >> 3) & 0x1F {
+			case 0x08: // EXG Dx,Dy
+				c.D[reg2], c.D[reg] = c.D[reg], c.D[reg2]
+				return
+			case 0x09: // EXG Ax,Ay
+				c.A[reg2], c.A[reg] = c.A[reg], c.A[reg2]
+				return
+			case 0x11: // EXG Dx,Ay
+				c.D[reg2], c.A[reg] = c.A[reg], c.D[reg2]
+				return
+			}
+		}
 		c.Halt("unimplemented opcode $%04X at $%06X", op, c.PC-2)
 		return
 	}
@@ -466,6 +520,24 @@ func (c *CPU) execGroup4(op uint16) {
 		return
 	case op&0xFB80 == 0x4880: // MOVEM
 		c.movem(op)
+		return
+	case op&0xFF00 == 0x4600 && size != 3: // NOT
+		ea := c.resolveEA(mode, reg, size)
+		r := ^c.load(ea, size)
+		c.store(ea, size, r)
+		c.setLogic(r, size)
+		return
+	case op&0xFF00 == 0x4400 && size != 3: // NEG
+		ea := c.resolveEA(mode, reg, size)
+		c.store(ea, size, c.sub(0, c.load(ea, size), size))
+		return
+	case op&0xFF00 == 0x4000 && size != 3: // NEGX
+		ea := c.resolveEA(mode, reg, size)
+		x := uint32(0)
+		if c.X {
+			x = 1
+		}
+		c.store(ea, size, c.sub(0, c.load(ea, size)+x, size))
 		return
 	case op&0xFF00 == 0x4200 && size != 3: // CLR
 		ea := c.resolveEA(mode, reg, size)

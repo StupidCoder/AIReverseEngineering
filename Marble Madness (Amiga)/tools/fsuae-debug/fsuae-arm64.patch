@@ -34,7 +34,7 @@ index 607ff32..c38bd32 100644
  #define CPU_arm 1
  #elif defined(__powerpc__) || defined(__ppc__) || defined(_M_PPC)
 diff --git a/src/remote_debug/remote_debug.cpp b/src/remote_debug/remote_debug.cpp
-index 54f2684..7923848 100644
+index 54f2684..3ed40a3 100644
 --- a/src/remote_debug/remote_debug.cpp
 +++ b/src/remote_debug/remote_debug.cpp
 @@ -183,6 +183,12 @@ static bool did_step_copper = false;
@@ -70,7 +70,26 @@ index 54f2684..7923848 100644
  	// if time_out > 0 we wait that number of seconds for a connection to be made. If
  	// none has been done within the given time-frame we just continue
  
-@@ -2745,8 +2759,13 @@ static void remote_debug_ (void)
+@@ -1994,10 +2008,16 @@ static bool kill_program () {
+ static bool handle_continue_exec (int process_id, int thread_id, char* packet)
+ {
+ 	// 'c [addr] Continue at addr, which is the address to resume. If addr is omitted, resume at current address.
+-	if ((packet != NULL) && (*packet != '#'))
++	// NB: handle_packet() has already stripped the '#<checksum>' (remove_checksum
++	// null-terminates at '#'), so for a bare 'c' this `packet` points at '\0',
++	// NOT at '#'. The original `*packet != '#'` test therefore treated the empty
++	// argument as an address, the sscanf failed, and we returned WITHOUT calling
++	// remote_deactivate_debugger() -- leaving s_state == Tracing so continue never
++	// resumed the CPU. Only parse an address when one is actually present.
++	if ((packet != NULL) && (*packet != '#') && (*packet != '\0'))
+ 	{
+ 		uae_u32 address;
+-		if (sscanf (packet, "%x#", &address) != 1)
++		if (sscanf (packet, "%x#", &address) != 1 && sscanf (packet, "%x", &address) != 1)
+ 		{
+ 			fs_log("[REMOTE_DEBUGGER] Unable to parse continue packet %s\n", packet);
+ 			return false;
+@@ -2745,8 +2765,13 @@ static void remote_debug_ (void)
  	{
  		case Running:
  		{
@@ -86,7 +105,7 @@ index 54f2684..7923848 100644
  
  			break;
  		}
-@@ -2776,6 +2795,15 @@ static void remote_debug_ (void)
+@@ -2776,6 +2801,15 @@ static void remote_debug_ (void)
  					break;
  				}
  
@@ -102,7 +121,7 @@ index 54f2684..7923848 100644
  				if (is_quiting())
  				{
  					if (log_remote_protocol_enabled) {
-@@ -2847,7 +2875,19 @@ static void remote_debug_update_ (void)
+@@ -2847,7 +2881,19 @@ static void remote_debug_update_ (void)
      remote_activate_debugger ();
  	//exception_debugging = 0;
  

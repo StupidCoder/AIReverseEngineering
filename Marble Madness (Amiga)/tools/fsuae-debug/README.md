@@ -101,26 +101,40 @@ so breakpoints are checked every instruction. (NB: a bp keeps `SPCFLAG_BRK` set,
 so this also needs the SOCKET_POLL_INTERVAL throttle above to avoid a `select()`
 per instruction.)
 
-## What works / what doesn't (macOS arm64, this fork)
+### The continue/resume bug — `handle_continue_exec` (the big one)
 
-Verified working:
+Symptom: after *any* halt (manual `0x03` or a breakpoint hit), `c` (continue)
+advanced the CPU zero instructions — the emulator was frozen. Single-step
+(`s`) worked. Found by instrumenting the whole path (`m68k_go` → `m68k_run_1_ce`
+→ `do_specialties` → `debug()` → `remote_debug_()`'s Tracing spin, plus
+`parse_packet`/`handle_packet`): the `c` packet was *received and dispatched*
+to `case 'c'`, but `handle_continue_exec` returned early **before** calling
+`remote_deactivate_debugger()`, so `s_state` stayed `Tracing` and the spin loop
+never broke.
+
+Root cause: `handle_packet()` runs `remove_checksum()`, which null-terminates
+the packet at `#`. So for a bare `c`, the argument handed to
+`handle_continue_exec` (`packet + 1`) points at `'\0'`, **not** `'#'`. The guard
+`if ((packet != NULL) && (*packet != '#'))` therefore treated the empty string
+as an address argument, `sscanf("%x#", …)` failed, and it `return false`d
+without resuming. (Step worked because `step` parses no argument.)
+
+Fix: only parse an address when one is actually present —
+`*packet != '#' && *packet != '\0'` — and also accept a trailing-`#`-less hex
+address. Verified: breakpoints now **chain** (15/15 continue→re-hit on a 50 Hz
+handler) and manual interrupt→continue→interrupt no longer freezes.
+
+## What works (macOS arm64, this fork)
+
 - Boots Kickstart 1.2 + the Marble Madness floppy to **Workbench** under the
-  debugger (free-run; do not interrupt).
+  debugger.
 - Connect, halt (raw `0x03`), read/write registers and memory, single-step.
-- **Software breakpoints fire during free-run** — arming `Z0,<addr>` while the
-  CPU runs delivers an async `%Stop;swbreak` notification when the address
-  executes. Reading state at that stop works. This is a usable one-shot capture.
+- **Software breakpoints** fire during free-run (async `%Stop;swbreak`) and
+  **`continue` resumes correctly** — full breakpoint chaining and step-through.
 
-Known open issue — **resume after a halt does not run the CPU**. After any halt
-(manual `0x03` *or* a breakpoint hit), `c` (continue) does not advance the
-emulation thread (verified: CPU runs at ~50 Hz before the first halt, then a
-breakpoint stops it, and subsequent `c` produces zero further hits). Root cause
-(via instrumentation): once `remote_debug_()` enters its Tracing spin the
-emulation thread never re-enters it after the spin breaks — the thread doesn't
-resume the m68k run loop. Not yet fixed. Consequence: **one breakpoint hit per
-session, no chaining/stepping-through.** A one-shot capture (boot free-run → arm
-one breakpoint at a known address → read state at the hit) is the usable mode;
-multi-stage debugging needs this fixed.
+(NB: KS1.2 exception/TRAP vectors `$8–$BC` legitimately stay all-`$FC` (ROM)
+even when fully booted — AmigaDOS doesn't redirect CPU vectors — so "0 vectors
+redirected" is the normal booted state, not a sign of a failed boot.)
 
 The patch only touches `src/include/sysdeps.h` and `src/cpuboard.cpp`; the
 narrowing/implicit-decl issues are handled by the `make` flags, and the

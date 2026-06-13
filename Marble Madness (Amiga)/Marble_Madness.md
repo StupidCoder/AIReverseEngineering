@@ -949,17 +949,21 @@ practice → 814 tiles). The blitter reads each tile as eight 1-byte rows at
 within 16-byte groups, and rows are at the even byte offsets — then composites the
 four planes through the course palette.
 
-**The full courses, assembled.** The tilemap (after the four planes in the
-unpacked buffer — `buffer+$12`) is a row-major stream of big-endian tile-index
-words; the blitter's 72-byte row stride fixes the course **width at 36 tiles
-(288 px)**, and because Marble Madness scrolls vertically, that width is constant
-while the height varies — practice is 36×75, up through ultimate at 36×198.
-Placing each 8×8 tile by its index reproduces each **complete course**:
-[`extract/cmd/sprites`](extract/cmd/sprites) emits them to [`rendered/`](rendered)
-(`<course>.mlb.png`) — the practice course renders as its grey isometric checkered
-floor, red walls, yellow/orange railings and the `GOAL` banner, in the real
-per-course colours. Six files cracked end to end: container → ByteRun1 →
-8×8×4 tiles → palette → tilemap → course image.
+**The full courses, assembled.** The tilemap (`buffer+$12`) is a row-major stream
+of big-endian tile-index words; the blitter's 72-byte row stride fixes the course
+**width at 36 tiles (288 px)**, and because Marble Madness scrolls vertically that
+width is constant while the height varies — practice is 36×75, up through ultimate
+at 36×198. The tilemap is **end-aligned** in the unpacked buffer: most courses
+have it immediately after the four planes, but beginner and silly leave a small
+gap (56 and 50 bytes) there, so the tilemap is taken as the *last* `height×72`
+bytes (reading from the plane end instead shifts every tile — the bug that made
+those two courses look index-shifted). Placing each 8×8 tile by its index
+reproduces each **complete course**: [`extract/cmd/sprites`](extract/cmd/sprites)
+emits the course to [`rendered/`](rendered) as `<course>.png` and the tile set as
+`<course>.tiles.png`. The practice course renders as its grey isometric checkered
+floor, red walls, yellow/orange railings and the `GOAL` banner; all six courses
+come out in their real per-course colours. Cracked end to end: container →
+ByteRun1 → 8×8×4 tiles → palette → tilemap → course image.
 
 A second `.ilb`/`.vlb` refinement remains. **Exact cell boundaries:** the loader
 expands each

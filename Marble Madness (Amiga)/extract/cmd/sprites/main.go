@@ -94,6 +94,16 @@ func blitTile(img *image.Paletted, up []byte, planes [4]int, idx, px, py int) {
 	}
 }
 
+// tileSheet renders all nTiles 8x8 tiles in a cols-wide grid (1px gaps).
+func tileSheet(up []byte, planes [4]int, nTiles, cols int) *image.Paletted {
+	rows := (nTiles + cols - 1) / cols
+	img := image.NewPaletted(image.Rect(0, 0, cols*9+1, rows*9+1), pal)
+	for t := 0; t < nTiles; t++ {
+		blitTile(img, up, planes, t, (t%cols)*9+1, (t/cols)*9+1)
+	}
+	return img
+}
+
 // mlbCourse assembles the full course image from the tilemap: a row-major stream
 // of big-endian tile-index words, courseW tiles wide (the game scrolls vertically,
 // so width is fixed and height varies). Returns the image and its tile height.
@@ -257,12 +267,20 @@ func main() {
 			o0, o1, o2, o3 := off(0x07), off(0x0b), off(0x0f), off(0x13)
 			planes := [4]int{0, o1 - o0, o2 - o0, o3 - o0}
 			up := unpackByteRun1(d[0x37:])
+			nTiles := (o1 - o0) / 8
 			planeEnd := (o3 - o0) + (o1 - o0) // four planes, then the tilemap
 			const courseW = 36               // 72-byte tilemap row stride (blitter $9910)
-			img, ht := mlbCourse(up, planes, up[planeEnd:], courseW)
-			writePNG(out, scale(img, 2))
-			fmt.Printf("%-14s flag=$%02X  course %dx%d tiles (%dx%d px)  pal=%s -> %s\n",
-				base, d[0], courseW, ht, courseW*8, ht*8, course, out)
+			// The tilemap is END-aligned in the unpacked buffer: a few courses
+			// (beginner, silly) have a small gap between the planes and the tilemap,
+			// so reading from planeEnd would shift every tile. Take the last
+			// height*72 bytes instead.
+			ht := (len(up) - planeEnd) / courseW / 2
+			tilemap := up[len(up)-ht*courseW*2:]
+			img, _ := mlbCourse(up, planes, tilemap, courseW)
+			writePNG(filepath.Join(outdir, course+".png"), scale(img, 2))
+			writePNG(filepath.Join(outdir, course+".tiles.png"), scale(tileSheet(up, planes, nTiles, 40), 3))
+			fmt.Printf("%-14s flag=$%02X  %d tiles, course %dx%d (%dx%d px)  pal=%s\n",
+				base, d[0], nTiles, courseW, ht, courseW*8, ht*8, course)
 			return nil
 		}
 

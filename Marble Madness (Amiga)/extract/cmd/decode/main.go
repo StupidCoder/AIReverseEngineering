@@ -169,6 +169,7 @@ func decode(in []byte, keyArray []uint32) (out []byte, err error) {
 func main() {
 	keyconst := flag.Uint("keyconst", 0, "16-bit key-array mutation constant (for the .dat)")
 	count := flag.Int("count", 0, "key-array length in longs (c/xxx=0, .dat=20)")
+	datalen := flag.Uint("datalen", 0, "c/xxx load length: key base[i]=datalen/((i+1)*300); 0 = uniform base (c/xxx). The .dat uses 1200 (bucket 1200-1499) with -keyconst 0xCDDA")
 	brute := flag.Bool("brute", false, "brute-force the 16-bit key constant against valid-hunk output")
 	flag.Parse()
 	if flag.NArg() != 3 {
@@ -190,27 +191,65 @@ func main() {
 		return ka
 	}
 
+	// The .dat key-array base is not zero: c/xxx's run_loader fills the 20-long
+	// ctrl->C array (which becomes the key array) with base[i] = datalen/((i+1)*300)
+	// (a multiply $61248 then a divide $61204), and the launcher then mutates each
+	// entry ^= a 16-bit checksum constant C. So key[i] = datalen/((i+1)*300) ^ C.
+	mkKeyBase := func(datalen, c uint32, n int) []uint32 {
+		ka := make([]uint32, n)
+		for i := range ka {
+			ka[i] = (datalen / ((uint32(i) + 1) * 300)) ^ c
+		}
+		return ka
+	}
+
 	if *brute {
 		n := *count
 		if n == 0 {
 			n = 20
 		}
-		for c := uint32(0); c <= 0xFFFF; c++ {
-			out, e := decode(in, mkKey(c, n))
+		try := func(ka []uint32, label string) bool {
+			out, e := decode(in, ka)
 			if e != nil {
-				continue
+				return false
 			}
 			if _, e2 := hunk.Load(out, 0x40000); e2 == nil {
-				fmt.Printf("FOUND key constant $%04X (count %d) -> valid hunk file\n", c, n)
+				fmt.Printf("FOUND %s -> valid hunk file\n", label)
 				chk(os.WriteFile(flag.Arg(2), out, 0644))
+				return true
+			}
+			return false
+		}
+		// (1) uniform base (base = 0).
+		for c := uint32(0); c <= 0xFFFF; c++ {
+			if try(mkKey(c, n), fmt.Sprintf("uniform key constant $%04X (count %d)", c, n)) {
 				return
 			}
 		}
-		fmt.Fprintln(os.Stderr, "brute-force found no valid key constant")
+		// (2) the c/xxx-derived base for every distinct datalen bucket (the divide
+		// collapses many datalen values onto the same base vector).
+		seen := map[string]bool{}
+		for datalen := uint32(1); datalen <= 20000; datalen++ {
+			base := mkKeyBase(datalen, 0, n)
+			key := fmt.Sprint(base)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			for c := uint32(0); c <= 0xFFFF; c++ {
+				if try(mkKeyBase(datalen, c, n), fmt.Sprintf("base datalen=%d const $%04X (count %d)", datalen, c, n)) {
+					return
+				}
+			}
+		}
+		fmt.Fprintln(os.Stderr, "brute-force found no valid key")
 		os.Exit(1)
 	}
 
 	ka := mkKey(uint32(*keyconst), *count)
+	if *datalen != 0 {
+		ka = mkKeyBase(uint32(*datalen), uint32(*keyconst), *count)
+	}
 	out, err := decode(in, ka)
 	chk(err)
 	chk(os.WriteFile(flag.Arg(2), out, 0644))

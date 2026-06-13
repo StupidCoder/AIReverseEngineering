@@ -453,12 +453,14 @@ reinforced by the `c/xxx` checksum integrity chain of Part II §3).
 The main program (`c/MarbleMadness!.dat`) and the second-stage loader (`c/xxx`)
 are encrypted, so reaching the game's own 68000 code means getting through
 `c/zzz`'s decoder (Part II §4) and the copy protection wrapped around it. This
-part reverses both completely, then reports what that buys: the load
-architecture and the program's shape are fully recovered, but the encrypted
-bodies are held behind a key that is not on the disk. The startup/copper/blitter
-detail this section was meant to hold lives inside those bodies and is therefore
-out of reach of a purely static analysis — for a reason that is itself worth
-documenting.
+part reverses both completely. The protection binds the key to machine state that
+is not on the disk — and §4 documents exactly where a purely disk-only static
+attack stops and why. That wall is then cleared in two steps (§4 updates): the
+~25 bytes of copy-protection input are read once off a real Kickstart, and the
+`.dat`'s count-20 key array is reverse-engineered from the decrypted `c/xxx`.
+**Both `c/xxx` and the 150 KB `c/MarbleMadness!.dat` are now fully decrypted**, so
+the game body — and the startup/copper/blitter detail inside it — is open for
+Parts IV–V.
 
 ## 1. The multi-stage load
 
@@ -620,7 +622,8 @@ Recovered from the disk alone:
 - the `.dat`'s own `HUNK_HEADER` (hunk count and sizes), which decodes the same
   way once its key array is supplied.
 
-Not recovered — the bodies. Two independent attacks were pushed to their limits:
+Not recovered *by a disk-only static attack* — the bodies (the updates below
+then clear this). Two independent attacks were pushed to their limits:
 
 1. **Known-plaintext linear algebra.** The keystream's low byte is linear
    (mod 256) in the 25 protection-perturbed table bytes; the plaintext structure
@@ -662,10 +665,30 @@ table → key-array XOR → `sub_DAA` perturbation → lagged-Fibonacci keystrea
 structure-aware field/body decrypt — turns `c/xxx` (empty key array) into a clean
 22-hunk object, verified by the hunk loader applying every `RELOC32` and by the
 key array deriving to all-zeros against the known header plaintext. `c/xxx`
-proves to be the disk's fast loader (Part II §5). The game `.dat` is the same
-decode with a 20-long key array the launcher XOR-mutates with the `c/xxx`
-checksum; recovering that key array (capturing the second `key_init` pass) is the
-remaining step.
+proves to be the disk's fast loader (Part II §5).
+
+**Update — the `.dat` decrypted, statically, no second capture needed.** The
+main program uses the *same* decode but with a 20-long key array, and recovering
+that key array turned out not to need a debugger at all — only the decrypted
+`c/xxx` and a 16-bit brute force. The key array is **built by `c/xxx` itself**:
+running as the loader, its `run_loader` fills the 20-longword `ctrl->C` buffer
+(which then *becomes* the key array for the second `c/zzz` pass) with
+`base[i] = datalen / ((i+1) × 300)` — a multiply (`$61248`) then a divide
+(`$61204`) over a load-length the loader clamps to ≈1500, giving the small,
+non-uniform vector `[4, 2, 1, 1, 0, 0, …]`. The launcher then mutates it in
+place, `key[i] ^= C`, where `C` is the 16-bit `checksum_seglist(c/xxx)` integrity
+constant (Part II §3). So the only unknown is that single 16-bit `C`: brute it
+against a valid-hunk check (`decode -brute -count 20`) and it falls out as
+**`C = $CDDA`**. With `key[i] = base[i] ^ $CDDA` and the same captured protection
+bytes, `c/MarbleMadness!.dat` decodes to a clean **347-segment, 150 KB** hunk
+object — every `RELOC32` applies, the entry hunk disassembles to the textbook
+C-runtime startup (`FindTask`, the `pr_CLI`/`$AC` WB-vs-CLI check), and the body
+carries the game's own text: `THE ULTIMATE RACE!`, `SCORE:`, the six
+`… RACE:` course banners, `GAME OVER`, `RED PLAYER` / `BLUE PLAYER`. The encrypted
+game body is open. (Reproduce with `decode -count 20 -datalen 1200 -keyconst
+0xCDDA`; both decrypted hunks are written to `extracted/` for analysis. The
+captured copy-protection bytes were still needed — they are shared by both
+passes — but the count-20 key array itself was reverse-engineered, not captured.)
 
 ---
 

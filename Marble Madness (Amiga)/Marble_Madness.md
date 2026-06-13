@@ -905,13 +905,24 @@ sign of the right codec. And the `.mlb` level modules — a different container
 load path, so they share the codec; only their wrapper differs.
 
 So the container, the slot geometry (132-byte course cells, 68-byte moving-object
-cells), the file roster, **and the compression** are all established. The one
-remaining mechanical step to pixel-perfect sprites is the post-unpack layout: the
-loader expands each 15-byte file descriptor into a 20-byte in-memory record and
-relocates its source/dest pointers (`$80B4`), and the final cells are assembled by
-`$8026`, which clears a cell then OR-composites planar source blocks into it — so
-a renderer must follow those descriptor offsets rather than slice the unpacked
-stream into fixed cells.
+cells), the file roster, **and the compression** are all established. With the
+codec in hand, [`extract/cmd/sprites`](extract/cmd/sprites) unpacks every bank and
+renders its cells as 2-bitplane (4-colour), 16-px-wide, row-interleaved PNGs into
+`extracted/sprites/<bank>/` (a tiled `sheet.png` plus individual `cells/`). The
+output confirms the decode visually: the course `.ilb` banks resolve into the
+recognisable **isometric scenery tiles** (diagonal block faces), and `marbdat.vlb`
+into the **marble's rotation frames** (16-px spheres with a shading plane).
+
+Two refinements remain. **Colour:** the renders are placeholder greys; the
+per-course palette is set from a copper list / runtime table not yet located (no
+`LoadRGB4` or direct `$DFF180` writes appear in the linear trace). **Exact cell
+boundaries:** the loader expands each 15-byte file descriptor into a 20-byte
+in-memory record and relocates its source/dest pointers (`$80B4`), and some banks
+(notably the marble) pair each cell with a blitter **mask**, so a frame stride is
+twice the cell — the current extractor slices on the cell size, which is exact for
+the opaque scenery but lands half-aligned on the masked objects. Following the
+descriptor offsets and `$8026`'s OR-compositing precisely is the last step to
+per-frame-perfect sprites.
 
 ---
 

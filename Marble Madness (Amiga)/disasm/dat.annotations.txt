@@ -1,0 +1,57 @@
+# Marble Madness (Amiga) — c/MarbleMadness!.dat (DECRYPTED) annotations.
+# The 175 KB main game program, decrypted from the disk's encrypted .dat
+# (Marble_Madness.md Part III §4: c/zzz with the count-20 key array
+# key[i] = (datalen/((i+1)*300)) ^ $CDDA, datalen bucket 1200-1499). A stripped
+# AmigaDOS hunk LOAD file: 347 hunks (133 CODE ~117 KB, 109 DATA ~24 KB, 105 BSS),
+# NO SYMBOL table, so every routine name below is derived from behaviour.
+# Addresses are in the flat relocated image (base $0).
+# Reversed 2026-06-13 — focus so far: the C runtime, the asset-load path, and the
+# .ilb/.vlb/.mlb sprite-bank codec (Marble_Madness.md Part IV §3).
+#
+# Regenerate (from repo root; .adf not committed):
+#   go run "./Marble Madness (Amiga)/extract/cmd/decode" \
+#       -count 20 -datalen 1200 -keyconst 0xCDDA \
+#       "Marble Madness (Amiga)/Marble_Madness.adf" "c/MarbleMadness!.dat" /tmp/dat.hunk
+#   go run ./tools/amiga/cmd/hunkload -base 0 -o /tmp/dat.bin /tmp/dat.hunk
+#   # -entry = every CODE-hunk base from `hunkload -base 0 /tmp/dat.hunk`
+#   go run ./tools/cmd/codetrace68k -base 0 -entry <CODE-hunk bases> \
+#       -annotate "Marble Madness (Amiga)/disasm/dat.annotations.txt" \
+#       -o "Marble Madness (Amiga)/disasm/dat.asm" /tmp/dat.bin
+
+# --- C runtime / startup (hunk 0) ---
+60000  cstart            C-runtime entry: save d0/a0 (startup args) to $208/$20C, cache ExecBase at $1F4, FindTask(0)->a4, set up the stack, open dos.library (open_dos), call the codec/file init, then run the game; restores and RTS to AmigaDOS on exit.
+# (the .dat loads contiguously from base $0; cstart is at $0, but the annotator is
+#  driven at base 0, so labels below use the real flat-image addresses.)
+000000  cstart_real      the actual entry at flat $0 (duplicate of the note above; LINK-less C startup).
+0001B0  open_dos         OldOpenLibrary("dos.library") (exec -$228) with the name string at $218; stores the base at the global $1F8. Used by the dos I/O wrappers below.
+
+# --- globals ---
+0001F4  g_execbase       (global) ExecBase, cached at startup.
+0001F8  g_dosbase        (global) dos.library base — the I/O wrappers $24730/$24760/$2474C call through this.
+000218  s_dos_library    the string "dos.library".
+0005D6  g_course         (global) current course number (0..5); indexes the per-course asset-filename tables.
+
+# --- dos.library I/O wrappers (hunk near the end) ---
+024730  dos_open         Open(name, mode) — dos.library -$1E; callers pass mode $3ED = MODE_OLDFILE.
+024760  dos_read         Read(file, buf, len) — dos.library -$2A.
+02474C  dos_close        Close(file) — dos.library -$24.
+
+# --- asset filename tables (data) ---
+003454  s_mlb_names      packed ".mlb" filename strings ("Practy.mlb", "Beginr.mlb", … "Ultima.mlb").
+003496  t_mlb_names      table of 6 pointers into s_mlb_names, indexed by g_course.
+0034AE  s_ilb_names      packed ".ilb" filename strings ("Practy.ilb" … "Silly.ilb").
+0034EE  t_ilb_names      table of 6 pointers to the .ilb filename strings, indexed by g_course.
+
+# --- the sprite/level-bank loader and codec (Part IV §3) ---
+0080B4  ilb_load         load an .ilb sprite bank for the current course: index a buffer table, read+unpack the file (bank_read_unpack), then walk the bank's descriptors — expanding each 15-byte file descriptor to a 20-byte in-memory record and relocating its source/dest pointer fields ($8/$C/$10) — and composite cells via composite_planes.
+007F38  mlb_load         load an .mlb level module (different container: flag $01 + a 5-entry offset-table header) through the SAME bank_read_unpack path, so it shares the ByteRun1 codec.
+007E4E  bank_read_unpack file loader: dos_open(name, MODE_OLDFILE) -> dos_read into the buffer -> dos_close; then, if the global flag $8351 is set, move the loaded (packed) data to the high end of the buffer and ByteRun1-decompress it in place (unpack_byterun1) back to the start. Returns the unpacked length.
+007DA6  pool_alloc       bump allocator: hand out $8(a6) bytes from the work pool tracked by $8340/$8344 (high-water at $8334), growing it via $8D74 when exhausted.
+009118  unpack_byterun1  THE BITMAP CODEC = ByteRun1 / PackBits (identical to IFF ILBM bodies). unpack(src@8, dst@C, srclen@10, dstlen@14): read a signed control byte n — n in 0..127 copies the next n+1 bytes literally; n in -1..-127 repeats the next single byte (1-n) times (2..128); n = -128 is a no-op. Stops at dstlen or end of source.
+008026  composite_planes one bank cell: zero the dest cell (size = desc->4 * desc->2 * 2), then OR four consecutive planar source blocks (desc->8) into it — builds the final 2-plane (16-wide) cell from the unpacked source.
+
+# --- display (engine renders via the blitter directly) ---
+# The engine programs the Amiga blitter register block $DFF040-$DFF066 and DMACON
+# ($DFF096) directly and reads JOYxDAT ($DFF00A/$00C); the per-course colour
+# palette is set from a copper list (not yet located). Bitmaps are blitted from
+# the unpacked sprite banks above.

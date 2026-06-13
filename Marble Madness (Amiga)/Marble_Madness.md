@@ -44,6 +44,7 @@ under way; Part V is still a stub.
   - [2. The decoder](#2-the-decoder)
   - [3. The copy protection](#3-the-copy-protection)
   - [4. What the static analysis recovers — and where it stops](#4-what-the-static-analysis-recovers--and-where-it-stops)
+  - [5. Inside the decrypted program — the code/data split](#5-inside-the-decrypted-program--the-codedata-split)
 - [Part IV — Graphics and data formats](#part-iv--graphics-and-data-formats)
   - [1. The splash (boot) screen](#1-the-splash-boot-screen)
   - [2. The Workbench icons](#2-the-workbench-icons)
@@ -689,6 +690,65 @@ game body is open. (Reproduce with `decode -count 20 -datalen 1200 -keyconst
 0xCDDA`; both decrypted hunks are written to `extracted/` for analysis. The
 captured copy-protection bytes were still needed — they are shared by both
 passes — but the count-20 key array itself was reverse-engineered, not captured.)
+
+## 5. Inside the decrypted program — the code/data split
+
+With the body open, the first question is what 150 KB of program actually
+contains, and how to separate code from data for analysis. The answer is built
+in: the `.dat` is a **stripped AmigaDOS hunk load file**, and the hunk *tags* are
+the split. It is **not** linked down to a few merged hunks — each object module
+kept its own `CODE`/`DATA`/`BSS` triple, so the file is **347 hunks** (≈115
+modules), with no `SYMBOL` or `DEBUG` blocks (routines are unnamed, as in
+`c/xxx`). By kind:
+
+| Kind | Hunks | Bytes | What it is |
+|------|------:|------:|------------|
+| `CODE` | 133 | ~117 KB | the engine — the overwhelming majority |
+| `DATA` | 109 | ~24 KB | tables, text, and zero-initialised globals |
+| `BSS`  | 105 | ~5.6 KB | uninitialised working storage (no file bytes) |
+
+So the surprise is that the file really **is** mostly code. That is consistent
+with the rest of the disk, not at odds with it: the bitmaps and samples live in
+separate files (`.ilb`/`.vlb` sprite banks, `Snd`, `Track` — Part I §3), so the
+program carries **no pixel or sample data** — only the engine that drives them.
+And it drives them at the metal: the code writes the full **blitter** register
+block (`$DFF040`–`$DFF066`) and `DMACON` (`$DFF096`) directly and reads
+`JOYxDAT` for the trackball/joystick, so rendering is hand-rolled blitting, not a
+library call.
+
+The ~24 KB of `DATA` is smaller than it looks: roughly **16 KB is zero** —
+working arrays the compiler emitted into `DATA` rather than `BSS` (one hunk is
+7 352 bytes with *two* non-zero bytes; another is 7 188 bytes at 99 % zero). The
+remaining ~8 KB is the real payload, and it is exactly what an engine-without-
+assets would hold:
+
+- **UI text** — `THE ULTIMATE RACE!`, `SCORE:`, `CONGRATULATIONS!`, `TOTAL`,
+  `GO!`, `Difficulty:`, `GAME OVER`, `RED PLAYER` / `BLUE PLAYER`, and the six
+  course banners (`PRACTICE`/`BEGINNER`/`INTERMEDIATE`/`AERIAL`/`SILLY`/`ULTIMATE
+  RACE:`);
+- **the level filenames** — `Practy.mlb`, `Beginr.mlb`, `Interm.mlb`,
+  `Aerial.mlb`, `Silly.mlb`, … — i.e. the engine names and loads the per-course
+  `.mlb` level modules at run time (the file-vs-track loading of Part II §5);
+- **small lookup tables** — offset/coordinate/sine-like runs and a few pointer
+  tables, the rest of the `DATA` hunks.
+
+Cleanly splitting it for further work needs no extra tooling: `hunkload` prints
+the per-hunk map (kind, address, size) — that *is* the code/data manifest — and
+`codetrace68k`, seeded with every `CODE`-hunk base as an entry point, follows the
+control flow and classifies reached bytes as code and the rest as data. A first
+pass reaches **~91 KB of code in 393 routines**; the remaining ~28 KB of `CODE`
+sits behind 11 indirect jump tables that need `-table` hints to resolve — the
+starting point for the mechanics analysis of Part V.
+
+```sh
+# split + first-pass disassembly of the decrypted engine
+go run stupidcoder.com/tools/amiga/cmd/hunkload -base 0 \
+    extracted/c_MarbleMadness.dat.decrypted.hunk            # the hunk/code-data map
+go run stupidcoder.com/tools/amiga/cmd/hunkload -base 0 -o /tmp/dat.bin \
+    extracted/c_MarbleMadness.dat.decrypted.hunk            # flat relocated image
+# -entry = every CODE-hunk base from the map above
+go run stupidcoder.com/tools/cmd/codetrace68k -base 0 -entry <CODE-hunk bases> /tmp/dat.bin
+```
 
 ---
 

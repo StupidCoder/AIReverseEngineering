@@ -937,15 +937,18 @@ colourful course floor and walls, by contrast, are the **`.mlb` level modules,
 which are 4 bitplanes (16 colours)** — the `.mlb` loader (`$7F38`) relocates four
 plane pointers and a palette pointer at the head of its work buffer.
 
-**The `.mlb` tile bitmap is not yet decoded — honestly, not even close.** Its
-header offsets and 16-colour palette are pinned, but every layout tried (the four
-plane offsets as planar or interleaved, packed or raw, across a sweep of widths)
-renders as colour-correct *noise* with no straight or diagonal edges — i.e. the
-real pixel/tile organisation (and likely a tile-index map) is still unknown, and
-"right colours" only means random bytes indexing the right 16-entry palette. So
-only the `.ilb`/`.vlb` sprite sheets are emitted to [`rendered/`](rendered); the
-`.mlb` playfield is deliberately left out rather than ship a misleading scramble.
-Decoding it properly is the open task.
+**The `.mlb` tile bitmap is only partially decoded.** Its header (four plane
+pointers + a palette pointer, relocated by the loader `$7F38`) and its 16-colour
+palette (offset `0x17`) are pinned, and a **2-plane view** of the tile data shows
+*recognisable shapes* — the isometric tile faces with diagonal edges — but
+**stretched ~2× vertically**: two of those 2-bit rows belong together as one real
+4-bit row, so the playfield is genuinely 4 bitplanes. The catch is that combining
+the rows as four interleaved planes (the obvious fix) scrambles into colour-correct
+noise, and so does every planar/width variant tried — the planes are evidently
+*separated*, not row-paired, and the exact plane/width layout (plus a likely
+tile-index map) is still unknown. So [`rendered/`](rendered) ships the honest
+2-plane partial (`<course>.mlb.png`, greyscale, vertically stretched) as the
+closest result, with the full 4-plane colour decode left as the open task.
 
 A second `.ilb`/`.vlb` refinement remains. **Exact cell boundaries:** the loader
 expands each

@@ -206,10 +206,18 @@ func main() {
 
 		if ext == ".mlb" {
 			// The .mlb playfield is 4 bitplanes / 16 colours (palette at 0x17), but
-			// its tile-bitmap layout is NOT yet decoded — every plane/width/tilemap
-			// interpretation tried so far renders as noise. So it is intentionally
-			// not emitted rather than shipping a misleading scrambled image.
-			fmt.Printf("%-14s flag=$%02X  .mlb bitmap layout not decoded -> skipped\n", base, d[0])
+			// its true tile layout is NOT decoded. This 2-plane view is the closest
+			// partial result so far: recognisable tile shapes (the isometric faces)
+			// appear, but vertically stretched ~2x — i.e. two of these 2-bit rows
+			// belong together as one real 4-bit row. Combining them as 4 interleaved
+			// planes scrambles, so the planes are evidently separated, not row-paired,
+			// and the exact plane/width layout is the open problem. Rendered greyscale
+			// (palette colours 0..3) as an honest "partial decode" marker.
+			pal = greys
+			raw := unpackByteRun1(d[24:])
+			writePNG(out, scale(sheet(raw, 16, 16), 2))
+			fmt.Printf("%-14s flag=$%02X  .mlb 2-plane PARTIAL (true layout is 4-plane, undecoded) -> %s\n",
+				base, d[0], out)
 			return nil
 		}
 

@@ -27179,6 +27179,8 @@
 01F5BE  4E B9 00 02 48 74             JSR $24874.l
 01F5C4  50 8F                         ADDQ.l #8,a7
 01F5C6  48 79 00 01 FA 82             PEA $1FA82.l
+
+; --- apply_palette  $01F5CC — sets the playfield ViewPort's colours (calls gfx_setrgb4 with the ViewPort at $1FA82). The colour VALUES come from the loaded course .mlb, not from the .dat — the program holds no colour table. ---
 01F5CC  4E B9 00 02 48 F0             JSR $248F0.l
 01F5D2  58 8F                         ADDQ.l #4,a7
 01F5D4  4E 75                         RTS
@@ -30797,7 +30799,7 @@
 0248DE  4C EF                         .dc.w $4CEF
 0248E0  .dc.b 0E 00 00 10 4E AE FE E6 4C DF 4C 00 4E 75 00 00 ; ....N...L.L.Nu..
 
-; ==== sub_0248F0 (2 callers) ====
+; ==== gfx_setrgb4  $0248F0  (2 callers) — graphics.library SetRGB4 wrapper (-$120 via the graphics base at $1F4); applies colours into a ViewPort. ====
 0248F0  2F 0E                         MOVE.l a6,-(a7)
 0248F2  2C 79 00 00 01 F4             MOVEA.l $1F4.l,a6
 0248F8  22 6F 00 08                   MOVEA.l $8(a7),a1

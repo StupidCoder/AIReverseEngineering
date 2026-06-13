@@ -51,14 +51,34 @@ func unpackByteRun1(src []byte) []byte {
 	return out
 }
 
-// planarCell renders one 16-wide, h-row, 2-plane (row-interleaved) cell starting
-// at byte off in buf into a paletted image. Out-of-range bytes read as 0.
+// pal is the 4-colour image palette for the bank currently being rendered (the
+// .ilb/.vlb cells are 2 bitplanes = colours 0..3 of the course palette). It is
+// reset per bank in main; greys is the fallback when no course palette is known.
 var greys = color.Palette{
 	color.Gray{0x00}, color.Gray{0x55}, color.Gray{0xAA}, color.Gray{0xFF},
 }
+var pal = greys
 
+// mlbPalette reads a course's 16-colour playfield palette from its .mlb level
+// module: 16 big-endian $0RGB words at offset 0x17 (Marble_Madness.md Part IV §3).
+func mlbPalette(d []byte) color.Palette {
+	p := make(color.Palette, 16)
+	for i := 0; i < 16; i++ {
+		o := 0x17 + 2*i
+		w := uint16(0)
+		if o+1 < len(d) {
+			w = uint16(d[o])<<8 | uint16(d[o+1])
+		}
+		n4 := func(x uint16) uint8 { return uint8(x) * 17 } // 4-bit -> 8-bit
+		p[i] = color.RGBA{n4((w >> 8) & 0xF), n4((w >> 4) & 0xF), n4(w & 0xF), 0xFF}
+	}
+	return p
+}
+
+// planarCell renders one 16-wide, h-row, 2-plane (row-interleaved) cell starting
+// at byte off in buf into a paletted image. Out-of-range bytes read as 0.
 func planarCell(buf []byte, off, h int) *image.Paletted {
-	img := image.NewPaletted(image.Rect(0, 0, 16, h), greys)
+	img := image.NewPaletted(image.Rect(0, 0, 16, h), pal)
 	for y := 0; y < h; y++ {
 		base := off + y*4
 		p0 := word(buf, base)
@@ -89,7 +109,7 @@ func sheet(buf []byte, h, cols int) *image.Paletted {
 	rows := (n + cols - 1) / cols
 	W := cols*(16+1) + 1
 	H := rows*(h+1) + 1
-	img := image.NewPaletted(image.Rect(0, 0, W, H), greys)
+	img := image.NewPaletted(image.Rect(0, 0, W, H), pal)
 	for i := 0; i < n; i++ {
 		cx := (i%cols)*(16+1) + 1
 		cy := (i/cols)*(h+1) + 1
@@ -128,12 +148,22 @@ func writePNG(path string, img image.Image) {
 	chk(png.Encode(f, img))
 }
 
-// bank describes how to carve a file: header length before the PackBits body,
-// and the cell height in rows.
-type bank struct {
-	name   string
-	hdrLen func(d []byte) int // bytes before the packed bitmap
-	cellH  int                // rows per cell (0 = derive from descriptor byte[4])
+// courseOf maps a bank's filename prefix to the course whose .mlb palette it
+// uses. The shared object banks (marble, creatures) fall back to "practy".
+func courseOf(base string) string {
+	for _, c := range []struct{ pre, course string }{
+		{"prc", "practy"}, {"practy", "practy"},
+		{"beg", "beginr"}, {"beginr", "beginr"},
+		{"int", "interm"}, {"interm", "interm"},
+		{"aer", "aerial"}, {"aerial", "aerial"},
+		{"sil", "silly"}, {"silly", "silly"}, {"slink", "silly"},
+		{"ult", "ultima"}, {"ultima", "ultima"},
+	} {
+		if strings.HasPrefix(base, c.pre) {
+			return c.course
+		}
+	}
+	return "practy"
 }
 
 func main() {
@@ -146,6 +176,16 @@ func main() {
 	vol, err := adf.Open(img)
 	chk(err)
 	outdir := os.Args[2]
+
+	// Pre-load each course's playfield palette from its .mlb (offset 0x17).
+	palettes := map[string]color.Palette{}
+	for _, c := range []string{"practy", "beginr", "interm", "aerial", "silly", "ultima"} {
+		if d, err := vol.ReadFile("c/" + c + ".mlb"); err == nil {
+			palettes[c] = mlbPalette(d)
+		} else if d, err := vol.ReadFile(c + ".mlb"); err == nil {
+			palettes[c] = mlbPalette(d)
+		}
+	}
 
 	chk(vol.Walk(func(e adf.Entry) error {
 		if e.IsDir {
@@ -181,11 +221,16 @@ func main() {
 			fmt.Fprintf(os.Stderr, "skip %s: bad geometry hdr=%d h=%d\n", base, hdr, h)
 			return nil
 		}
+		course := courseOf(base)
+		pal = greys
+		if p, ok := palettes[course]; ok {
+			pal = p[:4] // .ilb/.vlb cells are 2 bitplanes -> colours 0..3
+		}
 		raw := unpackByteRun1(d[hdr:])
 		out := filepath.Join(outdir, base+".png")
 		writePNG(out, scale(sheet(raw, h, 16), 3))
-		fmt.Printf("%-14s flag=$%02X hdr=%d packed=%d unpacked=%d  cell=16x%d -> %s\n",
-			base, d[0], hdr, len(d)-hdr, len(raw), h, out)
+		fmt.Printf("%-14s flag=$%02X hdr=%d packed=%d unpacked=%d  cell=16x%d  pal=%s -> %s\n",
+			base, d[0], hdr, len(d)-hdr, len(raw), h, course, out)
 		return nil
 	}))
 }

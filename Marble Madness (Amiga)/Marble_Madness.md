@@ -913,16 +913,36 @@ the decode visually: the course `.ilb` banks resolve into the recognisable
 **isometric scenery tiles** (diagonal block faces), and `marbdat.vlb` into the
 **marble's rotation frames** (16-px spheres with a shading plane).
 
-Two refinements remain. **Colour:** the renders are placeholder greys; the
-per-course palette is set from a copper list / runtime table not yet located (no
-`LoadRGB4` or direct `$DFF180` writes appear in the linear trace). **Exact cell
-boundaries:** the loader expands each 15-byte file descriptor into a 20-byte
-in-memory record and relocates its source/dest pointers (`$80B4`), and some banks
-(notably the marble) pair each cell with a blitter **mask**, so a frame stride is
-twice the cell — the current extractor slices on the cell size, which is exact for
-the opaque scenery but lands half-aligned on the masked objects. Following the
-descriptor offsets and `$8026`'s OR-compositing precisely is the last step to
-per-frame-perfect sprites.
+**The palette is per-course, and it lives in the `.mlb` level module — not in the
+program.** The engine sets colours with `graphics.library SetRGB4` (`$248FC`, via
+the ViewPorts at `$1FA82`/`$21170`), never `LoadRGB4`, and the `.dat` itself holds
+no colour table — which is why a search of the decrypted program comes up empty.
+The source is each course's **`.mlb`**, at a fixed **offset `0x17`**: sixteen
+big-endian `$0RGB` words, the playfield palette (colours 0–15). This was confirmed
+two ways: the six `.mlb` files carry six distinct palettes there, and reading the
+live OCS colour registers (`$DFF180`) on the training course under FS-UAE returned
+**`000 333 444 666 999 BBB DDD 822 C60 CC0 622 A22 D33 F88 …`** — byte-for-byte the
+words at `practy.mlb+0x17`. The first seven entries are a shared grey ramp (the
+isometric scenery shading); 7–15 are the course's own object/accent colours
+(practy red-orange, beginr blue, interm green, aerial tan, silly yellow, ultima
+red). [`extract/cmd/sprites`](extract/cmd/sprites) now reads each bank's course
+palette from the matching `.mlb` and renders with it (the 2-bitplane cells use
+colours 0–3); the sprite sheets are in [`rendered/`](rendered) (`<bank>.png`), and
+visually confirm the decode — the course `.ilb` banks resolve into the
+recognisable **isometric scenery tiles** and `marbdat.vlb` into the **marble's
+rotation frames**.
+
+Two refinements remain. **Full-colour scenery:** the individual `.ilb`/`.vlb`
+cells are only 2 bitplanes (the shading layers), so they render in the palette's
+low four greys; the vivid course colours (7–15) belong to the multi-plane
+*playfield* the engine composites from several banks plus the `.mlb` tiles, which
+is a larger reconstruction. **Exact cell boundaries:** the loader expands each
+15-byte file descriptor into a 20-byte in-memory record and relocates its
+source/dest pointers (`$80B4`), and some banks (notably the marble) pair each cell
+with a blitter **mask**, so a frame stride is twice the cell — the current
+extractor slices on the cell size, exact for the opaque scenery but half-aligned
+on the masked objects. Following the descriptor offsets and `$8026`'s
+OR-compositing precisely is the last step to per-frame-perfect sprites.
 
 ---
 

@@ -50,8 +50,11 @@
 009118  unpack_byterun1  THE BITMAP CODEC = ByteRun1 / PackBits (identical to IFF ILBM bodies). unpack(src@8, dst@C, srclen@10, dstlen@14): read a signed control byte n — n in 0..127 copies the next n+1 bytes literally; n in -1..-127 repeats the next single byte (1-n) times (2..128); n = -128 is a no-op. Stops at dstlen or end of source.
 008026  composite_planes one bank cell: zero the dest cell (size = desc->4 * desc->2 * 2), then OR four consecutive planar source blocks (desc->8) into it — builds the final 2-plane (16-wide) cell from the unpacked source.
 
-# --- display (engine renders via the blitter directly) ---
-# The engine programs the Amiga blitter register block $DFF040-$DFF066 and DMACON
-# ($DFF096) directly and reads JOYxDAT ($DFF00A/$00C); the per-course colour
-# palette is set from a copper list (not yet located). Bitmaps are blitted from
-# the unpacked sprite banks above.
+# --- display + palette ---
+0248F0  gfx_setrgb4      graphics.library SetRGB4 wrapper (-$120 via the graphics base at $1F4); applies colours into a ViewPort.
+01F5CC  apply_palette    sets the playfield ViewPort's colours (calls gfx_setrgb4 with the ViewPort at $1FA82). The colour VALUES come from the loaded course .mlb, not from the .dat — the program holds no colour table.
+# The per-course palette lives in each course's .mlb level module at offset 0x17:
+# 16 big-endian $0RGB words (playfield colours 0-15; 0-6 = shared grey scenery
+# ramp, 7-15 = per-course object colours). Confirmed by reading $DFF180 live under
+# FS-UAE (= practy.mlb+0x17 byte-for-byte). The engine also programs the blitter
+# ($DFF040-$DFF066) and DMACON ($DFF096) directly and reads JOYxDAT for input.

@@ -297,6 +297,33 @@ own drawer, creates a reply port, and proceeds to bring the game in. Because the
 game's main file is *crunched* (Part I §3), that load does not go through plain
 `LoadSeg` — it goes through `c/zzz`, the subject of §4.
 
+The full annotated disassembly is in
+[`disasm/MarbleMadness.asm`](disasm/MarbleMadness.asm) (with the names and notes
+in [`disasm/annotations.txt`](disasm/annotations.txt)). The boot-screen path is
+worth following concretely, because `c/bootscr` is one of the unencrypted hunks
+and so loads the ordinary way:
+
+```
+LoadSeg("c/bootscr")            ; -> seglist; bail to exit(1) if it fails
+Lock("c/splash", ACCESS_READ)   ; does the splash file exist?
+  if present:  run bootscr(seglist, 1, "c/splash")        ; paint the splash
+  else:        run bootscr(seglist, 1, "lo-res/paintcan") ; fallback image
+…                               ; (decrypt/stream the game meanwhile)
+run bootscr(seglist, 0, 0)      ; tear the boot screen back down
+UnLoadSeg(bootscr)
+```
+
+`c/bootscr` is thus a small overlay that the launcher `LoadSeg`s, *runs* via the
+seglist-call thunk `call_seglist` (which converts the `LoadSeg` BPTR to an address
+and `JSR`s into the first hunk with `d0`/`a0` arguments) — handing it the image
+filename so the overlay loads the IFF and displays it — and then runs once more
+with `(0, 0)` to dismiss it before `UnLoadSeg`ing it. The same `call_seglist`
+thunk is how `c/zzz` and the decrypted `c/xxx` are entered. (The launcher binary
+also contains a complete but *unreferenced* copy of `c/zzz`'s decrypt engine —
+the key-table builder, the keystream generator, and the vector-keyed protection
+of Part III — linked in from shared source; the launcher itself decrypts through
+the `LoadSeg`'d `c/zzz`.)
+
 ## 4. The decruncher (`c/zzz`)
 
 `c/MarbleMadness!.dat` and `c/xxx` are not plain hunks — they are crunched

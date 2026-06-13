@@ -1,0 +1,98 @@
+# Marble Madness (Amiga) — launcher (`MarbleMadness!`) annotations.
+# Consumed by codetrace68k -annotate; format: ADDR  name  description
+#   ADDR is hex; '#' starts a comment line. A routine address gets a header
+#   banner, any other address an inline "--- name — desc ---" marker.
+#
+# Regenerate MarbleMadness.asm (run from the repo root; the .adf is not in the
+# repo — extract it first with adfdump):
+#   adfdump -x /tmp/mm "Marble Madness (Amiga)/Marble_Madness.adf"
+#   go run ./tools/amiga/cmd/hunkload -base 50000 -o /tmp/mm.bin "/tmp/mm/MarbleMadness!"
+#   go run ./tools/cmd/codetrace68k -base 50000 \
+#     -entry 50000,5035C,5038C,50A10,50A34,50A9C,50B4E,50BC0,50BDA,50BF2,50CF4,50D2C,50DA4,50E4C,50F0C,50F20 \
+#     -annotate "Marble Madness (Amiga)/disasm/annotations.txt" \
+#     -o "Marble Madness (Amiga)/disasm/MarbleMadness.asm" /tmp/mm.bin
+# (The extra entry points past 50000 reach the library-call stubs and the
+#  unreferenced embedded c/zzz decrypt engine, which the trace can't fall into
+#  from main.)
+#
+# The launcher is a relocatable AmigaDOS hunk; it has no fixed load address, so
+# the image is laid out from an arbitrary base $050000 (the value the segments
+# were relocated for). Names are derived from observed behaviour, not external
+# sources. Library calls (JSR -off(a6)) and the HUNK_SYMBOL names (_LoadSeg,
+# _Lock, …) come from the program's own symbol table.
+
+# --- C runtime (hunk 0) ---
+50000  cstart            C runtime entry: AmigaDOS jumps here. Save regs, store ExecBase ($501A8) and the CLI arg length/ptr (d0/a0); FindTask self; on pr_CLI ($AC) split CLI-vs-Workbench, build an argv from the command line for CLI; then call main and exit.
+5011A  c_exit            exit(code): restore the saved stack ($501C0), reply/free the Workbench startup message if one was held, return the code in d0 to AmigaDOS.
+50160  alert_no_dos      dos.library failed to open: Alert($00038007) via exec -$6C, then retry/abort.
+5017A  reply_wb_msg      hand the Workbench startup message back through the process message port ($5C of the Process).
+5018C  open_dos          OpenLibrary("dos.library") -> $501AC (exec -$228); jump to alert_no_dos on failure.
+
+# --- helpers (hunk 2) ---
+5035C  avail_mem         AvailMem(d1=2) via exec -$D8 — query free memory before loading.
+50370  call_func         call a C function pointer: a1=func, d0=arg1, a0=arg2; save regs and JSR (a1).
+
+# --- main (hunk 3) ---
+5038C  main              C main(argc, argv): thin wrapper — calls launcher_main and returns 0.
+503A2  launcher_main     the launcher's real entry. FindTask self; branch on whether a Workbench startup message was passed ($C(a6)); CurrentDir to the program's own drawer; create the reply port; then put up the boot screen and load+decrypt the game (see the load sequence below).
+50764  build_path        assemble a "drawer/file" path string into a local buffer.
+507F6  build_path2       assemble a second path string (e.g. the data file under the program drawer).
+508BA  build_argv        build a NULL-terminated argv-style pointer array from a packed string.
+50934  copy_toolname     copy the Workbench tool name / CLI command name into a local buffer.
+50A10  call_seglist      run a LoadSeg'd module: take its BPTR seglist, convert to an address ((bptr+1)<<2) and JSR into the first hunk, passing d0 (arg1) and a0 (arg2). This is how every loaded overlay — bootscr, c/zzz, the decrypted c/xxx — is entered.
+
+# --- the boot-screen + game load sequence (inside launcher_main) ---
+504E4  ld_alloc_ctrl     AllocMem the control block / key-array buffer that c/zzz's decode is driven from.
+504FC  ld_name_zzz       point at the string "c/zzz" (the decrypter).
+50506  ld_loadseg_zzz    LoadSeg("c/zzz") -> the decrypter's seglist (-$46(a6)). c/zzz is a clean hunk, so AmigaDOS loads it normally.
+5051E  ld_run_zzz_xxx    call_seglist: run c/zzz with the control block and the filename "c/xxx" — i.e. decrypt and load the second-stage loader c/xxx. Its returned seglist is kept in -$32(a6).
+5059C  ld_mutate_key     XOR-mutate the key array in place before the next decrypt pass (the 16-bit constant computed just above).
+505E2  ld_name_bootscr   point at the string "c/bootscr".
+505E8  ld_loadseg_bootscr  LoadSeg("c/bootscr") -> the boot-screen overlay's seglist (-$3A(a6)). bootscr is also a clean, unencrypted hunk, so it loads through plain LoadSeg — this is the load the question asks about.
+505F4  ld_bootscr_check  if LoadSeg returned 0 the boot screen is missing: exit(1).
+5060E  ld_lock_splash    Lock("c/splash", ACCESS_READ=$FE) to test whether the splash image file is present.
+50628  ld_splash_present  splash file exists: UnLock it, then...
+50636  ld_run_bootscr_splash  call_seglist: run bootscr(seglist, 1, "c/splash") — hand the overlay the splash filename so it loads the IFF and paints it on screen.
+50642  ld_splash_missing  splash file absent: fall back to the alternate image path.
+50650  ld_run_bootscr_alt  call_seglist: run bootscr(seglist, 1, "lo-res/paintcan") — the fallback image.
+50666  ld_run_loader     call_seglist into the c/zzz/loader stage again to continue bringing the main game into memory (control block + work buffer).
+50688  ld_free_key       free the key-array buffer once decryption is done.
+50692  ld_run_bootscr_off  call_seglist: run bootscr(seglist, 0, 0) — tear the boot screen back down.
+506A0  ld_unload_bootscr  UnLoadSeg the boot-screen overlay now that it has done its job.
+506BC  ld_unload_zzz     UnLoadSeg the decrypter c/zzz.
+
+# --- embedded copy of the c/zzz decrypt engine (hunks 7,10,11) ---
+# These mirror c/zzz exactly (same source, linked into both binaries) but are
+# UNREFERENCED by the launcher, which decrypts via the LoadSeg'd c/zzz instead.
+# Documented in Marble_Madness.md Part III.
+50A34  zz_seed_table     [embedded, unused] build the 55-entry table from seed $57319753 by the ×31 hash (mirror of c/zzz sub_BEC).
+50A9C  zz_key_init       [embedded, unused] AllocMem the table, seed it, XOR in the key array, run the protection (mirror of c/zzz sub_D06).
+50B4E  zz_free_key       [embedded, unused] FreeMem the key table.
+50BC0  zz_freemem        [embedded, unused] FreeMem wrapper.
+50BDA  zz_byte_hi        [embedded, unused] return (arg>>16)&0xFF (mirror of c/zzz sub_D92).
+50BF2  zz_protection     [embedded, unused] THE COPY PROTECTION: XOR the host's CPU exception/TRAP vectors ($8-$38, $80-$BC) and the running task's tc_ExceptCode/tc_TrapCode into table entries 10-16 / 30-31 / 32-47 (mirror of c/zzz sub_DAA). Binds the decode to live machine state.
+50CF4  zz_keystream      [embedded, unused] the additive lagged-Fibonacci keystream generator over the table (mirror of c/zzz sub_$EAC): table[p]+=table[q]; p+=1; q+=2; mod 55.
+50D2C  zz_decrypt_word   [embedded, unused] read one longword and XOR it with the keystream.
+
+# --- AmigaDOS / Exec call stubs (hunks 10,11,15,16,18,19) ---
+# Thin "JSR -offset(libbase)" wrappers; names from the program's HUNK_SYMBOL table.
+50DA4  _Input            dos.library Input()  (-$36)
+50DB4  _Output           dos.library Output() (-$3C)
+50DC4  _Lock             dos.library Lock(name, mode) (-$54)
+50DE0  _UnLock           dos.library UnLock(lock) (-$5A)
+50DF4  _Info             dos.library Info(lock, infoblock) (-$72)
+50E10  _CurrentDir       dos.library CurrentDir(lock) (-$7E)
+50E24  _LoadSeg          dos.library LoadSeg(name) -> BPTR seglist (-$96)
+50E38  _UnLoadSeg        dos.library UnLoadSeg(seglist) (-$9C)
+50E4C  _AllocMem         exec.library AllocMem(size, flags) (-$C6)
+50E64  _FreeMem          exec.library FreeMem(addr, size) (-$D2)
+50E7C  _FindTask         exec.library FindTask(name|0) (-$126)
+50E90  _AllocSignal      exec.library AllocSignal(num) (-$14A)
+50EA4  _FreeSignal       exec.library FreeSignal(num) (-$150)
+50EB8  _AddPort          exec.library AddPort(port) (-$162)
+50ECC  _RemPort          exec.library RemPort(port) (-$168)
+50EE0  _PutMsg           exec.library PutMsg(port, msg) (-$16E)
+50EF8  _GetMsg           exec.library GetMsg(port) (-$174)
+50F0C  _NewList          exec.library NewList(list) (-$192)
+50F20  _CreatePort       create a public message port: AllocSignal, AllocMem the MsgPort, fill it in and AddPort.
+50FC8  _DeletePort       tear a message port down: RemPort, FreeSignal, FreeMem.

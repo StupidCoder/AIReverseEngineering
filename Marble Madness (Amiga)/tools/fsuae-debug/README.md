@@ -91,17 +91,36 @@ every emulator quit/disconnect (visible as macOS "fs-uae crashed" reports).
 Fix: re-check `if (!s_conn) return;` after `remote_debug_()`. Verified: clean
 connect/continue/disconnect now produces no crash report.
 
-## Known open issue
+### Speed: enable the CPU-context debug hook — `remote_debug.cpp`
 
-With the debugger **enabled**, the Marble Madness floppy does not autoboot to
-Workbench — Kickstart 1.2 sits at its insert-disk idle (`STOP` @ `$FC0F58`, all
-`$8–$BC` vectors still ROM `$00FCxxxx`). The same ROM+ADF boots to Workbench
-fine when fs-uae is run **without** `--remote_debugger`. Likely a disk-change
-detection / cycle-timing interaction introduced by the per-vsync debug hook;
-not yet root-caused. Reaching the c/zzz decrypt (to capture the decode-time
-vector/task state) is blocked on this. Workaround paths to try: trigger a fresh
-DF0 disk-change (eject/insert) or a warm reset after boot; or launch the game
-by interacting with the emulator window directly.
+`remote_debug_init_()` left `debugging = 0`, so `do_specialties()` never called
+`debug()` → `remote_debug()`; the whole debugger ran only off the per-vsync hook
+(~50 Hz), so software breakpoints were only *sampled* 50×/sec and effectively
+never hit. Setting `debugging = 1` enables the per-instruction CPU-context hook
+so breakpoints are checked every instruction. (NB: a bp keeps `SPCFLAG_BRK` set,
+so this also needs the SOCKET_POLL_INTERVAL throttle above to avoid a `select()`
+per instruction.)
+
+## What works / what doesn't (macOS arm64, this fork)
+
+Verified working:
+- Boots Kickstart 1.2 + the Marble Madness floppy to **Workbench** under the
+  debugger (free-run; do not interrupt).
+- Connect, halt (raw `0x03`), read/write registers and memory, single-step.
+- **Software breakpoints fire during free-run** — arming `Z0,<addr>` while the
+  CPU runs delivers an async `%Stop;swbreak` notification when the address
+  executes. Reading state at that stop works. This is a usable one-shot capture.
+
+Known open issue — **resume after a halt does not run the CPU**. After any halt
+(manual `0x03` *or* a breakpoint hit), `c` (continue) does not advance the
+emulation thread (verified: CPU runs at ~50 Hz before the first halt, then a
+breakpoint stops it, and subsequent `c` produces zero further hits). Root cause
+(via instrumentation): once `remote_debug_()` enters its Tracing spin the
+emulation thread never re-enters it after the spin breaks — the thread doesn't
+resume the m68k run loop. Not yet fixed. Consequence: **one breakpoint hit per
+session, no chaining/stepping-through.** A one-shot capture (boot free-run → arm
+one breakpoint at a known address → read state at the hit) is the usable mode;
+multi-stage debugging needs this fixed.
 
 The patch only touches `src/include/sysdeps.h` and `src/cpuboard.cpp`; the
 narrowing/implicit-decl issues are handled by the `make` flags, and the

@@ -49,6 +49,11 @@ class RSP:
         self.send(data)
         return self.recv()
 
+    def cont(self):
+        # 'c' replies OK immediately, then the CPU runs until a later stop.
+        self.send("c")
+        return self.recv()   # consume the OK reply so the stream stays in sync
+
     def interrupt(self):
         self.s.sendall(b"\x03")
         return self.recv()

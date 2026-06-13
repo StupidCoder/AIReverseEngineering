@@ -34,10 +34,23 @@ index 607ff32..c38bd32 100644
  #define CPU_arm 1
  #elif defined(__powerpc__) || defined(__ppc__) || defined(_M_PPC)
 diff --git a/src/remote_debug/remote_debug.cpp b/src/remote_debug/remote_debug.cpp
-index 54f2684..d73932e 100644
+index 54f2684..7923848 100644
 --- a/src/remote_debug/remote_debug.cpp
 +++ b/src/remote_debug/remote_debug.cpp
-@@ -309,8 +309,12 @@ static void remote_debug_init_ (int port, int time_out)
+@@ -183,6 +183,12 @@ static bool did_step_copper = false;
+ static uae_u8 s_last_sent[1024];
+ static int s_last_size = 0;
+ static unsigned int s_socket_update_count = 0;
++// While any breakpoint is armed, the breakpoint scan keeps SPCFLAG_BRK set, so
++// remote_debug_() runs once per emulated instruction. Polling the socket (a
++// select() syscall) every instruction collapses emulation to a crawl. Throttle
++// it: poll once every SOCKET_POLL_INTERVAL instructions, which keeps the
++// interrupt (0x03) responsive (a few ms at full speed) without killing speed.
++#define SOCKET_POLL_INTERVAL 20000
+ static int last_exception = 0;
+ static bool last_exception_sent = true;
+ static bool exception_send_pending = false;
+@@ -309,9 +315,17 @@ static void remote_debug_init_ (int port, int time_out)
  
  	fs_log("[REMOTE_DEBUGGER] remote debugger active\n");
  
@@ -50,9 +63,30 @@ index 54f2684..d73932e 100644
 +	debugmem_enable_stackframe(false);
 +	debugmem_trace = false;
  	remote_debugging = 1;
++	// Enable the CPU-context debug hook so do_specialties() checks breakpoints
++	// per instruction (otherwise breakpoints are only sampled at vsync ~50Hz).
++	extern int debugging;
++	debugging = 1;
  	// if time_out > 0 we wait that number of seconds for a connection to be made. If
  	// none has been done within the given time-frame we just continue
-@@ -2776,6 +2780,15 @@ static void remote_debug_ (void)
+ 
+@@ -2745,8 +2759,13 @@ static void remote_debug_ (void)
+ 	{
+ 		case Running:
+ 		{
+-			update_connection ();
+-			s_socket_update_count = 0;
++			// Throttled socket poll (see SOCKET_POLL_INTERVAL). The per-vsync
++			// remote_debug_update_() hook also polls, so the no-breakpoint case
++			// (where this runs only ~50Hz) stays responsive regardless.
++			if (++s_socket_update_count >= SOCKET_POLL_INTERVAL) {
++				update_connection ();
++				s_socket_update_count = 0;
++			}
+ 
+ 			break;
+ 		}
+@@ -2776,6 +2795,15 @@ static void remote_debug_ (void)
  					break;
  				}
  
@@ -68,17 +102,23 @@ index 54f2684..d73932e 100644
  				if (is_quiting())
  				{
  					if (log_remote_protocol_enabled) {
-@@ -2847,6 +2860,13 @@ static void remote_debug_update_ (void)
+@@ -2847,7 +2875,19 @@ static void remote_debug_update_ (void)
      remote_activate_debugger ();
  	//exception_debugging = 0;
  
 +	// remote_debug_() can tear down the connection (is_quiting path destroys
-+	// s_conn and sets it to 0). Without re-checking, the rconn_poll_read below
-+	// dereferences a NULL rconn* -> SIGSEGV (KERN_INVALID_ADDRESS at 0x8). This
-+	// is the crash that fired on every emulator shutdown/disconnect.
++	// s_conn and sets it to 0). Without re-checking, the poll below dereferences
++	// a NULL rconn* -> SIGSEGV (KERN_INVALID_ADDRESS at 0x8). This is the crash
++	// that fired on every emulator shutdown/disconnect.
 +	if (!s_conn)
 +		return;
 +
++	// Process any pending packet every vsync (50Hz). remote_debug_()'s Running
++	// case throttles its own socket poll (to avoid a select() per instruction
++	// while a breakpoint is armed), so this per-frame processing is what keeps
++	// the interrupt (0x03) responsive when the CPU is idle/STOPped.
  	if (rconn_poll_read(s_conn)) {
++		update_connection ();
  		remote_activate_debugger ();
  		//exception_debugging = 0;
+ 	}

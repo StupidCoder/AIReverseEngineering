@@ -925,18 +925,27 @@ live OCS colour registers (`$DFF180`) on the training course under FS-UAE return
 words at `practy.mlb+0x17`. The first seven entries are a shared grey ramp (the
 isometric scenery shading); 7–15 are the course's own object/accent colours
 (practy red-orange, beginr blue, interm green, aerial tan, silly yellow, ultima
-red). [`extract/cmd/sprites`](extract/cmd/sprites) now reads each bank's course
-palette from the matching `.mlb` and renders with it (the 2-bitplane cells use
-colours 0–3); the sprite sheets are in [`rendered/`](rendered) (`<bank>.png`), and
-visually confirm the decode — the course `.ilb` banks resolve into the
-recognisable **isometric scenery tiles** and `marbdat.vlb` into the **marble's
-rotation frames**.
+red). [`extract/cmd/sprites`](extract/cmd/sprites) reads each course palette from
+the matching `.mlb` and renders every bank with it into [`rendered/`](rendered)
+(`<bank>.png`).
 
-Two refinements remain. **Full-colour scenery:** the individual `.ilb`/`.vlb`
-cells are only 2 bitplanes (the shading layers), so they render in the palette's
-low four greys; the vivid course colours (7–15) belong to the multi-plane
-*playfield* the engine composites from several banks plus the `.mlb` tiles, which
-is a larger reconstruction. **Exact cell boundaries:** the loader expands each
+**The bit depth differs by file kind — this is the key to the colours.** The
+`.ilb`/`.vlb` **sprite banks are 2 bitplanes** (4 colours): the loader's compositor
+`$8026` builds 132-byte cells = 16×33×2 planes, and these are *sprite/object
+building blocks* (the marble, creatures, scenery props), so they render in the
+palette's low four colours. But the **colourful course floor and walls are the
+`.mlb` level modules, which are 4 bitplanes (16 colours)** — its header gives four
+plane offsets at a constant `0x1970`-byte stride, and decoding the unpacked tile
+bitmap as 4 planes with the 16-colour palette reproduces the course's true
+colours (the practice course's grey floor with red/orange/yellow tiles). So an
+earlier note that called these 2-plane was wrong: the *sprites* are 2-plane, the
+*playfield* is 4-plane.
+
+Two refinements remain. **The `.mlb` tile layout:** it is a tile-sheet + tilemap
+format — the raw tiles now render in correct colours, but the exact cell width and
+the tilemap that assembles them into the isometric course are not yet reversed
+(the rendered `.mlb` sheets show the tile data, not a finished course image).
+**Exact `.ilb`/`.vlb` cell boundaries:** the loader expands each
 15-byte file descriptor into a 20-byte in-memory record and relocates its
 source/dest pointers (`$80B4`), and some banks (notably the marble) pair each cell
 with a blitter **mask**, so a frame stride is twice the cell — the current

@@ -75,6 +75,42 @@ func mlbPalette(d []byte) color.Palette {
 	return p
 }
 
+// mlbSheet renders a .mlb course bitmap: 4 bitplanes (16 colours) whose plane
+// data starts at the four big-endian offsets in the header (file bytes 0x07/
+// 0x0b/0x0f/0x13, into the unpacked buffer). The .mlb is a tile-sheet format, so
+// the exact width/tilemap is not yet reversed — this renders the raw planes at a
+// fixed width so the real colours are visible.
+func mlbSheet(up []byte, raw []byte, W int) *image.Paletted {
+	off := func(o int) int {
+		if o+3 < len(raw) {
+			return int(raw[o])<<24 | int(raw[o+1])<<16 | int(raw[o+2])<<8 | int(raw[o+3])
+		}
+		return 0
+	}
+	planes := [4]int{off(0x07), off(0x0b), off(0x0f), off(0x13)}
+	bpr := W / 8
+	rows := (planes[1] - planes[0]) / bpr
+	if rows < 1 || rows > 4000 {
+		rows = 256
+	}
+	img := image.NewPaletted(image.Rect(0, 0, W, rows), pal)
+	for y := 0; y < rows; y++ {
+		for x := 0; x < W; x++ {
+			bi := y*bpr + x/8
+			bit := uint(7 - x%8)
+			v := 0
+			for p := 0; p < 4; p++ {
+				o := planes[p] + bi
+				if o < len(up) && (up[o]>>bit)&1 == 1 {
+					v |= 1 << p
+				}
+			}
+			img.SetColorIndex(x, y, uint8(v))
+		}
+	}
+	return img
+}
+
 // planarCell renders one 16-wide, h-row, 2-plane (row-interleaved) cell starting
 // at byte off in buf into a paletted image. Out-of-range bytes read as 0.
 func planarCell(buf []byte, off, h int) *image.Paletted {
@@ -201,35 +237,41 @@ func main() {
 			fmt.Fprintf(os.Stderr, "skip %s: %v\n", base, err)
 			return nil
 		}
-		var hdr, h int
-		switch ext {
-		case ".ilb", ".vlb":
-			// [flag][count:be16][$01][count*15 descriptors][packed bitmap]
-			// descriptor 0 begins at byte 4; its byte[4] (= file byte 8) is the
-			// cell height (33 for .ilb course cells, 17 for .vlb objects).
-			count := int(d[1])<<8 | int(d[2])
-			hdr = 4 + count*15
-			h = int(d[8])
-		case ".mlb":
-			// different container (flag $01 + offset table); the tile bitmap is
-			// the largest PackBits run. Best-effort: skip the 24-byte header and
-			// render at the course tile height (best-effort 16).
-			hdr = 24
-			h = 16
+		course := courseOf(base)
+		out := filepath.Join(outdir, base+".png")
+
+		if ext == ".mlb" {
+			// The .mlb playfield is 4 bitplanes = 16 colours (its own palette at
+			// 0x17). The packed tile bitmap follows the 16-colour palette at 0x37.
+			pal = greys
+			if p, ok := palettes[course]; ok {
+				pal = p // full 16-colour playfield palette
+			}
+			raw := unpackByteRun1(d[0x37:])
+			writePNG(out, scale(mlbSheet(raw, d, 320), 2))
+			fmt.Printf("%-14s flag=$%02X unpacked=%d  4-plane 16-colour  pal=%s -> %s\n",
+				base, d[0], len(raw), course, out)
+			return nil
 		}
+
+		// .ilb / .vlb: [flag][count:be16][$01][count*15 descriptors][packed bitmap].
+		// Descriptor 0 begins at byte 4; its byte[4] (= file byte 8) is the cell
+		// height (33 for .ilb course cells, 17 for .vlb objects). These banks are 2
+		// bitplanes (4 colours) -> palette colours 0..3.
+		count := int(d[1])<<8 | int(d[2])
+		hdr := 4 + count*15
+		h := int(d[8])
 		if hdr >= len(d) || h <= 0 {
 			fmt.Fprintf(os.Stderr, "skip %s: bad geometry hdr=%d h=%d\n", base, hdr, h)
 			return nil
 		}
-		course := courseOf(base)
 		pal = greys
 		if p, ok := palettes[course]; ok {
-			pal = p[:4] // .ilb/.vlb cells are 2 bitplanes -> colours 0..3
+			pal = p[:4]
 		}
 		raw := unpackByteRun1(d[hdr:])
-		out := filepath.Join(outdir, base+".png")
 		writePNG(out, scale(sheet(raw, h, 16), 3))
-		fmt.Printf("%-14s flag=$%02X hdr=%d packed=%d unpacked=%d  cell=16x%d  pal=%s -> %s\n",
+		fmt.Printf("%-14s flag=$%02X hdr=%d packed=%d unpacked=%d  cell=16x%d 2-plane  pal=%s -> %s\n",
 			base, d[0], hdr, len(d)-hdr, len(raw), h, course, out)
 		return nil
 	}))

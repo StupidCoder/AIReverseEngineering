@@ -492,6 +492,28 @@ a uniform `$FC`. This is the crux of the protection: the decryption key is not
 the ROM, and not any byte on the disk — it is the **live exception-vector table
 at the instant the game decrypts itself**, a piece of deep runtime state.
 
+One could hope the launcher closes that gap by *installing* its own handlers
+before it invokes `c/zzz` — which would put the key values back on the disk. It
+does not. The launcher's full disassembly (Part II §3) shows no write to the
+`$8`–`$BC` vector region, no `tc_ExceptCode`/`tc_TrapCode` write, and none of the
+calls that would install a handler (`Supervisor`, `SetIntVector`, `AddIntServer`,
+`SetFunction`); the only references to those task fields anywhere in the binary
+are *reads*, inside the dead embedded copy of the engine. So the launcher inherits
+the vector table from booted AmigaDOS and hands it, untouched, to the decoder —
+the protection's inputs are produced by the running OS, not the disk.
+
+Running the launcher confirms it dynamically. `extract/cmd/runlauncher` executes
+the real `MarbleMadness!` on the m68k core in a faked Workbench environment —
+trapping the dos/exec calls, serving files and `LoadSeg` out of the ADF — and it
+faithfully walks the load chain: open `dos.library`, take the `WBStartup`
+message, `LoadSeg` `c/zzz`, and run it on `c/xxx`. c/zzz streams the whole 6 116-
+byte file, decrypts the header, and `AllocMem`s all twenty-two of `c/xxx`'s hunks
+at sizes that match the static decode to the byte (3 296 = 822×4+8, 1 016 =
+252×4+8, …). Then — with the exception vectors sitting at zero, exactly as the
+launcher left them — the body decode loses the stream and the decruncher spins.
+The header decodes, the bodies do not: the live OS state is the missing key, and
+nothing on the disk supplies it.
+
 ## 4. What the static analysis recovers — and where it stops
 
 Recovered from the disk alone:

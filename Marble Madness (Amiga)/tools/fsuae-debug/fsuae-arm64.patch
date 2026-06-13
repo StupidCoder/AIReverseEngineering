@@ -1,0 +1,55 @@
+diff --git a/src/cpuboard.cpp b/src/cpuboard.cpp
+index 1624eb4..9841a81 100644
+--- a/src/cpuboard.cpp
++++ b/src/cpuboard.cpp
+@@ -898,12 +898,16 @@ void cpuboard_rethink(void)
+ 			INTREQ_0(0x8000 | 0x0008);
+ 			if (currprefs.cachesize)
+ 				uae_int_requested |= 0x010000;
++#ifdef WITH_PPC
+ 			uae_ppc_wakeup_main();
++#endif
+ 		} else if (!(io_reg[CSIII_REG_IRQ] & (P5_IRQ_PPC_1 | P5_IRQ_PPC_2))) {
+ 			INTREQ_0(0x8000 | 0x0008);
+ 			if (currprefs.cachesize)
+ 				uae_int_requested |= 0x010000;
++#ifdef WITH_PPC
+ 			uae_ppc_wakeup_main();
++#endif
+ 		} else {
+ 			uae_int_requested &= ~0x010000;
+ 		}
+diff --git a/src/include/sysdeps.h b/src/include/sysdeps.h
+index 607ff32..c38bd32 100644
+--- a/src/include/sysdeps.h
++++ b/src/include/sysdeps.h
+@@ -45,6 +45,9 @@ using namespace std;
+ #define CPU_64_BIT 1
+ #elif defined(__i386__) || defined(_M_IX86)
+ #define CPU_i386 1
++#elif defined(__aarch64__) || defined(_M_ARM64)
++#define CPU_aarch64 1
++#define CPU_64_BIT 1
+ #elif defined(__arm__) || defined(_M_ARM)
+ #define CPU_arm 1
+ #elif defined(__powerpc__) || defined(__ppc__) || defined(_M_PPC)
+diff --git a/src/remote_debug/remote_debug.cpp b/src/remote_debug/remote_debug.cpp
+index 54f2684..2246d2a 100644
+--- a/src/remote_debug/remote_debug.cpp
++++ b/src/remote_debug/remote_debug.cpp
+@@ -2776,6 +2776,15 @@ static void remote_debug_ (void)
+ 					break;
+ 				}
+ 
++				// A 'continue' (remote_deactivate_debugger) switches the state
++				// back to Running; without this check the loop would spin here
++				// forever in sleep_millis(), starving x_do_cycles() and freezing
++				// the whole chipset (frozen beam / no interrupts / STOP deadlock).
++				if (s_state == Running)
++				{
++					break;
++				}
++
+ 				if (is_quiting())
+ 				{
+ 					if (log_remote_protocol_enabled) {

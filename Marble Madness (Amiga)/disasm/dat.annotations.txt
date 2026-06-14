@@ -114,8 +114,20 @@
 #   THE surface->velocity step. Reads the object's velocity (obj+0->-$1E, obj+4->-$22)
 #   and the $CCA surface (a4=$CCA), dispatches on the surface-cell state $CCA+$1F via a
 #   ~50-case jump table ($169FC), and modifies the velocity per case (e.g. $0167CA adds
-#   a $168F8 8-direction force). The marble's slope/collision response lives here; the
-#   exact slope case (vs wall/hole/edge) is the last thing to isolate.
+#   a $168F8 8-direction force). The marble's slope/collision response lives here.
+# THE SLOPE FORCE (proven), sub_016900 case at $017B80: take (d5,d4) = the vector from
+#   the marble to the surface cell's DOWNHILL reference point ($CCA cell +$C/+$10),
+#   shift <<$10 and divide by the distance -$3C (JSR $23EB4) to get a UNIT vector, ASL
+#   #2 (x4), and ADD it to the velocity:  $017BDE ADD.l d0,(a5) -> obj+0 (vX) += ux*4 ;
+#   $017BE8 ADD.l d0,$4(a5) -> obj+4 (vY) += uy*4. So "downhill" = a constant ~4-unit
+#   push toward the cell's downhill point each frame; the downhill ref is set in the
+#   $CCA surface by build_surface $DEBC / sub_00E158 from the $9A6 terrain. PROVEN end
+#   to end: $9A6 terrain -> $CCA surface (downhill ref) -> $017BDE/$017BE8 velocity.
+# Sibling surface cases (the other terrain kinds the user noted): $017210/$0174E0
+#   MOVE.l d0,(a5)/$4(a5) = SET velocity (wall/stop), $01809E NEG.l $4(a5) = bounce,
+#   $017DC0 a second slope variant. (Ice/grating low/high-friction = still to map to
+#   their state cases; friction itself is the speed-cap in $14D28.) Exact state->case
+#   binding = decode the jump table at $016A00 (BRA.w offsets, target=here+2+off).
 00E944  iso_to_cell      take the iso-projected SCREEN position ($6C4,$6C6) and derive the cell coordinates the region map / terrain_lookup use: $6CA = $6C4>>3, $6CC = $6C6>>3 (8-px iso cell), $6D2 = $6C4&7, $6D4 = $6C6&7 (sub-cell), $6D6 = 1 if $6D2<=$6D4 else 0 (which DIAGONAL HALF of the cell -> matches the iso diamond / ramp-edge split). So the region records are in iso-screen-cell space; each record's |byte0|,|byte1| is a start cell and the sign of byte0/byte1 is its diagonal direction. For practy all 10 boundaries are PARALLEL diagonals = a ladder of terraces; $FF-sided ones are the fall-off edges. OPEN: exact projection scale/offset to overlay them on the course art pixel-accurately.
 019390  trackball_decode read the mouse/TRACKBALL via JOY0DAT/JOY1DAT ($DFF00A/$DFF00C), per player (d5); decode the Amiga quadrature (EOR adjacent counter bits for direction, +/-$20 per step) into an X/Y delta. (CIA fire buttons read at $BFE001 / sub_018F90.) The delta is the marble's roll force.
 0192EC  control_update   per-player loop: trackball_decode then apply each player's delta to the marble via $18FCC, accumulating/scaling it into the roll-force accumulators $195EE/$195EA. The marble is a 3-D point mass: position (x,y,z) at obj+$C/+$10/+$14, velocity (vx,vy,vz) at obj+0/+4/+8, integrated each frame by object_draw $14EF0 (pos += velocity) then iso-projected by set_draw_pos $E872.

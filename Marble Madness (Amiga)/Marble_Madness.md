@@ -975,7 +975,102 @@ Decoding those is the next step; the engine side that consumes them is Part V.
 
 # Part V — Game mechanics
 
-## 1. The object/actor system
+## 1. The game loop
+
+Marble Madness runs as **two cooperating contexts** that talk over exec messages:
+a **main thread** (the Intuition front-end and the game-state machine) and a
+separate vblank-synced **"Framer" task** that owns the display refresh. There is no
+single linear loop — the gameplay update and the display refresh run in different
+contexts, which is why the call graph forks.
+
+**Entry and the front-end.** `cstart` (`$0`) → C runtime → `main` (`$243E8`) →
+`game` (`$2B68`). The shell opens `intuition.library`, runs one-time init
+(including `sub_00CA14` below), starts gameplay, and then services an IDCMP message
+loop:
+
+```
+game():                                   # $2B68 — the Intuition front-end
+    open intuition.library
+    init(); sub_00CA14(); start_gameplay()    # $2F54 / $CA14 / $6FC6
+    repeat:
+        msg = Wait/GetMsg()
+        switch msg.Class (+$14):
+            8:  quit = true
+            9:  start_course()             # $3410: enable DMA, start_gameplay()
+            10: ...                         # $3432
+        ReplyMsg(msg)
+    until quit
+
+start_gameplay(go):                       # $6FC6 → $6F20
+    PutMsg(framer_port, {cmd: go ? 6 : 7}) # tell the Framer task to start/stop
+```
+
+**The Framer task — the display loop.** `create_framer` (`$6FDC`) spawns an exec
+task named **"Framer"** (entry `framer_task $6DA8`). It is the real-time loop, woken
+once per **vertical blank**, and it doubles as a frame-rate meter (it tallies how
+many vblanks each frame took into the `$70B8` histogram):
+
+```
+framer_task():                            # $6DA8 — the real-time main loop (own task)
+    repeat:
+        Wait(vblank_signal)               # $24B54
+        frame_tick(frame_index)           # $7596
+        record vblanks-this-frame into $70B8
+        if stop_message: break
+
+frame_tick(f):                            # $7596 — one displayed frame
+    redraw  = colour_cycle_A()            # $B6DE — animate one cycling colour range
+    redraw |= colour_cycle_B()            # $A7A2 — animate a second range
+    if subsystem_flags ($5BCA, $1E20D): ...update those...
+    if new_world_frame ($5DB):            # a fresh world update is ready
+        $230++                            # frame counter
+        $7692 = $D30C                     # latch the vertical scroll position
+        redraw = true
+    if redraw:
+        rebuild_display(scroll=$7692)     # $86B4 — rebuild the copper/display list
+```
+
+The two `colour_cycle` passes drive the animated ice/hazard palette entries
+(`$0RGB` tables → the copper colour slots `$B954/$B960` and `$B95A/$B966`) — the
+cycling that a static `.mlb` palette can't show (Part IV §3).
+
+**The game-state machine and the world update.** The gameplay proper is a state
+machine, `sub_00CA14`, dispatched on `$CDAC` (1 = set up the course, 2 = …, 3 =
+play). The **play** state runs the per-object world update and the object render:
+
+```
+game_state():                             # $CA14 — dispatched on $CDAC
+    case 1: setup_course()                # reset scroll ($D30C=0), DMACON, counters
+    case 2: ...
+    case 3: play_frame()                  # the world update + render (below)
+
+play_frame():
+    for each live object:
+        object_draw(obj)                  # $14EF0
+            obj.pos += obj.velocity       # physics: integrate (x,y,z)
+            set_draw_pos(obj)             # $E872 → iso-project $E944 → screen seed
+            draw obj's sprite + shadow/secondary passes (by obj.+$1B) via actor_update
+```
+
+**The render pipeline** (Part IV §3–§4 for the cell formats):
+
+```
+render:
+    mlb_draw_column() → draw_tile()       # $9910/$99C0 — .mlb tilemap background
+    for each object: object_draw()        # $14EF0 — sprites
+        actor_update() → draw_object_wrap() → blit_object()   # $1D3B2/$104C4/$11D1C
+            type-0 cell → 4 plane-blocks + cookie-cut mask    (scenery)
+            type-1 cell → row-interleaved 4-plane sprite       (flag/marble/creature)
+```
+
+**Still open.** The exact message/signal that ticks the game-state machine once per
+world frame — the hand-off between the Framer's vblank and the main thread's update
+(the `$5DB` "new world frame" flag is the visible half of it) — is the one link not
+yet pinned. It is the natural entry point for the next trace: input (`JOYxDAT`) →
+the marble's velocity → collision against the terrain `type` (`$6A0`, §3) → the
+`object_draw` integrator above.
+
+## 2. The object/actor system
 
 The moving things in a course — the goal flag, the enemies and the
 marble-munchers — are **actors**, fed by the per-course `*Track` data (Part IV §5).
@@ -1004,7 +1099,7 @@ across the 512-px seam). Because each `.ilb` descriptor cell stores only two
 planes, a 16-colour object spans **two consecutive cells** — the cell→object
 grouping the obstacle render still needs (Part IV §4).
 
-## 2. Terrain interaction
+## 3. Terrain interaction
 
 The placement records (Part IV §5) are the marble's **terrain map**. A proximity
 query (`$012600` / `place_objects $0122AC`) finds the record nearest the marble,
@@ -1012,7 +1107,7 @@ isometric-transforms it (`$6718`), and stores its `type` at `$6A0` → the marbl
 `+$1B`; the marble physics then reacts to that `type` (a hole, a ramp, a hazard,
 the goal). Naming each `type` 0–7 is the open decode.
 
-## 3. Physics, controls, scoring
+## 4. Physics, controls, scoring
 
 *To follow.* The marble's physics and controls, the timer, scoring and
 progression.

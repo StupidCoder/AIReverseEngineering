@@ -1268,20 +1268,43 @@ grid.
 
 `$CCA` is a **multi-phase work buffer** — verified by the identical literal `$0CCA`
 used with three different strides: `build_region` writes it as **8-byte** corner-height
-cells; an init pass (`$3886`) clears it as **18-byte** cells (seeding `+$C/+$10` to the
-defaults `$FF`/`$80`); and the physics/setup use **86-byte** region structs. The
-86-byte structs are populated by **`region_build_list $F7EA`**, which walks a
-per-course source list (from Track header `+0`/`$FD2C`), and for each entry allocates a
-struct (`$F6B2`), writes its grid key `+$52`/`+$54 = (x,y)`, and calls **`region_update
-$F96A`** to set `+$3A`/`+$18`/`+$1A` and dispatch its terrain code (`$11C24`).
+cells; the region init `region_clear $8F42` clears it as **86-byte** structs
+(`+$18=0`, `+$C/+$10=0`, `+$1F=0`, `+$19=index`); and a particle/effect system
+(`$1E21C`) reuses it as **8-byte** pos+vel records. The 86-byte structs are populated by
+**`region_build_list $F7EA`**, which walks a per-course source list (`[x][y][scriptPtr]`
+records from Track header `+0`/`$FD2C`); for each it allocates a struct (`$F6B2`), writes
+its grid key `+$52`/`+$54 = (x,y)`, and calls **`region_update $F96A`**, which stores the
+record's long as the region's **script pointer `+$3A`** and sets `+$18`/`+$1A`.
 **`region_activate $F8FC`** then matches each region's `+$52`/`+$54` against the marble
-tile every frame to set its `+$18` valid flag — which is the gate `sub_016900`'s loop
-tests.
+tile every frame to set its `+$18` valid flag — the gate `sub_016900`'s loop tests.
 
-The one instruction not yet pinned is where each region's screen-space reference
-`+$C/+$10` is written from its geometry/height (it starts at the `$FF`/`$80` default and
-must be filled during setup or per-frame projection). Everything that *consumes* it is
-now traced.
+### The reference point is *scripted* — `region_script $FD68`
+
+The decisive find: a region's `+$C/+$10` reference is **not a static field** — it is
+emitted by a tiny **per-region bytecode animation script**. `region_clear` zeroes
+`+$C/+$10`; an exhaustive scan of the whole binary finds *no* ordinary instruction that
+fills them. They are written by `region_script $FD68`, a per-region interpreter:
+
+- `+$3A` = script base pointer (from the Track source list / the anim-script table at
+  `$FD2C`); `+$36` = the script **program counter** (advances 2 bytes per word read);
+  `+$1E` = the current keyframe's **duration in frames** (counted down; at 1 the next
+  opcode is fetched). A word opcode `0..$12` dispatches through a 19-entry table at
+  `$FD96`. The key opcodes:
+
+| Op | Effect |
+|---|---|
+| **0** (keyframe) | reads 5 words → `+$C` = refX (`word<<19`), `+$10` = refY (`word<<19`), `+$14` = refZ (`word<<16`), `+$1E` = duration, `+$1F` = **terrain code**. This is what plants the downhill reference point and the region's terrain type. |
+| **16** (move) | every frame `+$C += region.vX (+0)`, `+$10 += region.vY (+4)` — the reference point **drifts**, i.e. a *moving* slope/seesaw/scrolling wall. |
+| **2** | sets `+$1C`/`+$23`/`+$1A`, plays a sound — a state-change keyframe. |
+
+So the long-sought "downhill reference data" is a **keyframe stream per region**:
+opcode 0 sets the ref point `(x,y,z)` as `word<<19/<<16` fixed-point plus a terrain code
+and a frame count; opcode 16 advances it by a velocity; others trigger sounds/state. The
+fixed-point `<<19` matches the marble's own position scale, so `sub_016900` can subtract
+them directly. This is exactly how Marble Madness animates its slopes, seesaws, sliding
+walls and pulsing hazards — and it closes the chain end to end: **Track anim-script →
+`region_script $FD68` keyframe → region `+$C/+$10` ref point → `sub_016900` slope
+force → marble velocity.**
 
 So "downhill" is a real per-region slope field: the **`$9A6` descriptor** lists
 rectangular regions with a base height and a 3-bit slope direction; `build_surface`
@@ -1299,13 +1322,13 @@ The "dizzy" spin we decoded in Part IV §4 is one of these death/respawn animati
 
 ### Still open
 
-The slope force, the terrain-code table, the region-struct layout and the `$9A6`
-record format are now pinned by code. What remains: the exact bit-for-bit layout of
-all 86 bytes of the region struct (only the physics-relevant fields are named above),
-the precise geometry `sub_00E158` uses to write each region's `+$C/+$10` reference
-from the record's origin/size/direction, and the full death/respawn and scoring state
-machines. The friction surfaces are the per-region max-speed selector (`+$1A` →
-`$14E7E`), not separate jump-table cases.
+The slope force, the terrain-code table, the region-struct layout, the `$9A6` record
+format **and the reference-point source** (the `region_script $FD68` keyframe stream)
+are now pinned by code — the marble-physics chain is traced end to end. What remains:
+the full 19-opcode region-script vocabulary (only opcodes 0/2/16 are characterised
+above), the exact bit-for-bit layout of all 86 bytes of the region struct, and the
+full death/respawn and scoring state machines. The friction surfaces are the per-region
+max-speed selector (`+$1A` → `$14E7E`), not separate jump-table cases.
 
 ---
 

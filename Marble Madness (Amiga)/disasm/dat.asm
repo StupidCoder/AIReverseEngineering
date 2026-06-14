@@ -5746,7 +5746,7 @@
 0080B0  4E 5E                         UNLK a6
 0080B2  4E 75                         RTS
 
-; ==== ilb_load  $0080B4  (6 callers) — load an .ilb sprite bank for the current course: index a buffer table, read+unpack the file (bank_read_unpack), then walk the bank's descriptors — expanding each 15-byte file descriptor to a 20-byte in-memory record and relocating its source/dest pointer fields ($8/$C/$10) — and composite cells via composite_planes. ====
+; ==== ilb_load  $0080B4  (6 callers) — load an .ilb/.vlb sprite bank: read+unpack the WHOLE file (one ByteRun1 stream), then walk descriptors in the unpacked buffer at buf+2, stride $14=20 (+0 type, +1 flag, +2 width-words, +4 height, +6 one-plane size, +8 source off, +$C dest, +$10 aux). Pixel data is contiguous after the descriptors; plane count = source span / +6. Composites type-0 cells via composite_planes. ====
 0080B4  4E 56 FF E4                   LINK a6,#-$1C
 0080B8  4A 6E 00 0E                   TST.w $E(a6)
 0080BC  66 18                         BNE $0080D6

@@ -2,11 +2,12 @@
 // course scenery, .vlb moving objects, .mlb level tiles) and writes them as PNGs.
 //
 // The codec was reversed from the decrypted game program (Marble_Madness.md
-// Part IV §3): each bank's bitmap section is ByteRun1 / PackBits compressed (the
-// same RLE as IFF ILBM bodies, engine routine $9118), and the pixels are 2
-// bitplanes (4 colours), 16 px wide, row-interleaved (per row: plane-0 word then
-// plane-1 word = 4 bytes). Colours are placeholder greys; the real per-course
-// palette is a copper list not yet decoded.
+// Part IV §3): the WHOLE file is one ByteRun1 / PackBits stream (same RLE as IFF
+// ILBM bodies, engine routine $9118). Unpacked, the buffer holds a count word, an
+// array of 20-byte cell descriptors (loader $80B4), then the planar pixel data the
+// descriptors point at. Each cell carries its own width/height and plane count
+// (2 planes / 4 colours for small markers and objects, 4 planes / 16 colours for
+// scenery blocks). The per-course palette comes from the course .mlb (offset 0x16).
 //
 // Usage: sprites <disk.adf> <outdir>
 //   writes <outdir>/<bankname>.png — one tiled sheet of all cells per bank.
@@ -57,6 +58,16 @@ func unpackByteRun1(src []byte) []byte {
 var greys = color.Palette{
 	color.Gray{0x00}, color.Gray{0x55}, color.Gray{0xAA}, color.Gray{0xFF},
 }
+
+// greys16 is the 16-colour fallback for sprite banks when no course palette is
+// known (cells can be up to 4 bitplanes / 16 colours).
+var greys16 = func() color.Palette {
+	p := make(color.Palette, 16)
+	for i := range p {
+		p[i] = color.Gray{uint8(i * 17)}
+	}
+	return p
+}()
 var pal = greys
 
 // mlbPalette reads a course's 16-colour playfield palette from its .mlb level
@@ -125,52 +136,112 @@ func mlbCourse(up []byte, planes [4]int, tilemap []byte, courseW int) (*image.Pa
 	return img, H
 }
 
-// planarCell renders one 16-wide, h-row, 2-plane (row-interleaved) cell starting
-// at byte off in buf into a paletted image. Out-of-range bytes read as 0.
-func planarCell(buf []byte, off, h int) *image.Paletted {
-	img := image.NewPaletted(image.Rect(0, 0, 16, h), pal)
-	for y := 0; y < h; y++ {
-		base := off + y*4
-		p0 := word(buf, base)
-		p1 := word(buf, base+2)
-		for x := 0; x < 16; x++ {
-			bit := uint(15 - x)
-			v := (p0>>bit)&1 | ((p1>>bit)&1)<<1
-			img.SetColorIndex(x, y, uint8(v))
+// cell is one .ilb/.vlb sprite cell decoded from a 20-byte descriptor: w x h
+// pixels, planes bitplanes stored as sequential cz-byte blocks starting at src in
+// the unpacked buffer (cz = one-plane byte size = (w/8)*h).
+type cell struct{ w, h, planes, cz, src int }
+
+// parseCells reads the count descriptors at buf+2 (stride 20) and derives each
+// cell's plane count from its source span (gap to the next cell, or buffer end).
+func parseCells(buf []byte, count int) []cell {
+	wd := func(o int) int {
+		if o+1 < len(buf) {
+			return int(buf[o])<<8 | int(buf[o+1])
 		}
+		return 0
 	}
-	return img
-}
-
-func word(b []byte, o int) uint16 {
-	if o+1 < len(b) {
-		return uint16(b[o])<<8 | uint16(b[o+1])
-	}
-	if o < len(b) {
-		return uint16(b[o]) << 8
-	}
-	return 0
-}
-
-// sheet tiles cells (16 x h) cols-per-row into one image with a 1px gap.
-func sheet(buf []byte, h, cols int) *image.Paletted {
-	cellBytes := 4 * h
-	n := (len(buf) + cellBytes - 1) / cellBytes
-	rows := (n + cols - 1) / cols
-	W := cols*(16+1) + 1
-	H := rows*(h+1) + 1
-	img := image.NewPaletted(image.Rect(0, 0, W, H), pal)
-	for i := 0; i < n; i++ {
-		cx := (i%cols)*(16+1) + 1
-		cy := (i/cols)*(h+1) + 1
-		c := planarCell(buf, i*cellBytes, h)
-		for y := 0; y < h; y++ {
-			for x := 0; x < 16; x++ {
-				img.SetColorIndex(cx+x, cy+y, c.ColorIndexAt(x, y))
+	ln := func(o int) int { return wd(o)<<16 | wd(o+2) }
+	var cs []cell
+	for i := 0; i < count; i++ {
+		o := 2 + i*20
+		if o+20 > len(buf) {
+			break
+		}
+		ww, h, cz, src := wd(o+2), wd(o+4), wd(o+6), ln(o+8)
+		if cz <= 0 || src <= 0 || src >= len(buf) {
+			continue
+		}
+		end := len(buf)
+		if i+1 < count {
+			if nx := ln(o + 20 + 8); nx > src && nx <= len(buf) {
+				end = nx
 			}
 		}
+		planes := (end - src) / cz
+		if planes < 1 {
+			planes = 1
+		} else if planes > 6 {
+			planes = 6
+		}
+		cs = append(cs, cell{w: ww * 16, h: h, planes: planes, cz: cz, src: src})
+	}
+	return cs
+}
+
+// drawCell blits one cell at (ox,oy). Each plane p is a cz-byte block at
+// src+p*cz; pixel value ORs the planes' bits (low plane = bit 0).
+func drawCell(img *image.Paletted, buf []byte, c cell, ox, oy int) {
+	bpr := c.w / 8 // bytes per plane row
+	for y := 0; y < c.h; y++ {
+		for x := 0; x < c.w; x++ {
+			var v uint8
+			for p := 0; p < c.planes; p++ {
+				o := c.src + p*c.cz + y*bpr + x/8
+				if o >= 0 && o < len(buf) {
+					v |= (buf[o] >> uint(7-x%8) & 1) << uint(p)
+				}
+			}
+			img.SetColorIndex(ox+x, oy+y, v)
+		}
+	}
+}
+
+// ilbSheet flow-packs the cells left-to-right (wrapping near maxW px), each row as
+// tall as its tallest cell, 1px gaps.
+func ilbSheet(buf []byte, cells []cell) *image.Paletted {
+	const gap, maxW = 1, 40 * 16
+	type place struct {
+		c    cell
+		x, y int
+	}
+	var ps []place
+	x, y, rowH, totW := gap, gap, 0, gap
+	for _, c := range cells {
+		if x > gap && x+c.w+gap > maxW {
+			x, y, rowH = gap, y+rowH+gap, 0
+		}
+		ps = append(ps, place{c, x, y})
+		x += c.w + gap
+		if c.h > rowH {
+			rowH = c.h
+		}
+		if x > totW {
+			totW = x
+		}
+	}
+	img := image.NewPaletted(image.Rect(0, 0, totW, y+rowH+gap), pal)
+	for _, p := range ps {
+		drawCell(img, buf, p.c, p.x, p.y)
 	}
 	return img
+}
+
+// cellSummary tallies the distinct WxHxP cell shapes for the log line.
+func cellSummary(cells []cell) string {
+	order := []string{}
+	n := map[string]int{}
+	for _, c := range cells {
+		k := fmt.Sprintf("%dx%dx%dp", c.w, c.h, c.planes)
+		if n[k] == 0 {
+			order = append(order, k)
+		}
+		n[k]++
+	}
+	parts := make([]string, len(order))
+	for i, k := range order {
+		parts[i] = fmt.Sprintf("%dx %s", n[k], k)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // scale nearest-neighbours an image up by n for visibility.
@@ -285,25 +356,34 @@ func main() {
 			return nil
 		}
 
-		// .ilb / .vlb: [flag][count:be16][$01][count*15 descriptors][packed bitmap].
-		// Descriptor 0 begins at byte 4; its byte[4] (= file byte 8) is the cell
-		// height (33 for .ilb course cells, 17 for .vlb objects). These banks are 2
-		// bitplanes (4 colours) -> palette colours 0..3.
-		count := int(d[1])<<8 | int(d[2])
-		hdr := 4 + count*15
-		h := int(d[8])
-		if hdr >= len(d) || h <= 0 {
-			fmt.Fprintf(os.Stderr, "skip %s: bad geometry hdr=%d h=%d\n", base, hdr, h)
+		// .ilb / .vlb: like the .mlb, the WHOLE file is one ByteRun1/PackBits stream
+		// (loader $7E4E). Unpacked, the buffer is:
+		//   +0   word              cell count
+		//   +2   count x 20-byte   cell descriptors (loader $80B4 walks these at
+		//                          stride $14): +2 width in 16-px words, +4 height in
+		//                          rows, +6 one-plane byte size (= width*2 * height),
+		//                          +8 source offset into this same buffer.
+		//   ...                    the planar pixel data the +8 fields point at.
+		// Cells are contiguous and in order, so a cell's source span is the gap to the
+		// next +8 (or buffer end); the plane count is span/cellsize (planes are stored
+		// as sequential blocks, per composite_planes $8026). Geometry varies per cell
+		// (e.g. practy mixes 16x33 2-plane scenery with 80x48 4-plane cells), which the
+		// old uniform-height/2-plane model could not represent — it only matched by
+		// unpacking from a coincidental raw-file offset.
+		buf := unpackByteRun1(d)
+		count := int(buf[0])<<8 | int(buf[1])
+		cells := parseCells(buf, count)
+		if len(cells) == 0 {
+			fmt.Fprintf(os.Stderr, "skip %s: no cells (count=%d)\n", base, count)
 			return nil
 		}
-		pal = greys
+		pal = greys16
 		if p, ok := palettes[course]; ok {
-			pal = p[:4]
+			pal = p
 		}
-		raw := unpackByteRun1(d[hdr:])
-		writePNG(out, scale(sheet(raw, h, 16), 3))
-		fmt.Printf("%-14s flag=$%02X hdr=%d packed=%d unpacked=%d  cell=16x%d 2-plane  pal=%s -> %s\n",
-			base, d[0], hdr, len(d)-hdr, len(raw), h, course, out)
+		writePNG(out, scale(ilbSheet(buf, cells), 3))
+		fmt.Printf("%-14s flag=$%02X  %d cells, %s  pal=%s -> %s\n",
+			base, d[0], count, cellSummary(cells), course, out)
 		return nil
 	}))
 }

@@ -822,71 +822,58 @@ format**; only the sprite geometry and counts differ. The `.ilb` sizes track how
 much each course needs: the Silly and Ultimate courses share a minimal four-sprite
 set (466 bytes), while Aerial packs sixty-three (35 KB).
 
-**The container.** Every `.ilb` has the same layout, confirmed across all six
-files: a 4-byte header, a table of fixed 15-byte image descriptors, then the
-packed bitmap data.
+**The container is one whole-file ByteRun1 stream — exactly like the `.mlb`.** An
+earlier reading of the *raw* file (a 4-byte header + a table of "15-byte"
+descriptors + packed bitmap, with the data section at `4 + count×15`) decoded the
+sprites *correctly* but for the wrong reason: that computed offset just happened to
+land on a PackBits control boundary, so the unpack re-synced. The honest model —
+confirmed from the loader `$80B4` — is that the bank is **packed end-to-end** and
+the structure only exists **after** unpacking. The loader does exactly that:
+`dos.library Open(MODE_OLDFILE)`/`Read`/`Close` (**not** the track loader, **not**
+a decompression library), then `$9118` ByteRun1-expands the *whole file* into a
+work buffer, and walks the descriptors **in that buffer**.
 
 ```
-+0   byte   flag (9 on the lighter banks, 13 on the heavier)
-+1   word   image count (big-endian)
-+3   byte   $01
-+4   …      count × 15-byte descriptor records
-            └ data section begins at 4 + count*15
+unpacked buffer:
++0    word              cell count
++2    count × 20 bytes  cell descriptors (loader walks these at stride $14)
+...                     contiguous planar pixel data the +8 fields point at
 ```
 
-The image count drives the layout — Silly/Ultimate 4, Practice 10, Beginner 21,
-Intermediate 23, Aerial 63 — and in every file the data section begins exactly at
-`4 + count×15`, opening with the tell-tale left-aligned bitmap ramp
-(`80 C0 E0 F0 F8 FC FE FF`):
+**The descriptors (20 bytes, in the unpacked buffer).** The first of `silly.ilb`,
+read from the unpacked buffer — note it is *clean*, with none of the stray `$FE`
+control bytes that the old raw-file read showed (those `$FE` were PackBits repeat
+codes the raw read was straddling):
 
 ```
-silly.ilb  (count 4):  data @64  = 00 C0 00 C0 00 80 00 E0 …
-aerial.ilb (count 63): data @949 = C0 00 80 00 FE FF E0 00 …
++0  byte   cell type      (1 = stored cell, 0 = engine-composited cell)
++1  byte   flags           (bit 0 = process this cell)
++2  word   width  in 16-px words   (silly: 1 → 16 px)
++4  word   height in rows          (silly: 33)
++6  word   one-plane byte size     (= width*2 * height; silly: 66)
++8  long   source offset into the unpacked buffer (relocated +buf at load)
++C  long   dest cell pointer       (0 in file; allocated from buffer slack at load)
++10 long   aux pointer             (0 in file; relocated at load)
 ```
 
-**The descriptors.** Each 15-byte record describes one sprite. The first four of
-`silly.ilb`:
+The cells' pixel data is **contiguous and in `+8` order**, so a cell's source span
+is the gap to the next cell's `+8` (or the buffer end), and the **plane count is
+that span ÷ the `+6` one-plane size**. This is the key correction over the old
+"everything is 2 bitplanes" reading: plane count **varies per cell**. Silly's
+cells are 132 ÷ 66 = **2 planes** (16×33, 4-colour markers), but Practice's big
+scenery blocks are 1920 ÷ 480 = **4 planes** (80×48, 16-colour), and a single
+`.ilb` freely mixes both (e.g. `interm.ilb`: 16×33×2p markers alongside 96×64×4p,
+80×64×4p and 48×79×4p scenery). `composite_planes` `$8026` confirms the storage:
+it consumes the planes as **sequential `+6`-byte blocks** (not row-interleaved).
 
-```
-01 00  01 00  21 00 42  FE 00  00 52  F9  00  FF 01
-05 00  01 00  21 00 42  FE 00  00 D6  F9  00  FF 01
-09 00  01 00  21 00 42  00 00  01 5A  F9  00  FF 01
-09 00  01 00  21 00 42  00 00  01 DE  D9  00  08 80
-```
-
-Two things stand out. Bytes 9–10 hold a 16-bit value that increases by a constant
-**132** from one record to the next (`$0052 → $00D6 → $015A → $01DE`); a constant
-stride means a fixed-size slot. And the recurring `21 00 42` is `$21`=**33** and
-`$42`=**66** = 2×33. Together they pin the sprite geometry: a 16-pixel-wide object
-**33 rows tall at 2 bitplanes** is 33 × 2 bytes × 2 planes = **132 bytes** — a
-small blitter object, one per slot. (A 16×16, 4-plane object is also 132; the
-descriptor's 33/66 favour the taller form.) The remaining descriptor fields — a
-small index that steps `01/05/09…`, a signed `FE 00`, and the trailing flag bytes
-— read provisionally as the sprite's placement and draw flags.
-
-**The `.vlb` moving-object banks** share this container exactly — a `$0D` flag
-(the "heavy" variant), the same big-endian count, and the same 15-byte
-descriptors — but with a smaller cell. Their descriptors carry `$11`=**17** and
-`$22`=**34** in place of 33/66, and the slot stride is **68** (= 17 rows × 2 bytes
-× 2 planes), i.e. a 16×17, 4-colour object. The counts tell the story:
-`marbdat.vlb` holds **130** images — the marble drawn at every rotation step —
-while `birdink.vlb` (45) and `ooze.vlb` (48) are creature animation cycles. So one
-format covers the whole sprite set: 16-wide, 2-bitplane objects, 33 rows tall for
-course scenery and 17 for the things that move.
-
-**The bitmap data is compressed** — provably so: a `.vlb` of 130 sixty-eight-byte
-cells would need 8 840 bytes but the file carries only 6 648; Silly's four
-132-byte `.ilb` slots would need 528 but the data section is 402.
+**The `.vlb` moving-object banks** are the same format (a `$0D` "heavy" flag vs the
+`.ilb` `$09`/`$0D`), the same count word and 20-byte descriptors. `marbdat.vlb`
+holds **130** cells — the marble at every rotation step, plus its mask cells —
+while `birdink.vlb` (45) and `ooze.vlb` (48) are creature cycles; the obstacle
+banks (`*obsc.vlb`) are uniform 16×64×2p strips.
 
 **The codec is ByteRun1 / PackBits** — the *same* RLE as IFF ILBM bodies (Part IV
-§1's `_UnPackRow`). This was an open question while the consumer was encrypted; it
-is now answered directly from the decrypted engine. The course-load code indexes
-a per-course filename table (`.mlb` pointers at `$3496`, `.ilb` at `$34EE`, keyed
-by the course global `$5D6`) and calls the shared bank loader (`$80B4` for `.ilb`,
-`$7F38` for `.mlb`). That loader reads the file with plain `dos.library`
-`Open(MODE_OLDFILE)`/`Read`/`Close` — **not** the track loader, and **not** a
-decompression library — then unpacks the bitmap through `$9118`, which is textbook
-ByteRun1:
+§1's `_UnPackRow`), routine `$9118`:
 
 ```
 read a signed control byte n:
@@ -895,23 +882,23 @@ read a signed control byte n:
   n == -128      : no-op
 ```
 
-My earlier guess of `$FE` as a literal escape was the mistake: `$FE` is signed
-`-2`, i.e. "repeat the next byte 3×", and the planar ramps (`… F8 FC FE FF`) are
-just literal runs — which is exactly why a plain copy-count "overshot." Decoding
-with the signed PackBits rule consumes each bank's bitmap section **exactly** to
-its last byte (`silly.ilb` 402/402, `marbdat.vlb` 6 648/6 648), the unmistakable
-sign of the right codec. And the `.mlb` level modules — a different container
-(flag `$01`, an offset-table header) — go through the **same** `$7E4E`→`$9118`
-load path, so they share the codec; only their wrapper differs.
+My earlier guess of `$FE` as a literal escape was the mistake that comes from
+reading the *packed* stream as if it were structured: `$FE` is signed `-2`, i.e.
+"repeat the next byte 3×". Unpacking the whole file with the signed PackBits rule
+consumes each bank **exactly** to its last byte and yields the clean count +
+descriptor + pixel layout above. The `.mlb` level modules go through the **same**
+`$7E4E`→`$9118` load path with a different post-unpack header (flag `$01`, an
+offset table), so all three bank kinds share one codec; only the unpacked layout
+differs.
 
-So the container, the slot geometry (132-byte course cells, 68-byte moving-object
-cells), the file roster, **and the compression** are all established. With the
-codec in hand, [`extract/cmd/sprites`](extract/cmd/sprites) unpacks every bank and
-renders its cells as 2-bitplane (4-colour), 16-px-wide, row-interleaved PNGs — one
-tiled sheet per bank in [`rendered/`](rendered) (`<bank>.png`). The output confirms
-the decode visually: the course `.ilb` banks resolve into the recognisable
-**isometric scenery tiles** (diagonal block faces), and `marbdat.vlb` into the
-**marble's rotation frames** (16-px spheres with a shading plane).
+With the model corrected, [`extract/cmd/sprites`](extract/cmd/sprites) unpacks the
+whole file, reads each 20-byte descriptor, derives per-cell width/height/plane
+count, and flow-packs the cells (which now vary in size) into one sheet per bank in
+[`rendered/`](rendered) (`<bank>.png`). The 4-plane scenery cells now render in
+full 16 colours — `aerial.ilb` resolves into the recognisable isometric ramps,
+hazard walls, columns and the marble-muncher; `marbdat.vlb` into the marble's
+rotation frames (the mask cells render as their raw planes, pending the cell+mask
+pairing).
 
 **The palette is per-course, and it lives in the `.mlb` level module — not in the
 program.** The engine sets colours with `graphics.library SetRGB4` (`$248FC`, via
@@ -941,13 +928,13 @@ the cycling cyan seen in-game). The cycling is generated by the display task the
 main loop signals (`$1F392` → a separate task), not from any static colour table
 in the `.dat`, so it is out of reach of a static palette extraction.
 
-**The bit depth differs by file kind.** The `.ilb`/`.vlb` **sprite banks are 2
-bitplanes** (4 colours): the loader's compositor `$8026` builds 132-byte cells =
-16×33×2 planes, and these are *sprite/object building blocks* (the marble,
-creatures, scenery props), so they render in the palette's low four colours. The
-colourful course floor and walls, by contrast, are the **`.mlb` level modules,
-which are 4 bitplanes (16 colours)** — the `.mlb` loader (`$7F38`) relocates four
-plane pointers and a palette pointer at the head of its work buffer.
+**The bit depth varies per cell, not per file.** Within an `.ilb`/`.vlb` bank the
+small markers, the marble and the creatures are **2 bitplanes** (4 colours, the
+palette's low four), while the larger scenery blocks are **4 bitplanes** (16
+colours) — each cell's plane count is read straight from its descriptor (source
+span ÷ the `+6` one-plane size, §3 above). The `.mlb` **level modules** are
+uniformly 4 bitplanes (16 colours): the loader (`$7F38`) relocates four plane
+pointers and a palette pointer at the head of its work buffer.
 
 **The `.mlb` format, decoded from the consumer.** The whole file is **one
 ByteRun1/PackBits stream**. The loader (`$7F38`) unpacks it into a work buffer and

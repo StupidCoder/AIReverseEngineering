@@ -61,6 +61,18 @@
 # FS-UAE (= practy.mlb+0x17 byte-for-byte). The engine also programs the blitter
 # ($DFF040-$DFF066) and DMACON ($DFF096) directly and reads JOYxDAT for input.
 
+# --- the per-frame render pipeline (top-down; dispatched via the game's jump-table
+#     state machine, so the top-level callers are indirect) ---
+00E872  set_draw_pos     set the screen draw position for an object: copy its world pos (obj+$C/+$10/+$14) to $6B8/$6BC/$6C0, the >>$13 tile coords to $6CE/$6D0, then call $E944 to project to the iso screen seed $6C4/$6C6/$6C8. Called before each object draw.
+014EF0  object_draw       per-object update+draw: advance the object's world pos by its velocity (obj+$C += obj+0, +$10 += +4, +$14 += +8), set_draw_pos, then draw the object plus up to three actor passes (a main sprite + shadow/secondary passes) chosen by the object subtype obj+$1B (==1/2/3), each at its own Y offset ($1E8/$238/$210) via actor_update; a per-frame "already drawn" bitmask ($5F6) prevents double-draws.
+# Render leaf routines (annotated elsewhere): mlb_draw_column $9910 + draw_tile $99C0
+# draw the .mlb tilemap background; place_objects $0122AC walks the Track placement
+# list; actor_update $01D3B2 -> draw_object_wrap $0104C4 -> blit_object $011D1C draw
+# the sprites. The .ilb cell ENCODING is selected by the descriptor type byte (+0):
+# type-0 (+0=00) = composited scenery, span=4*cz, 4 plane-blocks (mask built by
+# composite_planes $8026); type-1 (+0=01) = free sprites, span=2*cz, row-interleaved
+# 4-plane at half height (the flag/marble/creatures).
+
 # --- the object / actor (sprite-animation) system (Part V) ---
 # The .ilb/.vlb cells are drawn as BLITTER objects (no hardware sprites: no
 # $DFF0A0-$DFF0DC anywhere). The playfield is 4 bitplanes, so each on-screen object

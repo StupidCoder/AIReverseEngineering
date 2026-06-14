@@ -60,14 +60,18 @@ var greys = color.Palette{
 var pal = greys
 
 // mlbPalette reads a course's 16-colour playfield palette from its .mlb level
-// module: 16 big-endian $0RGB words at offset 0x17 (Marble_Madness.md Part IV §3).
+// module. The palette is 16 big-endian $0RGB words at offset 0x16 of the
+// whole-file-unpacked buffer (Marble_Madness.md Part IV §3). Reading the raw file
+// at 0x17 instead happens to work for most courses but is a PackBits artifact —
+// for beginner it yields a bogus $EE00 where the buffer holds $0000.
 func mlbPalette(d []byte) color.Palette {
+	buf := unpackByteRun1(d)
 	p := make(color.Palette, 16)
 	for i := 0; i < 16; i++ {
-		o := 0x17 + 2*i
+		o := 0x16 + 2*i
 		w := uint16(0)
-		if o+1 < len(d) {
-			w = uint16(d[o])<<8 | uint16(d[o+1])
+		if o+1 < len(buf) {
+			w = uint16(buf[o])<<8 | uint16(buf[o+1])
 		}
 		n4 := func(x uint16) uint8 { return uint8(x) * 17 } // 4-bit -> 8-bit
 		p[i] = color.RGBA{n4((w >> 8) & 0xF), n4((w >> 4) & 0xF), n4(w & 0xF), 0xFF}

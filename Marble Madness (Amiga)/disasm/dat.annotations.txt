@@ -100,12 +100,22 @@
 #   word array (->$9AE/$9B2). Clears the $CCA buffer ($420 longs), then for each region
 #   calls sub_00E158 to rasterise an 8-byte region record into the $CCA structs. PROVEN:
 #   $9A6 terrain -> $CCA region structs.
-00E158  build_region     rasterise one 8-byte region record into the $CCA structs.
-#   Record = [+0 origin.x(s8)][+1 origin.y][+2 size.x][+3 size.y][+4..5 baseHeight word]
-#   [+6 low5 = edge-shape selector into $9A6+$20][+7 low3 = SLOPE DIRECTION 0..7 -> indexes
-#   the global 8-dir vector table $2504 for the (dx,dy) height step; bit3 = flip]. Walks
-#   the rectangle and writes the per-region height/reference words; $80 byte in the
-#   edge-run stream = restart the run.
+00E158  build_region     rasterise one 8-byte region record into the $CCA CORNER-HEIGHT
+#   mesh (a 22-wide grid of 8-byte cells, each = 4 corner heights at +0/+2/+4/+6). Record
+#   = [+0 origin.x(s8)][+1 origin.y][+2 size.x][+3 size.y][+4..5 baseHeight word][+6 low5 =
+#   edge-shape selector into the $9A6+$20 table -> a height-PROFILE byte array][+7 low3 =
+#   SLOPE DIRECTION 0..7, indexes $2504 for the step (dx,dy); bit3 = flip]. $2504 holds
+#   only the 4 iso diagonals (+/-1,+/-1); dir picks 1 of 8 fills (4 diagonals x 2 loop-
+#   transpose orders, dir<4 vs dir>=4 take the two inner loops $E274/$E464). Walks the
+#   rectangle DIAGONALLY in iso space: per step cell row=xAcc+yAcc-originX, col=originY-
+#   xAcc+(row>>1), addr=$CCA+(row*$16+col)*8 (odd rows clamp to 21 cols = iso half-cell).
+#   Writes value = baseHeight +/- profile[i] (flip = sign), profile advanced 1 byte/cell
+#   and RESTARTED on a $80 marker (so 00 02 04..80 = repeating linear ramp) -> the height
+#   RAMPS along the diagonal = the slope. A boundary test writes value into the right
+#   corner word(s) of the cell depending on left/right (x0/xEnd) and top/bottom (y0/yEnd)
+#   edges, sharing corners so adjacent cells agree = a continuous corner-height terrain.
+#   OPEN bridge: how the physics' per-region screen-space ref point (+$C/+$10) is derived
+#   from this corner-height mesh.
 00F8FC  region_activate  per-frame pass over the 25 $CCA region structs (a4=$CCA, +=$56
 #   to a3=$CCA+$866). For each valid region (+$18) whose grid key +$52/+$54 brackets the
 #   marble tile, calls region_update $F96A to (de)activate it and run its enter/exit

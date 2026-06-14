@@ -1212,17 +1212,52 @@ buffer at **`$CCA`**:
     codes 11/13 at `$12B42`/`$12B58` (this is what makes a slope keep pushing as the
     marble moves across it).
 
-- These structs are rasterised by **`build_surface $DEBC` → `sub_00E158`** from the
-  **course descriptor at Track header `+0` (`$9A6`)**. The descriptor's fields:
-  `+$08` a command/coordinate stream (bit-selector + `[col,row]+value` words,
+- These structs are built at course load by **`build_surface $DEBC` → `build_region
+  $E158`** from the **course descriptor at Track header `+0` (`$9A6`)**, whose fields
+  are: `+$08` a command/coordinate stream (bit-selector + `[col,row]+value` words,
   terminated `$FFFE`/`$FFFF`); `+$18` world height; `+$1A` region count; `+$1C` the
-  **region-record table**; `+$20` a table of edge-run sub-shapes; `+$24` width;
-  `+$26` a per-column word array. Each **8-byte region record** encodes
-  `origin.x, origin.y, size.x, size.y, baseHeight (word), a 5-bit edge-shape
-  selector` (into the `+$20` table), and a **3-bit slope direction** (bit 0–2) that
-  indexes the **global 8-direction vector table `$2504`** for the `(dx,dy)` height
-  step, plus a flip bit. `sub_00E158` walks each rectangular region and fills the
-  region struct's height/reference words accordingly.
+  **region-record table**; `+$20` a table of edge-shape sub-records; `+$24` width;
+  `+$26` a per-column word array.
+
+### How a region is defined — `build_region $E158`, traced
+
+Each region is one **8-byte record** plus a referenced height profile:
+
+| Bytes | Field | Meaning |
+|---|---|---|
+| `[0]` | `x0` (signed) | iso-grid origin X |
+| `[1]` | `y0` | iso-grid origin Y |
+| `[2]` | `xSize` | region width → covers `x0 … x0+xSize−1` |
+| `[3]` | `ySize` | region height → covers `y0 … y0+ySize−1` |
+| `[4..5]` | `baseHeight` (word) | the region's reference height |
+| `[6]` low 5 bits | `edgeShape` | index into the `$9A6+$20` table → a **height-profile byte array** |
+| `[7]` low 3 bits | `dir` (0–7) | **slope direction**; indexes `$2504` → step `(dx,dy)` |
+| `[7]` bit 3 | `flip` | negate the profile (down-slope vs up-slope) |
+
+`$E158` then **rasterises the region into the `$CCA` corner-height mesh** — a 22-wide
+grid of 8-byte cells, each cell holding **four corner heights** at `+0/+2/+4/+6`:
+
+1. It picks the direction step from `$2504`. That table holds only the four iso
+   diagonals `(±1,±1)`; the 3-bit `dir` selects one of **8** fills (4 diagonals × 2
+   loop-transpose orders, `dir<4` vs `dir≥4`), i.e. the 8 isometric slope facings.
+2. It walks the rectangle **diagonally** in iso space. For each step the grid cell is
+   `row = xAcc + yAcc − originX`, `col = originY − xAcc + (row>>1)`, address
+   `$CCA + (row·22 + col)·8` (odd rows are clamped to 21 columns — the iso half-cell
+   offset). The walk order follows `(dx,dy)`, so it sweeps **up the slope**.
+3. The height written is `value = baseHeight ± profile[i]`, where `profile` is the
+   `edgeShape` byte array, advanced one byte per cell and **restarted on a `$80`
+   marker** (so a profile like `00 02 04 06 … 80` is a repeating linear ramp). `flip`
+   chooses `+` vs `−`. So the height **ramps along the diagonal** — that gradient *is*
+   the slope.
+4. A boundary test writes `value` into the correct corner word(s) of the cell
+   (`+0/+2/+4/+6`) depending on whether the position sits on the region's left/right
+   (`x0`/`xEnd`) or top/bottom (`y0`/`yEnd`) edge, replicating shared corners so
+   adjacent cells agree — producing a **continuous corner-height terrain mesh**.
+
+So a region is a rectangle with a base height and a *direction + 1-D profile* that
+ramps the height across it; `$E158` paints that ramp into the shared corner-height
+grid. The physics' per-region screen-space `+$C/+$10` reference point is then derived
+from this mesh (the remaining bridge — see "Still open").
 
 So "downhill" is a real per-region slope field: the **`$9A6` descriptor** lists
 rectangular regions with a base height and a 3-bit slope direction; `build_surface`

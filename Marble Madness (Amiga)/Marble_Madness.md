@@ -1127,39 +1127,35 @@ velocity `(vx,vy,vz)` at `obj+0/+4/+8`. Every frame `object_draw $14EF0` integra
 `pos += velocity`, then `set_draw_pos $E872` **iso-projects** `(x,y,z)` to the
 screen (`$E944`). The isometric look is a *projection* of a real 3-D simulation.
 
-### What makes it roll downhill — the invisible region map
+### What makes it roll downhill — the terrain map
 
-The physics **never reads the visual `.mlb` tilemap**. Each course's `*Track`
-carries a separate, invisible **region map** (the block at Track header `+8`,
-`$12F74` → `$9D4`): a short list of **5-byte boundary records**, `$FFFF`-terminated:
+The physics **never reads the visual `.mlb` tilemap** (its entries are pure tile
+indices, and only the renderer touches them). The terrain is the **placement table**
+of Part IV §5 (`$129FC` → `$91C`): a list of **`[X][Y][type]`** records, one per
+course location, with `type` 0–7 selecting the **slope/terrain kind**. It scales
+with the course — **59** records for Practice, up to **159 (Aerial)** and **144
+(Ultimate)** — and iso-projecting it (`screen = (X−Y, X+Y)`) reproduces the course
+itself: Practice's wide checkerboard start, the narrowing flat, the two-sided
+zigzag canyon, and the run to the goal all fall out, coloured by slope type
+(`extract/cmd/tracks` reads the table; the plot is in this section's notes). The
+marble's terrain comes from the `type` at its position — that type drives the slope
+acceleration on its velocity. So "downhill" is a per-location slope vector keyed by
+`type`; the isometric ramps you *see* are `.mlb` tiles laid out to match this map,
+not the source of the force.
 
-```
-+0  byte  dx     (signed)   # the boundary line's direction in the iso plane
-+1  byte  dy     (signed)
-+2  byte  length            # how many cells the boundary runs
-+3  byte  type_a            # terrain type on one side
-+4  byte  type_b            # terrain type on the other side  ($FF = off-course void)
-```
-
-This is a **2-D vector partition** of the horizontal plane — *not* 3-D volumes. The
-boundaries are diagonal line segments (both `dx` and `dy` non-zero, in the two
-isometric directions = ramp edges); practice has just **10** of them, carving the
-course into ~8 typed regions. `terrain_lookup $012B9E` tests the marble's projected
-(x,y) position against each boundary and assigns `type_a` *or* `type_b` by which
-side it falls on, writing the result to the marble's `+$1B`. The marble's 3-D
-position is flattened to (x,y) for this test — *height* comes from the type, not
-from the region shape. The slope force then follows from the type; the isometric
-ramps, walls and pits you *see* are `.mlb` tiles laid out to match this map, so
-"downhill" is a per-region acceleration, not anything read off the picture.
+(There is *also* a small 10-record diagonal-boundary list at Track `+8`
+(`$12F74` → `$9D4`, `terrain_lookup $012B9E`) — a coarse `[dx][dy][len][type_a]
+[type_b]` partition that classifies a few large zones and the off-course edge; it is
+**not** the per-location slope field. Earlier drafts wrongly identified this small
+list as the whole terrain.)
 
 ### Falling off — death
 
-`terrain_lookup` ends with the giveaway: if the marble lands on **no** region, its
-terrain type comes back `$FF` (`$012D44`), which triggers the off-the-edge state
-(`$5E4`) — the marble falls. (Hazard types and the marble-munchers are other death
-paths, signalled through the same `+$1B` terrain type and the placement-list
-collision query of §3.) The "dizzy" spin we decoded in Part IV §4 is one of these
-death/respawn animations.
+If the marble ends up on **no** terrain (its type resolves to `$FF`, e.g.
+`terrain_lookup` at `$012D44`), the off-the-edge state (`$5E4`) fires and the marble
+**falls**. Hazard types and the marble-munchers are other death paths, all signalled
+through the same `+$1B` terrain type and the placement-list collision query (§3).
+The "dizzy" spin we decoded in Part IV §4 is one of these death/respawn animations.
 
 ### Still open
 

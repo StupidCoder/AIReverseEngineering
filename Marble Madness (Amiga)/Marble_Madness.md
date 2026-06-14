@@ -1264,6 +1264,21 @@ So a region is a rectangle with a base height and a *direction + 1-D profile* th
 ramps the height across it; `$E158` paints that ramp into the shared corner-height
 grid.
 
+**What shape is a region, really?** Not a 3-D polygon, and not a screen-space bounding
+box. The footprint is an **axis-aligned rectangle in iso-*tile* coordinates** — so on
+screen it is a *diamond*, not a screen-aligned box. It is never simply flat: it carries
+a base height (z), a slope direction (one of the four iso diagonals), and a 2-D
+height-delta profile (e.g. edge[1] `00 02 04 06 06 06 06 02 04 06 08 08…` = a staircase
+ramp; edge[2] `00 fe fc fa 80 …` = a descending ramp with ragged `$80`-broken rows).
+`$E158` composites all 66 records into a single **corner-height mesh** (each iso tile =
+four corner heights). That mesh — a 2.5-D height-map on the iso grid — is the actual
+surface; the **triangular slope faces** the game shows are quads in it whose four corners
+are non-coplanar (the standard height-map two-triangle split), plus profile/overlap
+tapering that narrows a slope's influence to a wedge. So the regions are rectangles; the
+*triangles are emergent from the height field*. (Practice histogram: 18× `7×7` slope
+tiles for the checkerboard, plus flat rectangles of every aspect ratio — `41×3`, `7×22`,
+`17×16` — for corridors and plateaus.)
+
 ### How regions become contact structs
 
 `$CCA` is a **multi-phase work buffer** — verified by the identical literal `$0CCA`

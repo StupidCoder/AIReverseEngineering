@@ -93,15 +93,31 @@
 #   per-state factor from obj+$60/$1A, <<3), and ADDS it to the velocity:
 #   $0130DA ADD.l d0,(a0)  -> obj+0 (vY) += force ;  $0130E0 ADD.l d0,$4(a0) -> obj+4
 #   (vX) += force. (Then JSRs $14E7E.) PROVEN, no assumptions.
-00DEBC  build_surface    SLOPE data -> surface. Reads the $9A6 course descriptor
-#   (slope-code array at +$1C=$342, height segments via +$8/+$1C/+$24/+$26), clears
-#   the $CCA work grid (264 longs = $420 bytes) and fills it with the marble's local
-#   surface HEIGHTS by walking the terrain (calls the per-span builder sub_00E158,
-#   which uses the $2504 8-direction vector table). So $9A6 terrain -> $CCA surface
-#   grid is PROVEN. OPEN: the exact instruction where the $CCA surface gradient is
-#   added to the marble velocity (in the $CCA-reading physics; other velocity ADDs at
-#   $013338 = object/enemy attraction toward obj+$78, $0167CA = a $168F8 directional
-#   push -- not yet isolated as the slope force).
+00DEBC  build_surface    $9A6 course descriptor -> $CCA surface-region structs. Reads
+#   the descriptor (a0=$9A6): +$08 command/coordinate stream (bit selector + [col,row]
+#   +value words, $FFFE/$FFFF terminated), +$18 world height, +$1A region count, +$1C
+#   region-record table, +$20 edge-run sub-shape ptr table, +$24 width, +$26 per-column
+#   word array (->$9AE/$9B2). Clears the $CCA buffer ($420 longs), then for each region
+#   calls sub_00E158 to rasterise an 8-byte region record into the $CCA structs. PROVEN:
+#   $9A6 terrain -> $CCA region structs.
+00E158  build_region     rasterise one 8-byte region record into the $CCA structs.
+#   Record = [+0 origin.x(s8)][+1 origin.y][+2 size.x][+3 size.y][+4..5 baseHeight word]
+#   [+6 low5 = edge-shape selector into $9A6+$20][+7 low3 = SLOPE DIRECTION 0..7 -> indexes
+#   the global 8-dir vector table $2504 for the (dx,dy) height step; bit3 = flip]. Walks
+#   the rectangle and writes the per-region height/reference words; $80 byte in the
+#   edge-run stream = restart the run.
+00F8FC  region_activate  per-frame pass over the 25 $CCA region structs (a4=$CCA, +=$56
+#   to a3=$CCA+$866). For each valid region (+$18) whose grid key +$52/+$54 brackets the
+#   marble tile, calls region_update $F96A to (de)activate it and run its enter/exit
+#   logic (sets +$18/+$1A, plays edge sounds, handles the goal/fall). This is what makes
+#   exactly one region "active" for surface_interaction $16900 to read.
+00F96A  region_update    enter/leave handler for one region struct (a5). On enter sets
+#   +$18 valid / +$1A=3 / copies +$3A; on leave clears +$18/+$1A, decrements counters,
+#   and dispatches the region's terrain code +$1F (calls $11C24 for the transition).
+01470A  surface_state    per-object surface-state update (a0=obj): copies the active
+#   region's slope code into obj+$62, plays the edge sound for codes $10/$32-$37, and
+#   sets the obj contact/anim state (+$60/+$64/+$69/+$6A) from $14ED8. Called by the
+#   slope/edge cases to latch the marble onto a region.
 # The full marble per-frame velocity chain, traced (no assumptions):
 #   $013C38 save_prev_state (stores prev tile pos obj+$32/$34, prev z obj+$2A, prev
 #     terrain obj+$1D) -> NOT velocity.
@@ -110,38 +126,44 @@
 #     roll anim/sound (obj+$D6, table $201A, $A5F0), and CLAMPS velocity to a max
 #     speed ($40000/$50000) by scaling vX/vY at $014E62/$014E6E -> friction, NOT slope.
 #   surface build: course_init/$E6B2 -> build_surface $DEBC -> sub_00E158 -> $CCA grid.
-016900  surface_interaction  per-object pass (called from object_draw $150F8) that is
-#   THE surface->velocity step. Reads the object's velocity (obj+0->-$1E, obj+4->-$22)
-#   and the $CCA surface (a4=$CCA), dispatches on the surface-cell state $CCA+$1F via a
-#   ~50-case jump table ($169FC), and modifies the velocity per case (e.g. $0167CA adds
-#   a $168F8 8-direction force). The marble's slope/collision response lives here.
-# THE SLOPE FORCE (proven), sub_016900 case at $017B80: take (d5,d4) = the vector from
-#   the marble to the surface cell's DOWNHILL reference point ($CCA cell +$C/+$10),
-#   shift <<$10 and divide by the distance -$3C (JSR $23EB4) to get a UNIT vector, ASL
-#   #2 (x4), and ADD it to the velocity:  $017BDE ADD.l d0,(a5) -> obj+0 (vX) += ux*4 ;
-#   $017BE8 ADD.l d0,$4(a5) -> obj+4 (vY) += uy*4. So "downhill" = a constant ~4-unit
-#   push toward the cell's downhill point each frame; the downhill ref is set in the
-#   $CCA surface by build_surface $DEBC / sub_00E158 from the $9A6 terrain. PROVEN end
-#   to end: $9A6 terrain -> $CCA surface (downhill ref) -> $017BDE/$017BE8 velocity.
-# Sibling surface cases (the other terrain kinds the user noted): $017210/$0174E0
-#   MOVE.l d0,(a5)/$4(a5) = SET velocity (wall/stop), $01809E NEG.l $4(a5) = bounce,
-#   $017DC0 a second slope variant. (Ice/grating low/high-friction = still to map to
-#   their state cases; friction itself is the speed-cap in $14D28.) Exact state->case
-#   binding = decode the jump table at $016A00 (BRA.w offsets, target=here+2+off).
+016900  surface_interaction  THE surface->velocity step (a5=marble). Preamble $169A0
+#   reads the marble's ACTIVE region struct (a4=$CCA): d5 = $C(a4)refX - $6C4 marbleX,
+#   d4 = $10(a4)refY - $6C6 marbleY (vector marble -> downhill reference point), checks
+#   $18(a4) valid, then d0 = $1F(a4) terrain code (5..59); JMP $2(pc,d0.l) via the jump
+#   table at $016A00 (55 BRA.w entries, d0=(code-5)*4, target=entry+2+off).
+# THE SLOPE FORCE (proven), code 11 case $17AA8 (and 13 -> $17C88): a dead-zone box test
+#   ($17AE8) leaves the marble at rest when centred; otherwise normalise (d5,d4) via
+#   JSR $23EB4 (divide by octagonal distance), ASL #2 (x4) and ADD to velocity:
+#   $017BDE ADD.l d0,(a5) -> vX += ux*4 ;  $017BE8 ADD.l d0,$4(a5) -> vY += uy*4.
+#   PROVEN end to end: $9A6 region record -> $CCA struct ref point -> $017BDE/$017BE8 vel.
+# THE $016A00 JUMP TABLE, all 55 targets decoded (terrain code -> behaviour):
+#   FLAT/no-force ($18024): codes 6-9,14,15,17,25,40-44.
+#   SLOPE (vXY += unit(ref-pos)*4): 11 ($17AA8), 13 ($17C88).  FUNNEL (set vel): 12 ($178A6).
+#   PROXIMITY TRIGGER (within dist $38 of ref -> set $6A1/$6A2 + sound $21ADC): 5,26-31
+#     ($16C0C..); directional sound-only variants: 16,50-55.
+#   WALL/EDGE -> shared $180AC: 21,22,33,35,36,38,39.
+#   HARD EDGE/FALL/GOAL (set/clr vel + $E872/$EA10/$15FC8/$FD68): 10,18,19,20,32,34,37.
+#   geometric/border variants (fall to flat): 23,24,45-49,56-59.
+#   Friction (ice/grating) is NOT here: it is the per-region max-speed selector on the
+#   marble +$1A read by $14E7E (picks $40000 vs $50000) in the $14D28 speed cap.
+# THE $CCA SURFACE-REGION STRUCTS: 25 structs, $56 (86) bytes each ($CCA..$CCA+$866;
+#   activator loop $12B02 and producer $F8FC/$F96A both stride $56). Fields: +$C/+$10 =
+#   downhill reference point (refX,refY); +$18 valid; +$1A contact/anim state; +$1E
+#   counter; +$1F terrain code (5..59, the jump index); +$19/+$1B neighbour/transition
+#   code; +$52/+$54 grid key (col,row) matched vs the marble tile to pick the ACTIVE
+#   region ($F906 loop); +$36 = slope live target, refreshed from the marble obj $FD2C
+#   ($54/$58) for codes 11/13 at $12B42/$12B58 (keeps the slope pushing as it moves).
 00E944  iso_to_cell      take the iso-projected SCREEN position ($6C4,$6C6) and derive the cell coordinates the region map / terrain_lookup use: $6CA = $6C4>>3, $6CC = $6C6>>3 (8-px iso cell), $6D2 = $6C4&7, $6D4 = $6C6&7 (sub-cell), $6D6 = 1 if $6D2<=$6D4 else 0 (which DIAGONAL HALF of the cell -> matches the iso diamond / ramp-edge split). So the region records are in iso-screen-cell space; each record's |byte0|,|byte1| is a start cell and the sign of byte0/byte1 is its diagonal direction. For practy all 10 boundaries are PARALLEL diagonals = a ladder of terraces; $FF-sided ones are the fall-off edges. OPEN: exact projection scale/offset to overlay them on the course art pixel-accurately.
 019390  trackball_decode read the mouse/TRACKBALL via JOY0DAT/JOY1DAT ($DFF00A/$DFF00C), per player (d5); decode the Amiga quadrature (EOR adjacent counter bits for direction, +/-$20 per step) into an X/Y delta. (CIA fire buttons read at $BFE001 / sub_018F90.) The delta is the marble's roll force.
 0192EC  control_update   per-player loop: trackball_decode then apply each player's delta to the marble via $18FCC, accumulating/scaling it into the roll-force accumulators $195EE/$195EA. The marble is a 3-D point mass: position (x,y,z) at obj+$C/+$10/+$14, velocity (vx,vy,vz) at obj+0/+4/+8, integrated each frame by object_draw $14EF0 (pos += velocity) then iso-projected by set_draw_pos $E872.
-# THE per-cell SLOPE/HEIGHT field is the COURSE DESCRIPTOR at Track header +0 ($9A6,
-# ~2.3KB; earlier wrongly skipped as "code"). Its header points to parallel per-cell
-# arrays: a slope-CODE array (e.g. $342: 13 07 07 07 40 0C 01 0C.. with repeating
-# runs = the checkerboard), a HEIGHT array (e.g. $5DE: ~$6E-$78 values), and 20-byte
-# slope-PATTERN records ($63C+, bitmask templates). The marble update $00E1C0 indexes
-# these by position to get the cell's direction, then looks up the SLOPE VECTOR in a
-# global 8-direction table at $2504 ((dx,dy) push) and adds it to the velocity. So
-# the slope force is per-cell, large enough for a whole checkerboard of independent
-# slopes. (The PLACEMENT TABLE $129FC->$91C places features/objects -- iso-projected
-# it traces the course outline -- and the $9D4 list classifies a few coarse zones;
-# neither is the per-cell slope field.) OPEN: exact $9A6 array layout + $2504 table.
+# THE per-region SLOPE field is the COURSE DESCRIPTOR at Track header +0 ($9A6). It is
+# a list of 8-byte REGION RECORDS (origin x/y, size x/y, base height, 5-bit edge-shape,
+# 3-bit slope direction -> $2504 8-dir vector); build_surface $DEBC / build_region
+# $E158 expand them into the 25 $CCA region structs at load time, and surface_interaction
+# $16900 reads those structs each frame (above). (Superseded earlier guess: there is no
+# $342/$5DE/$63C parallel-array / 7x7-prototype scheme -- that was a data-shape guess
+# the velocity trace disproved.) The PLACEMENT TABLE $129FC->$91C places visible objects
+# only; terrain_lookup $12B9E/$9D4 is a coarse zone/edge classifier, not the slope field.
 012B9E  terrain_lookup   a COARSE zone/edge lookup (NOT the per-location slope field). Walks the small Track block at header+8 ($12F74 -> $9D4): 5-byte records [+0 dx signed][+1 dy signed][+2 length][+3 type_a][+4 type_b], $FFFF-terminated (practy has only 10) = a 2-D diagonal-boundary partition classifying a few large zones and the off-course edge. Tests the marble's iso-cell ($6CA/$6CC + $6CE/$6D0) vs each boundary, writing a type to +$1B; type $FF ($012D44) = off-course -> fall/death ($5E4). OPEN: the type->slope-acceleration table.
 
 # --- the object / actor (sprite-animation) system (Part V) ---

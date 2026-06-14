@@ -88,10 +88,17 @@
 00E944  iso_to_cell      take the iso-projected SCREEN position ($6C4,$6C6) and derive the cell coordinates the region map / terrain_lookup use: $6CA = $6C4>>3, $6CC = $6C6>>3 (8-px iso cell), $6D2 = $6C4&7, $6D4 = $6C6&7 (sub-cell), $6D6 = 1 if $6D2<=$6D4 else 0 (which DIAGONAL HALF of the cell -> matches the iso diamond / ramp-edge split). So the region records are in iso-screen-cell space; each record's |byte0|,|byte1| is a start cell and the sign of byte0/byte1 is its diagonal direction. For practy all 10 boundaries are PARALLEL diagonals = a ladder of terraces; $FF-sided ones are the fall-off edges. OPEN: exact projection scale/offset to overlay them on the course art pixel-accurately.
 019390  trackball_decode read the mouse/TRACKBALL via JOY0DAT/JOY1DAT ($DFF00A/$DFF00C), per player (d5); decode the Amiga quadrature (EOR adjacent counter bits for direction, +/-$20 per step) into an X/Y delta. (CIA fire buttons read at $BFE001 / sub_018F90.) The delta is the marble's roll force.
 0192EC  control_update   per-player loop: trackball_decode then apply each player's delta to the marble via $18FCC, accumulating/scaling it into the roll-force accumulators $195EE/$195EA. The marble is a 3-D point mass: position (x,y,z) at obj+$C/+$10/+$14, velocity (vx,vy,vz) at obj+0/+4/+8, integrated each frame by object_draw $14EF0 (pos += velocity) then iso-projected by set_draw_pos $E872.
-# The per-location SLOPE/TERRAIN map is the PLACEMENT TABLE ($129FC -> $91C, the
-# [X][Y][type] records of Part IV §5: 59 practy .. 159 aerial), NOT the small list
-# below. Iso-projecting it (screen=(X-Y,X+Y)) reproduces the course terrain; the
-# marble's terrain type at its position drives the slope acceleration.
+# THE per-cell SLOPE/HEIGHT field is the COURSE DESCRIPTOR at Track header +0 ($9A6,
+# ~2.3KB; earlier wrongly skipped as "code"). Its header points to parallel per-cell
+# arrays: a slope-CODE array (e.g. $342: 13 07 07 07 40 0C 01 0C.. with repeating
+# runs = the checkerboard), a HEIGHT array (e.g. $5DE: ~$6E-$78 values), and 20-byte
+# slope-PATTERN records ($63C+, bitmask templates). The marble update $00E1C0 indexes
+# these by position to get the cell's direction, then looks up the SLOPE VECTOR in a
+# global 8-direction table at $2504 ((dx,dy) push) and adds it to the velocity. So
+# the slope force is per-cell, large enough for a whole checkerboard of independent
+# slopes. (The PLACEMENT TABLE $129FC->$91C places features/objects -- iso-projected
+# it traces the course outline -- and the $9D4 list classifies a few coarse zones;
+# neither is the per-cell slope field.) OPEN: exact $9A6 array layout + $2504 table.
 012B9E  terrain_lookup   a COARSE zone/edge lookup (NOT the per-location slope field). Walks the small Track block at header+8 ($12F74 -> $9D4): 5-byte records [+0 dx signed][+1 dy signed][+2 length][+3 type_a][+4 type_b], $FFFF-terminated (practy has only 10) = a 2-D diagonal-boundary partition classifying a few large zones and the off-course edge. Tests the marble's iso-cell ($6CA/$6CC + $6CE/$6D0) vs each boundary, writing a type to +$1B; type $FF ($012D44) = off-course -> fall/death ($5E4). OPEN: the type->slope-acceleration table.
 
 # --- the object / actor (sprite-animation) system (Part V) ---

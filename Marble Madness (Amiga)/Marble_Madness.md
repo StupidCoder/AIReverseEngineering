@@ -1127,27 +1127,33 @@ velocity `(vx,vy,vz)` at `obj+0/+4/+8`. Every frame `object_draw $14EF0` integra
 `pos += velocity`, then `set_draw_pos $E872` **iso-projects** `(x,y,z)` to the
 screen (`$E944`). The isometric look is a *projection* of a real 3-D simulation.
 
-### What makes it roll downhill — the terrain map
+### What makes it roll downhill — the course descriptor
 
 The physics **never reads the visual `.mlb` tilemap** (its entries are pure tile
-indices, and only the renderer touches them). The terrain is the **placement table**
-of Part IV §5 (`$129FC` → `$91C`): a list of **`[X][Y][type]`** records, one per
-course location, with `type` 0–7 selecting the **slope/terrain kind**. It scales
-with the course — **59** records for Practice, up to **159 (Aerial)** and **144
-(Ultimate)** — and iso-projecting it (`screen = (X−Y, X+Y)`) reproduces the course
-itself: Practice's wide checkerboard start, the narrowing flat, the two-sided
-zigzag canyon, and the run to the goal all fall out, coloured by slope type
-(`extract/cmd/tracks` reads the table; the plot is in this section's notes). The
-marble's terrain comes from the `type` at its position — that type drives the slope
-acceleration on its velocity. So "downhill" is a per-location slope vector keyed by
-`type`; the isometric ramps you *see* are `.mlb` tiles laid out to match this map,
-not the source of the force.
+indices, and only the renderer touches them). The per-cell slope/height field is a
+separate, much larger structure: the **course descriptor** at Track header `+0`
+(`$9A6`) — a ~2.3 KB block (which earlier drafts wrongly skipped as "code"). Its
+header points to several parallel per-cell arrays, including:
 
-(There is *also* a small 10-record diagonal-boundary list at Track `+8`
-(`$12F74` → `$9D4`, `terrain_lookup $012B9E`) — a coarse `[dx][dy][len][type_a]
-[type_b]` partition that classifies a few large zones and the off-course edge; it is
-**not** the per-location slope field. Earlier drafts wrongly identified this small
-list as the whole terrain.)
+- a **slope-code** array (e.g. `$342`: `13 07 07 07 40 0C 01 0C …`) — the per-cell
+  terrain code, with visibly repeating runs (the checkerboard), and
+- a **height** array (e.g. `$5DE`: `… 78 6E 6E 78 6E 72 …`, values ~`$6E–$78`), plus
+- a table of 20-byte **slope-pattern records** (`$63C…`, bitmask templates).
+
+The marble's update (`$00E1C0`) indexes these by its position to get the cell's
+slope code/direction, then looks up the **slope vector in a global direction table
+at `$2504`** (8 directions → a `(dx,dy)` push) and applies it to the velocity. So
+"downhill" is a real per-cell slope field — large enough for a whole checkerboard of
+independently-sloped cells — and the visual `.mlb` ramps are tiles laid out to match
+it.
+
+Two *smaller* Track structures play supporting roles and should not be confused with
+the slope field: the **placement table** (`$129FC` → `$91C`, the `[X][Y][type]`
+records of Part IV §5) places course **features/objects** — iso-projected it traces
+the course outline (the plot in this section's notes) — and a 10-record
+diagonal-boundary list (`$12F74` → `$9D4`, `terrain_lookup $012B9E`) classifies a few
+coarse zones and the off-course edge. The exact `$9A6` array layout and the `$2504`
+vector table are located but not yet fully decoded.
 
 ### Falling off — death
 

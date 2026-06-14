@@ -1065,9 +1065,16 @@ by a leading `$FF`:
 +2  byte   type (object kind, 0..7)
 ```
 
-The consumer (`place_objects $0122AC`) walks the list, filters by `type`, seeds the
-screen position (`$6C4`/`$6C6`) and runs the isometric transform (`$6718`). Decoded
-straight from the Track files by [`extract/cmd/tracks`](extract/cmd/tracks):
+The records are walked two ways. A **proximity query** (`$012600`, and the
+filtered `place_objects $0122AC`) seeds each record's screen position (`$6C4`/`$6C6`),
+runs the isometric transform (`$6718`), and finds the record nearest the marble
+within a radius, storing its `type` at `$6A0` → the marble's `+$1B`. So `type`
+(0–7) is the **terrain/obstacle interaction kind** the marble reacts to (a hole, a
+ramp, a hazard, the goal …), not a free-standing sprite — the static scenery is
+already baked into the `.mlb` tilemap. The animated obstacles and the enemies are
+**actors** (the 3-record array at `$FD2C+$23C`, driven by the Track's animation
+scripts). Decoded straight from the Track files by
+[`extract/cmd/tracks`](extract/cmd/tracks):
 
 | Course | Track | Objects placed |
 |---|---|---|
@@ -1078,11 +1085,14 @@ straight from the Track files by [`extract/cmd/tracks`](extract/cmd/tracks):
 | Silly | `SilTrack` | 104 |
 | Ultimate | `UltTrack` | 144 |
 
-What each `type` (0–7) *is* — which sprite/animation and behaviour, including the
-marble's start cell and the enemies — is held in the other Track header pointers
-(the per-type object/animation definitions, e.g. the animation table at `$FD2C`).
-Mapping `type` → object is the next decode; it will also pin the correct
-cell→object grouping that fixes the flag/marble render with no guessing.
+What each `type` (0–7) *means* — the marble's reaction at that cell — is decided by
+the marble-physics dispatch on `$6A0` (Part V §3, still to do). The per-type
+object/animation definitions, the enemy actor templates and the animation scripts
+live in the other Track header pointers (`$1ED44` pointer array, `$89C2`, the
+animation table `$FD2C`); the Track even carries a per-course colour table
+(`$DFF180…$DFF192` words, e.g. practy `000 333 444 666 999 BBB DDD 822 C60 CC0`).
+Decoding those tables is the next step — it pins the enemy/marble start data and the
+correct cell→object grouping that fixes the flag/marble render with no guessing.
 
 ## 2. Physics, controls, scoring
 

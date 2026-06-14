@@ -1140,12 +1140,19 @@ header points to several parallel per-cell arrays, including:
 - a **height** array (e.g. `$5DE`: `… 78 6E 6E 78 6E 72 …`, values ~`$6E–$78`), plus
 - a table of 20-byte **slope-pattern records** (`$63C…`, bitmask templates).
 
-The marble's update (`$00E1C0`) indexes these by its position to get the cell's
-slope code/direction, then looks up the **slope vector in a global direction table
-at `$2504`** (8 directions → a `(dx,dy)` push) and applies it to the velocity. So
-"downhill" is a real per-cell slope field — large enough for a whole checkerboard of
-independently-sloped cells — and the visual `.mlb` ramps are tiles laid out to match
-it.
+Decoded, the descriptor holds a list of **slope-shape prototypes**: `$80`-separated
+**height blocks** whose per-cell bytes step by 2 (a rising run `00 02 04 06…0C` is an
+up-slope, `…FA FC FE` a down-slope). The block sizes are squares — `49 = 7×7`,
+`25 = 5×5`, `16 = 4×4` — and rendering them by gradient direction shows real terrain:
+prototype 1 (7×7) is **four quadrants each sloping a different way** (the
+checkerboard), others are diagonal ramps, bumps and dips. The **placement table**
+(`$91C`) then places these prototypes across the course (its `type` selects the
+prototype), so the iso-plot of the placement table *is* the slope-direction layout.
+At run time the marble's update (`$00E1C0`/`sub_00E158`) indexes its cell's prototype
++ sub-cell, interpolates the surface height, and looks up the **push vector in the
+global 8-direction table `$2504`**, adding it to the velocity. So "downhill" is a
+real per-cell slope field — the checkerboard is one 7×7 four-way prototype, tiled —
+and the visual `.mlb` ramps are tiles laid out to match it.
 
 Two *smaller* Track structures play supporting roles and should not be confused with
 the slope field: the **placement table** (`$129FC` → `$91C`, the `[X][Y][type]`

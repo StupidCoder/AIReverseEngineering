@@ -1131,25 +1131,26 @@ screen (`$E944`). The isometric look is a *projection* of a real 3-D simulation.
 
 The physics **never reads the visual `.mlb` tilemap**. Each course's `*Track`
 carries a separate, invisible **region map** (the block at Track header `+8`,
-`$12F74` → `$9D4`): a list of **5-byte records**
+`$12F74` → `$9D4`): a short list of **5-byte boundary records**, `$FFFF`-terminated:
 
 ```
-+0  byte  region key / column
-+1  byte  y0          # region bounds
-+2  byte  y1
-+3  byte  type_a      # terrain type on one side of the region's diagonal
-+4  byte  type_b      # terrain type on the other side
++0  byte  dx     (signed)   # the boundary line's direction in the iso plane
++1  byte  dy     (signed)
++2  byte  length            # how many cells the boundary runs
++3  byte  type_a            # terrain type on one side
++4  byte  type_b            # terrain type on the other side  ($FF = off-course void)
 ```
 
-`terrain_lookup $012B9E` tests the marble's tile position (`$6CA/$6CC` plus the
-`$6CE/$6D0` sub-tile) against each region and, for a region split by a **diagonal**,
-assigns `type_a` *or* `type_b` depending on which side of the diagonal the marble is
-on — i.e. an isometric **ramp edge**. The resulting terrain **type** is written to
-the marble's `+$1B`, and that type drives the slope acceleration applied to the
-marble's velocity. The isometric ramps, walls and pits you *see* are `.mlb` tiles
-laid out to match this region map; the *forces* come entirely from the region map.
-So "downhill" is a per-region acceleration vector, not anything read off the
-picture.
+This is a **2-D vector partition** of the horizontal plane — *not* 3-D volumes. The
+boundaries are diagonal line segments (both `dx` and `dy` non-zero, in the two
+isometric directions = ramp edges); practice has just **10** of them, carving the
+course into ~8 typed regions. `terrain_lookup $012B9E` tests the marble's projected
+(x,y) position against each boundary and assigns `type_a` *or* `type_b` by which
+side it falls on, writing the result to the marble's `+$1B`. The marble's 3-D
+position is flattened to (x,y) for this test — *height* comes from the type, not
+from the region shape. The slope force then follows from the type; the isometric
+ramps, walls and pits you *see* are `.mlb` tiles laid out to match this map, so
+"downhill" is a per-region acceleration, not anything read off the picture.
 
 ### Falling off — death
 

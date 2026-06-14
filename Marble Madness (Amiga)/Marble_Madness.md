@@ -1146,28 +1146,34 @@ accumulated `$195EA/$195EE` deltas and does `ADD.l d0,(a0)` / `ADD.l d0,$4(a0)` 
 max (`$40000` or `$50000`, selected per-surface) at `$14E62`/`$14E6E` — it *limits*
 velocity, it is not the slope.
 
-**3. The slope force** is in `surface_interaction sub_016900`. Its preamble (`$169A0`)
-reads the marble's **active surface region** (pointer `a4`) and computes
+**3. The slope force** is in `surface_interaction sub_016900` (`a5` = the marble).
+It **loops over all 25 region structs** (`a4`, stride `$56`; loop `$016986…$01802A`,
+counter vs `$19`=25), and for every *valid* region (`+$18≠0`) computes
 
 ```
-d5 = region.refX ($C(a4)) − marbleX ($6C4)     ; vector marble → downhill ref. point
+d5 = region.refX ($C(a4)) − marbleX ($6C4)     ; vector marble → this region's ref point
 d4 = region.refY ($10(a4)) − marbleY ($6C6)
 ```
 
 then dispatches on the region's **terrain code** `$1F(a4)` (value 5..59) through the
 jump table at `$016A00` (55 `BRA.w` entries, `JMP $2(pc,d0.l)`, `d0=(code−5)*4`). For
-a slope code (11 → `$17AA8`, 13 → `$17C88`) the handler normalises `(d5,d4)` to a unit
-vector (`JSR $23EB4`), multiplies by 4 (`ASL.l #2`) and does
+a slope code (11 → `$17AA8`, 13 → `$17C88`) the handler first range-checks `(d5,d4)`
+— so a region only acts while the marble is **within its bounds** — then normalises it
+to a unit vector (`JSR $23EB4`), multiplies by 4 (`ASL.l #2`) and does
 
 ```
 $017BDE  ADD.l d0,(a5)        ; vX += ux·4
 $017BE8  ADD.l d0,$4(a5)      ; vY += uy·4
 ```
 
-That is the whole of "downhill": **each frame the marble is accelerated toward its
-region's reference point `(refX,refY)`.** A small dead-zone box around the reference
-(`$17AE8…`) leaves the marble at rest when it is already centred, so it settles into
-dips instead of oscillating.
+That is the whole of "downhill": **each frame, every region the marble overlaps
+accelerates it toward that region's reference point `(refX,refY)`.** Because the
+course is tiled into many small regions, each with its ref point biased toward its
+low side, the net pull follows the terrain. A dead-zone box (`$17AE8…`) leaves the
+marble at rest when already centred, so it settles into dips. After the loop
+(`$01807C…$01809E`) any wall flags raised during it (`$6A1`/`$6A2`) snap the marble
+position back to the wall edge (`$6B8`/`$6BC`) and **negate** the velocity — the
+bounce.
 
 ### The terrain-code jump table (`$016A00`)
 
@@ -1256,8 +1262,26 @@ grid of 8-byte cells, each cell holding **four corner heights** at `+0/+2/+4/+6`
 
 So a region is a rectangle with a base height and a *direction + 1-D profile* that
 ramps the height across it; `$E158` paints that ramp into the shared corner-height
-grid. The physics' per-region screen-space `+$C/+$10` reference point is then derived
-from this mesh (the remaining bridge — see "Still open").
+grid.
+
+### How regions become contact structs
+
+`$CCA` is a **multi-phase work buffer** — verified by the identical literal `$0CCA`
+used with three different strides: `build_region` writes it as **8-byte** corner-height
+cells; an init pass (`$3886`) clears it as **18-byte** cells (seeding `+$C/+$10` to the
+defaults `$FF`/`$80`); and the physics/setup use **86-byte** region structs. The
+86-byte structs are populated by **`region_build_list $F7EA`**, which walks a
+per-course source list (from Track header `+0`/`$FD2C`), and for each entry allocates a
+struct (`$F6B2`), writes its grid key `+$52`/`+$54 = (x,y)`, and calls **`region_update
+$F96A`** to set `+$3A`/`+$18`/`+$1A` and dispatch its terrain code (`$11C24`).
+**`region_activate $F8FC`** then matches each region's `+$52`/`+$54` against the marble
+tile every frame to set its `+$18` valid flag — which is the gate `sub_016900`'s loop
+tests.
+
+The one instruction not yet pinned is where each region's screen-space reference
+`+$C/+$10` is written from its geometry/height (it starts at the `$FF`/`$80` default and
+must be filled during setup or per-frame projection). Everything that *consumes* it is
+now traced.
 
 So "downhill" is a real per-region slope field: the **`$9A6` descriptor** lists
 rectangular regions with a base height and a 3-bit slope direction; `build_surface`

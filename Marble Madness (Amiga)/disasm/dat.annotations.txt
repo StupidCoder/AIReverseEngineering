@@ -114,8 +114,15 @@
 #   RAMPS along the diagonal = the slope. A boundary test writes value into the right
 #   corner word(s) of the cell depending on left/right (x0/xEnd) and top/bottom (y0/yEnd)
 #   edges, sharing corners so adjacent cells agree = a continuous corner-height terrain.
-#   OPEN bridge: how the physics' per-region screen-space ref point (+$C/+$10) is derived
-#   from this corner-height mesh.
+#   NOTE $CCA is a MULTI-PHASE work buffer (verified same literal $0CCA at 3 strides):
+#   build_region writes 8-byte corner-height cells; init $3886 clears 18-byte cells
+#   (seeds +$C/+$10 = defaults $FF/$80); physics/setup use 86-byte region structs.
+00F7EA  region_build_list  populate the 86-byte $CCA region structs from a per-course
+#   source list (head = *($FD2C)/Track header+0). Walks [x][y][long] records; per entry
+#   (filtered by tile-range args) allocs a struct via $F6B2, sets +$52/+$54 = (x,y) grid
+#   key, and calls region_update $F96A to set +$3A/+$18/+$1A and dispatch the terrain code.
+#   OPEN bridge: the exact write of each region's screen-space ref +$C/+$10 (starts at the
+#   $FF/$80 default; consumer surface_interaction is fully traced).
 00F8FC  region_activate  per-frame pass over the 25 $CCA region structs (a4=$CCA, +=$56
 #   to a3=$CCA+$866). For each valid region (+$18) whose grid key +$52/+$54 brackets the
 #   marble tile, calls region_update $F96A to (de)activate it and run its enter/exit
@@ -136,11 +143,15 @@
 #     roll anim/sound (obj+$D6, table $201A, $A5F0), and CLAMPS velocity to a max
 #     speed ($40000/$50000) by scaling vX/vY at $014E62/$014E6E -> friction, NOT slope.
 #   surface build: course_init/$E6B2 -> build_surface $DEBC -> sub_00E158 -> $CCA grid.
-016900  surface_interaction  THE surface->velocity step (a5=marble). Preamble $169A0
-#   reads the marble's ACTIVE region struct (a4=$CCA): d5 = $C(a4)refX - $6C4 marbleX,
-#   d4 = $10(a4)refY - $6C6 marbleY (vector marble -> downhill reference point), checks
-#   $18(a4) valid, then d0 = $1F(a4) terrain code (5..59); JMP $2(pc,d0.l) via the jump
-#   table at $016A00 (55 BRA.w entries, d0=(code-5)*4, target=entry+2+off).
+016900  surface_interaction  THE surface->velocity step (a5=marble). LOOPS over all 25
+#   region structs (a4=$CCA, += $56; loop $016986 counter -$5 vs $19=25; $01802A advances,
+#   $016990 skips regions with $18(a4)==0). For each VALID region: d5 = $C(a4)refX - $6C4
+#   marbleX, d4 = $10(a4)refY - $6C6 marbleY (vector marble -> this region's ref point);
+#   d0 = $1F(a4) terrain code (5..59); JMP $2(pc,d0.l) via the jump table at $016A00 (55
+#   BRA.w entries, d0=(code-5)*4, target=entry+2+off). So every region the marble overlaps
+#   contributes; a region's handler range-checks (d5,d4) so it only acts within its bounds.
+#   LOOP TAIL $01807C: if wall flag $6A1 set -> marble posX($C(a5))=$6B8, NEG.l (a5) vX;
+#   if $6A2 -> posY($10(a5))=$6BC, NEG.l $4(a5) vY = the wall BOUNCE (clamp + reverse).
 # THE SLOPE FORCE (proven), code 11 case $17AA8 (and 13 -> $17C88): a dead-zone box test
 #   ($17AE8) leaves the marble at rest when centred; otherwise normalise (d5,d4) via
 #   JSR $23EB4 (divide by octagonal distance), ASL #2 (x4) and ADD to velocity:

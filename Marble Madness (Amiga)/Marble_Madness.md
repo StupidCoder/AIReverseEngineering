@@ -48,7 +48,9 @@ under way; Part V is still a stub.
 - [Part IV — Graphics and data formats](#part-iv--graphics-and-data-formats)
   - [1. The splash (boot) screen](#1-the-splash-boot-screen)
   - [2. The Workbench icons](#2-the-workbench-icons)
-  - [3. The sprite banks (`.ilb` and `.vlb`)](#3-the-sprite-banks-ilb-and-vlb)
+  - [3. Tile map (`.mlb`)](#3-tile-map-mlb)
+  - [4. Obstacles (`.ilb`)](#4-obstacles-ilb)
+  - [5. Course layout (`*Track`)](#5-course-layout-track)
 - [Part V — Game mechanics](#part-v--game-mechanics)
 - [Appendix A — Toolchain and reproduction](#appendix-a--toolchain-and-reproduction)
 
@@ -64,11 +66,6 @@ double-density disk — **1760 blocks of 512 bytes = 901,120 bytes** — so bloc
 *N* is simply the 512 bytes at file offset *N* × 512. The exact copy this
 analysis is based on is pinned by size and MD5 in the repository
 [README](../README.md#image-files).
-
-There is no copy-protection track scheme to defeat here the way the C64 tapes
-needed a fastloader reverse-engineered: an ADF is already the decoded block
-image. The work in this part is therefore reading the *filesystem* laid over
-those blocks.
 
 ## 2. The AmigaDOS filesystem
 
@@ -94,14 +91,12 @@ AmigaDOS ones:
 The boot block itself contains the **standard AmigaDOS boot code**, not a custom
 loader: its 68000 fragment references the string `dos.library`, opens it through
 an Exec library call and returns its base, which is exactly what an ordinary
-bootable AmigaDOS disk does. So unlike the C64 titles, there is no bespoke
-on-disk loader to reverse — the disk boots through the normal ROM/AmigaDOS path,
-and the interesting boot logic is the game's own startup (Part II).
+bootable AmigaDOS disk does.
 
 ## 3. The disk contents
 
 The volume holds **50 files across 3 directories** (`c/`, `s/`, `libs/`). Almost
-every file begins with `$0000_03F3`, the **`HUNK_HEADER`** magic of an Amiga
+every file begins with the **`HUNK_HEADER`** magic of an Amiga
 loadable object — a relocatable code/data segment that AmigaDOS brings in with
 `LoadSeg`. So the game is not one monolithic binary but a launcher plus a main
 program plus a large set of per-course overlays, each a hunk file loaded on
@@ -121,8 +116,7 @@ returns a flat image that `dis68k`/`codetrace68k` can disassemble.
 Two files are exceptions. `c/MarbleMadness!.dat` (the main program) and `c/xxx`
 are not plain hunks: after a `$0000_03F3 8F01…` header their contents are
 near-random (entropy ≈ 7.95 of 8 bits/byte), i.e. **stored encrypted** and
-decrypted at load by the small `c/zzz` helper. Decrypting them — and thereby
-reaching the main game code — is a Part II/III concern.
+decrypted at load by the small `c/zzz` helper, as described in part II §4.
 
 **System and boot files** — an ordinary AmigaDOS boot setup:
 
@@ -132,8 +126,8 @@ reaching the main game code — is a Part II/III concern.
 | `c/LoadWb`, `c/EndCLI` | the AmigaDOS CLI commands the script runs |
 | `c/splash` | the title/splash screen — an IFF ILBM bitmap (Part IV §1) |
 | `c/bootscr` | the boot-screen program (a 50-hunk overlay) that displays the splash (Part II §3) |
-| `c/zzz` | the decryptor — decrypts the encrypted files at load (Part III) |
-| `c/xxx` | encrypted data decrypted by `c/zzz` (the disk fast-loader, Part II §5) |
+| `c/zzz` | the decryptor — decrypts the encrypted files at load (Part II §4) |
+| `c/xxx` | the disk fast-loader (encrypted, Part II §5) |
 | `c/sigfile` | a disk-signature / copy-protection table (`"DOW"`+incrementing bytes) |
 | `libs/icon.library` | bundled so the disk shows icons without the user's Workbench disk |
 | `MarbleMadness!.info`, `Disk.info`, `.info` | Workbench icons (`$E310` magic, not hunks) |
@@ -148,7 +142,7 @@ reaching the main game code — is a Part II/III concern.
 **Per-course modules.** The bulk of the disk is six parallel families of files,
 one per Marble Madness course, keyed by a short prefix and a type suffix:
 
-| prefix | course | level | image | vector | sound | music |
+| prefix | course | tile map | obstacles | `.vlb` | sound | layout |
 |--------|--------|-------|-------|--------|-------|-------|
 | `prc` / `practy` | Practice | `practy.mlb` | `practy.ilb` | — | `PrcSnd` | `PrcTrack` |
 | `beg` / `beginr` | Beginner | `beginr.mlb` | `beginr.ilb` | `begobsc.vlb` | `BegSnd` | `BegTrack` |
@@ -158,13 +152,11 @@ one per Marble Madness course, keyed by a short prefix and a type suffix:
 | `ult` / `ultima` | Ultimate | `ultima.mlb` | `ultima.ilb` | `ultobsc.vlb` | `UltSnd` | `ulttrack` |
 
 Plus shared assets: `marbdat` / `marbdat.vlb` (the marble), and `birdink.vlb`
-and `ooze.vlb` (the creatures). The suffix conventions: `.ilb` is the per-course
-**sprite bank** (its container is decoded in Part IV §3); the rest are read off
-the names and sizes and stay **provisional** until Part IV decodes them — `.mlb`
-course/level data, `.vlb` vector or obstacle ("`obsc`") graphics, and `*Snd` sound
-effects. (`*Track` turns out **not** to be music but the per-course **level/object
-layout** — actor placements and sprite-animation scripts, `LoadSeg`'d at course
-init; see Part V.)
+and `ooze.vlb` (the creatures). The suffix conventions: `.mlb` is the per-course
+**tile map** (Part IV §3) and `.ilb` the **obstacle sprites** (Part IV §4); the
+`*Track` files are the per-course **course layout** (actor placements and
+animation data, `LoadSeg`'d at course init — Part IV §5), **not** music. The rest
+stay **provisional** — `.vlb` moving-object graphics and `*Snd` sound effects.
 
 **Compression and encryption.** Several encodings appear on the disk, decoded in
 this writeup where possible. The two executables that matter most —
@@ -174,7 +166,8 @@ bits/byte — high entropy from the cipher, **not** compression: the bodies are
 stored at full size) and decrypted at load by `c/zzz`; reaching the main code
 therefore means reversing that decryptor (Part III). The title screen `c/splash` is an IFF ILBM
 whose pixels are **ByteRun1 (PackBits)** compressed (Part IV §1). The per-course
-sprite banks (`.ilb`) carry their own **run-length sprite packing** (Part IV §3).
+tile maps (`.mlb`) and obstacle sprites (`.ilb`) carry the same PackBits packing
+(Part IV §3–§4).
 `c/sigfile` is not compression but a copy-protection signature table. The
 remaining per-course formats (`.mlb`, `.vlb`, `Snd`, `Track`) and whatever
 encoding they use are still to be decoded. (The on-disk filesystem also frames
@@ -757,12 +750,13 @@ go run stupidcoder.com/tools/cmd/codetrace68k -base 0 -entry <CODE-hunk bases> /
 # Part IV — Graphics and data formats
 
 The boot-time graphics use standard Amiga formats the toolchain already reads end
-to end — the title splash (§1) and the Workbench icons (§2). §3 turns to the
-game's own formats: the sprite banks (`.ilb` course scenery and `.vlb` moving
-objects), whose container, geometry, and **compression** (ByteRun1/PackBits,
-identified from the decrypted engine — shared with the `.mlb` levels) are all
-reversed here. The remaining per-course modules (`Snd`, `Track`) are still to be
-decoded.
+to end — the title splash (§1) and the Workbench icons (§2). §3–§5 turn to the
+game's own per-course formats: the **tile map** (`.mlb`, §3), the **obstacle
+sprites** (`.ilb`, §4) and the **course layout** (`*Track`, §5). The `.mlb` and
+`.ilb` pixel data share one **ByteRun1/PackBits** codec, identified from the
+decrypted engine; the `*Track` is a plain `LoadSeg`'d hunk module. The remaining
+per-course modules — the `.vlb` moving-object banks and the `*Snd` sound — are
+still to be decoded.
 
 ## 1. The splash (boot) screen
 
@@ -815,268 +809,154 @@ label.
 
 ![Disk icon](rendered/icon-disk.png)
 
-## 3. The sprite banks (`.ilb` and `.vlb`)
+## 3. Tile map (`.mlb`)
 
-Each course carries an `.ilb` (an "image library") holding its static sprites,
-and the moving objects live in matching `.vlb` files — `marbdat.vlb` (the
-marble), `birdink.vlb` and `ooze.vlb` (creatures). Both extensions are the **same
-format**; only the sprite geometry and counts differ. The `.ilb` sizes track how
-much each course needs: the Silly and Ultimate courses share a minimal four-sprite
-set (466 bytes), while Aerial packs sixty-three (35 KB).
+Each course's floor, walls and railings — everything the marble rolls on — are a
+**tile map** held in its `.mlb` ("map library") file: `practy.mlb`, `beginr.mlb`,
+… one per course. The whole file is a single **ByteRun1 / PackBits** stream (the
+same RLE as IFF ILBM bodies; signed control byte *n*: `0..127` copies *n*+1 literal
+bytes, `-1..-127` repeats the next byte `1−n` times, `-128` is a no-op). The loader
+(`$7F38`) expands the entire file into a work buffer and relocates the plane and
+tilemap pointers in its header; the tile blitter (`$9910` → `$99C0`) then paints
+the course.
 
-**The container is one whole-file ByteRun1 stream — exactly like the `.mlb`.** An
-earlier reading of the *raw* file (a 4-byte header + a table of "15-byte"
-descriptors + packed bitmap, with the data section at `4 + count×15`) decoded the
-sprites *correctly* but for the wrong reason: that computed offset just happened to
-land on a PackBits control boundary, so the unpack re-synced. The honest model —
-confirmed from the loader `$80B4` — is that the bank is **packed end-to-end** and
-the structure only exists **after** unpacking. The loader does exactly that:
-`dos.library Open(MODE_OLDFILE)`/`Read`/`Close` (**not** the track loader, **not**
-a decompression library), then `$9118` ByteRun1-expands the *whole file* into a
-work buffer, and walks the descriptors **in that buffer**.
+**Memory map** of the unpacked `practy.mlb` work buffer:
+
+| Offset | Field | Practice value |
+|---|---|---|
+| `+0x00` word | course height (tile rows) | `0x004B` (75) |
+| `+0x02` long | plane-0 offset | `0x000036` |
+| `+0x06` long | plane-1 offset | `0x0019A6` |
+| `+0x0A` long | plane-2 offset | `0x003316` |
+| `+0x0E` long | plane-3 offset | `0x004C86` |
+| `+0x12` long | tilemap offset | `0x0065F6` |
+| `+0x16 … +0x36` (32 B) | **palette** | 16 `$0RGB` words |
+| `+0x36 … +0x19A6` | **plane 0** (6512 B) | tile bitplane 0 |
+| `+0x19A6 … +0x3316` | plane 1 | tile bitplane 1 |
+| `+0x3316 … +0x4C86` | plane 2 | tile bitplane 2 |
+| `+0x4C86 … +0x65F6` | plane 3 | tile bitplane 3 |
+| `+0x65F6 … +0x7B0E` | **tilemap** (5400 B) | 75 × 36 tile-index words |
+
+The four plane offsets differ per course, but **plane 0 is always at `$36`** and
+the planes are a constant stride apart — that stride is one plane's byte size, so
+the **tile count = stride ÷ 8** (practice: `$1970 ÷ 8 = 814` tiles).
+
+**Palette.** The sixteen big-endian `$0RGB` words at `+0x16` are the course's
+playfield palette (colours 0–15). The per-course palette lives here, not in the
+`.dat` — the engine programs it with `SetRGB4` (`$248FC`), never `LoadRGB4`.
+Colours 0–6 are a shared grey ramp (the isometric shading); 7–15 are the course's
+accent colours. Practice's palette is `000 333 444 666 999 BBB DDD 822 C60 CC0 622
+A22 D33 F88 A22 D33`. Colours 14–15 are an engine colour-cycling range (the
+animated hazard/ice pools), so a static render shows their base value rather than
+the in-game cycling.
+
+**Tiles** are **8×8 pixels, 4 bitplanes (16 colours)**. The blitter reads a tile as
+eight 1-byte rows from `plane[(i>>1)*16 + (i&1) + 2*r]` — even/odd tiles are
+byte-interleaved within 16-byte groups. Tile 0 is the all-black tile.
+
+![Practice tile set](rendered/practy.tiles.png)
+
+**Assembling the course.** The **tilemap** at `+0x12` is a row-major stream of
+big-endian tile-index words, **36 tiles (288 px) wide** (the blitter's 72-byte row
+stride fixes the width). Marble Madness scrolls only vertically, so the width is
+constant and the height varies per course — practice 36×75, up through ultimate's
+36×198. Placing each tile by its index reproduces the complete course:
+
+![Practice course](rendered/practy.png)
+
+[`extract/cmd/sprites`](extract/cmd/sprites) decodes every `.mlb` and writes the
+tile set (`<course>.tiles.png`) and the assembled course (`<course>.png`) to
+[`rendered/`](rendered).
+
+## 4. Obstacles (`.ilb`)
+
+Each course also carries an `.ilb` ("image library") of **obstacle sprites** — the
+objects placed on the course: the goal flag, moving barriers, drawbridges and the
+like. Sizes track each course's needs, from Silly's minimal four-cell set (466 B)
+up to Aerial's sixty-three cells (35 KB).
+
+**Container.** Like the `.mlb`, the whole `.ilb` is one **ByteRun1 / PackBits**
+stream (§3). The loader (`$80B4`) reads the file with plain `dos.library`
+`Open(MODE_OLDFILE)`/`Read`/`Close`, expands it through `$9118`, and walks a table
+of cell descriptors **in the unpacked buffer**:
 
 ```
 unpacked buffer:
 +0    word              cell count
-+2    count × 20 bytes  cell descriptors (loader walks these at stride $14)
++2    count × 20 bytes  cell descriptors (walked at stride $14)
 ...                     contiguous planar pixel data the +8 fields point at
 ```
 
-**The descriptors (20 bytes, in the unpacked buffer).** The first of `silly.ilb`,
-read from the unpacked buffer — note it is *clean*, with none of the stray `$FE`
-control bytes that the old raw-file read showed (those `$FE` were PackBits repeat
-codes the raw read was straddling):
+**Cell descriptor (20 bytes):**
 
 ```
-+0  byte   cell type      (1 = stored cell, 0 = engine-composited cell)
-+1  byte   flags           (bit 0 = process this cell)
-+2  word   width  in 16-px words   (silly: 1 → 16 px)
-+4  word   height in rows          (silly: 33)
-+6  word   one-plane byte size     (= width*2 * height; silly: 66)
-+8  long   source offset into the unpacked buffer (relocated +buf at load)
-+C  long   dest cell pointer       (0 in file; allocated from buffer slack at load)
-+10 long   aux pointer             (0 in file; relocated at load)
++0  byte   cell type   (1 = stored cell, 0 = engine-composited)
++1  byte   flags       (bit 0 = process)
++2  word   width  in 16-px words
++4  word   height in rows
++6  word   one-plane byte size  (= width*2 * height)
++8  long   source offset into the unpacked buffer
++C  long   dest cell pointer    (filled at load)
++10 long   aux pointer          (filled at load)
 ```
 
-The cells' pixel data is **contiguous and in `+8` order**, so a cell's source span
-is the gap to the next cell's `+8` (or the buffer end), and the **plane count is
-that span ÷ the `+6` one-plane size**. This is the key correction over the old
-"everything is 2 bitplanes" reading: plane count **varies per cell**. Silly's
-cells are 132 ÷ 66 = **2 planes** (16×33, 4-colour markers), but Practice's big
-scenery blocks are 1920 ÷ 480 = **4 planes** (80×48, 16-colour), and a single
-`.ilb` freely mixes both (e.g. `interm.ilb`: 16×33×2p markers alongside 96×64×4p,
-80×64×4p and 48×79×4p scenery). `composite_planes` `$8026` confirms the storage:
-it consumes the planes as **sequential `+6`-byte blocks** (not row-interleaved).
+The cells' pixel data is **contiguous in `+8` order**, so a cell's source span is
+the gap to the next `+8` (or the buffer end), and its **plane count = span ÷ the
+`+6` one-plane size**. The depth therefore **varies per cell**: small markers are 2
+bitplanes (4 colours), while the larger obstacle blocks are 4 bitplanes (16
+colours) — `interm.ilb`, for instance, mixes 16×33×2p markers with 96×64×4p,
+80×64×4p and 48×79×4p blocks. The planes are stored as sequential `+6`-byte blocks
+(confirmed by the compositor `$8026`). [`extract/cmd/sprites`](extract/cmd/sprites)
+unpacks each bank, derives per-cell geometry, and flow-packs the cells into one
+sheet per bank in [`rendered/`](rendered):
 
-**The `.vlb` moving-object banks** are the same format (a `$0D` "heavy" flag vs the
-`.ilb` `$09`/`$0D`), the same count word and 20-byte descriptors. `marbdat.vlb`
-holds **130** cells — the marble at every rotation step, plus its mask cells —
-while `birdink.vlb` (45) and `ooze.vlb` (48) are creature cycles; the obstacle
-banks (`*obsc.vlb`) are uniform 16×64×2p strips.
+![Practice obstacle cells](rendered/practy.ilb.png)
 
-**The codec is ByteRun1 / PackBits** — the *same* RLE as IFF ILBM bodies (Part IV
-§1's `_UnPackRow`), routine `$9118`:
+**Open question — cell→object grouping.** The engine draws these obstacles as
+**4-bitplane (16-colour) blitter objects**, and an on-screen object is built from
+**two consecutive 2-plane cells** (the goal flag, for example, is cells 0+1, with a
+second wave frame at 2+3). Drawn one descriptor at a time, those cells come out
+grey and half-depth. Which cells pair, and how the frames sequence into
+animations, is held in the course's `*Track` data (§5) and the engine's actor
+system (Part V) — not yet fully decoded. The extractor currently renders each
+descriptor cell faithfully; the per-object grouping is the open refinement.
 
-```
-read a signed control byte n:
-  n in   0..127 : copy the next n+1 bytes literally
-  n in -127..-1 : repeat the next single byte (1 - n) times   (2..128)
-  n == -128      : no-op
-```
+(The moving creatures and the marble live in separate `.vlb` files, which share
+this container but whose exact role — and what the "V" stands for — is still being
+pinned down; they are deliberately left out here.)
 
-My earlier guess of `$FE` as a literal escape was the mistake that comes from
-reading the *packed* stream as if it were structured: `$FE` is signed `-2`, i.e.
-"repeat the next byte 3×". Unpacking the whole file with the signed PackBits rule
-consumes each bank **exactly** to its last byte and yields the clean count +
-descriptor + pixel layout above. The `.mlb` level modules go through the **same**
-`$7E4E`→`$9118` load path with a different post-unpack header (flag `$01`, an
-offset table), so all three bank kinds share one codec; only the unpacked layout
-differs.
+## 5. Course layout (`*Track`)
 
-With the model corrected, [`extract/cmd/sprites`](extract/cmd/sprites) unpacks the
-whole file, reads each 20-byte descriptor, derives per-cell width/height/plane
-count, and flow-packs the cells (which now vary in size) into one sheet per bank in
-[`rendered/`](rendered) (`<bank>.png`). The 4-plane scenery cells now render in
-full 16 colours — `aerial.ilb` resolves into the recognisable isometric ramps,
-hazard walls, columns and the marble-muncher; `marbdat.vlb` into the marble's
-rotation frames (the mask cells render as their raw planes, pending the cell+mask
-pairing).
+Where the tiles (§3) are a course's *appearance* and the obstacle cells (§4) are
+its *art*, the **`*Track`** file is its *layout*: where every obstacle and terrain
+feature sits, plus the animation data for the moving objects. There is one per
+course — `PrcTrack`, `BegTrack`, `IntTrack`, `AerTrack`, `SilTrack`, `UltTrack`.
+(Despite the name these are **not** music — that is `*Snd`.)
 
-**The palette is per-course, and it lives in the `.mlb` level module — not in the
-program.** The engine sets colours with `graphics.library SetRGB4` (`$248FC`, via
-the ViewPorts at `$1FA82`/`$21170`), never `LoadRGB4`, and the `.dat` itself holds
-no colour table — which is why a search of the decrypted program comes up empty.
-The source is each course's **`.mlb`**: sixteen big-endian `$0RGB` words, the
-playfield palette (colours 0–15), at **offset `0x16` of the whole-file-unpacked
-buffer** (the `.mlb` decode below). They also appear raw at file offset `0x17` as
-a PackBits literal run — which is a usable shortcut for most courses but a trap for
-beginner, whose file bytes there hold a bogus `$EE00` while the real unpacked value
-is `$0000`; reading from the unpacked buffer is the correct source. This was
-confirmed two ways: the six `.mlb` files carry six distinct palettes, and reading
-the live OCS colour registers (`$DFF180`) on the training course under FS-UAE
-returned **`000 333 444 666 999 BBB DDD 822 C60 CC0 622 A22 D33 F88 …`** —
-byte-for-byte the words in `practy.mlb`. The first seven entries are a shared grey
-ramp (the isometric scenery shading); 7–15 are the course's own object/accent
-colours (practy red-orange, beginr blue, interm green, aerial tan, silly yellow,
-ultima red). [`extract/cmd/sprites`](extract/cmd/sprites) reads each course palette
-from the matching `.mlb` and renders every bank with it into
-[`rendered/`](rendered).
+**Loading.** A `*Track` is a plain AmigaDOS hunk module (not encrypted). At course
+init (`load_track_data $003176`) the engine indexes the per-course name table
+(`$353C`) by the course number and **`LoadSeg`s** the file. The loaded module opens
+with a header of ten relocated pointers that the engine fans out to the
+actor-system globals — for example the placement table to `$129FC` and the
+animation scripts to `$FD2C`.
 
-**Two palette entries are engine-animated, not static.** Colours 14–15 are a
-small **colour-cycling effect range** the engine drives at runtime (the animated
-hazard/ice pools) — the static `.mlb` palette only holds a base/placeholder there
-(beginner zeroes them, so its ice trap reads black in a static render rather than
-the cycling cyan seen in-game). The cycling is generated by the display task the
-main loop signals (`$1F392` → a separate task), not from any static colour table
-in the `.dat`, so it is out of reach of a static palette extraction.
-
-**The bit depth varies per cell, not per file.** Within an `.ilb`/`.vlb` bank the
-small markers, the marble and the creatures are **2 bitplanes** (4 colours, the
-palette's low four), while the larger scenery blocks are **4 bitplanes** (16
-colours) — each cell's plane count is read straight from its descriptor (source
-span ÷ the `+6` one-plane size, §3 above). The `.mlb` **level modules** are
-uniformly 4 bitplanes (16 colours): the loader (`$7F38`) relocates four plane
-pointers and a palette pointer at the head of its work buffer.
-
-**The `.mlb` format, decoded from the consumer.** The whole file is **one
-ByteRun1/PackBits stream**. The loader (`$7F38`) unpacks it into a work buffer and
-relocates four plane pointers and the tilemap pointer that sit in the buffer's
-header; the tile blitter (`$9910` → `$99C0`) then draws the course. The unpacked
-buffer's layout (silly.mlb shown):
-
-| Buffer offset | Field | silly value |
-|---|---|---|
-| `+0x00` word | tile count | `0x008F` (143) |
-| `+0x02` long | plane-0 offset | `0x000036` |
-| `+0x06` long | plane-1 offset | `0x001D76` |
-| `+0x0A` long | plane-2 offset | `0x003AB6` |
-| `+0x0E` long | plane-3 offset | `0x0057F6` |
-| `+0x12` long | tilemap offset | `0x007536` |
-| `+0x16 … +0x36` (32 B) | **palette** | 16 `$0RGB` words (also raw at file `0x17`) |
-| `+0x36 … +0x1D76` | **plane 0** (7488 B) | tile bitplane 0 |
-| `+0x1D76 … +0x3AB6` | plane 1 | tile bitplane 1 |
-| `+0x3AB6 … +0x57F6` | plane 2 | tile bitplane 2 |
-| `+0x57F6 … +0x7536` | plane 3 | tile bitplane 3 |
-| `+0x7536 … +0x9DB6` | **tilemap** (10368 B) | 144 × 36 tile-index words |
-
-(The four plane offsets differ per course but the plane-0 offset is always `0x36`,
-and the planes are a constant stride apart — that stride is the plane size, so the
-tile count = stride/8. The header palette appears raw in the file at `0x17` because
-it is stored as a PackBits literal run.)
-
-**Tiles** are **8×8, 4 bitplanes (16 colours)**. The blitter reads each tile as
-eight 1-byte rows at `plane[(i>>1)*16 + (i&1) + 2*r]` — i.e. **even/odd tiles are
-byte-interleaved** within 16-byte groups, rows at the even byte offsets — and
-composites the four planes through the course palette. Tile 0 is the all-black
-tile in every course.
-
-**The full courses, assembled.** The **tilemap** is a row-major stream of
-big-endian tile-index words; the blitter's 72-byte row stride fixes the course
-**width at 36 tiles (288 px)**, and because Marble Madness scrolls vertically that
-width is constant while the height varies — practice 36×75 up through ultimate
-36×198. Placing each 8×8 tile by its index reproduces each **complete course**:
-[`extract/cmd/sprites`](extract/cmd/sprites) emits the course to
-[`rendered/`](rendered) as `<course>.png` and the tile set as `<course>.tiles.png`.
-The practice course renders as its grey isometric checkered floor, red walls,
-yellow/orange railings and the `GOAL` banner; all six courses come out in their
-real per-course colours. (Reading the offsets and tilemap pointer from the proper
-*whole-file-unpacked* buffer header — rather than guessing them from the raw file —
-is what makes every course correct; an earlier model that unpacked only from `0x37`
-mis-aligned beginner and silly.) Cracked end to end: container → ByteRun1 →
-8×8×4 tiles → palette → tilemap → course image.
-
-A second `.ilb`/`.vlb` refinement remains. **Exact cell boundaries:** the loader
-expands each
-15-byte file descriptor into a 20-byte in-memory record and relocates its
-source/dest pointers (`$80B4`), and some banks (notably the marble) pair each cell
-with a blitter **mask**, so a frame stride is twice the cell — the current
-extractor slices on the cell size, exact for the opaque scenery but half-aligned
-on the masked objects. Following the descriptor offsets and `$8026`'s
-OR-compositing precisely is the last step to per-frame-perfect sprites.
-
----
-
-*The per-course `.mlb`, `.vlb`, `Snd` and `Track` formats are to follow.*
-
----
-
-# Part V — Game mechanics
-
-## 1. The object/actor system and the `*Track` level files
-
-The moving things in a course — the goal flag, enemies, the marble-munchers, the
-animated obstacles — are driven by an **actor system** in the engine, fed by the
-per-course **`*Track` file**. `*Track` is **not** music (that is `*Snd`); it is the
-**level/object layout**: where each object starts and how it animates.
-
-**Loading (`load_track_data $003176`).** At course init the engine indexes a
-6-entry table `t_track_names` (`$353C`, keyed by the course global `$5D6`) holding
-the names `PrcTrack`/`BegTrack`/`IntTrack`/`AerTrack`/`SilTrack`/`UltTrack`,
-**`LoadSeg`s** the file (`dos.library` −150, via `$8CF0`), and stores the seglist
-at `$3554`. The loaded segment opens with a header of **ten longword pointers**
-(seg `+0 … +$24`) that the engine fans out to the actor-system globals — notably
-`+$14 → $FD2C`, the **animation-script table**.
-
-**Actors (`actor_update $01D3B2`).** Each frame the engine walks an array of
-**20-byte actor records**:
+**Object-placement table.** Header field `+4` (`$129FC`) points to the
+**object-placement list**: an array of **3-byte records**, terminated by a leading
+`$FF`:
 
 ```
-+0  long   pointer to the current sprite CELL to draw
-+4  long   animation-script pointer (8-byte entries: cell ptr + timing,
-           $FFFFFFFF-terminated → loop); advanced when the frame timer expires
-+8  word   frame timer
-+A  word   x position
-+C  word   y position (biased by the scroll offset $D30C)
-+E/+10     animation / wrap state
++0  byte  X     (isometric grid cell; screen seed = X*8+4)
++1  byte  Y     (isometric grid cell; screen seed = Y*8+4)
++2  byte  type  (0..7 — the feature kind)
 ```
 
-So a cell is grouped into an animation by the **script** (a list of cell pointers
-in the Track segment), and the actor carries the **position**. Frame durations are
-randomised through the engine RNG (`$8F96`).
+The engine finds the record nearest the marble (`$012600`), isometric-transforms it
+(`$6718`) and uses its `type` to drive the interaction — so `type` is the
+**terrain/obstacle kind** the marble reacts to (a hole, a ramp, a hazard, the
+goal), not a free-standing sprite index. [`extract/cmd/tracks`](extract/cmd/tracks)
+decodes the table for every course:
 
-**Drawing (`draw_object_wrap $0104C4` → `blit_object $011D1C`).** There are **no
-hardware sprites** (the program never touches `$DFF0A0–$DFF0DC`); everything is
-blitted. The playfield is **4 bitplanes**, so every on-screen object is 16-colour.
-`blit_object` reads the cell's width/source from its descriptor and loops the
-screen bitmap's plane-pointer table for **four planes**, advancing the source by
-one plane-size each step — i.e. it consumes **four consecutive one-plane blocks**
-from the cell source. `draw_object_wrap` adds vertical wraparound for the 512-tall
-scroll buffer (two blits across the seam).
-
-**Consequence for the sprite banks (corrects Part IV §3 rendering).** Because the
-blit pulls four planes and each `.ilb`/`.vlb` descriptor cell physically stores
-only two, a 16-colour object is built from **two consecutive 2-plane cells** — the
-goal flag is cells 0+1 (and 2+3 = a second wave frame), and the marble is an image
-pair. This is why those cells render grey and "interlaced" when drawn one
-descriptor at a time. The grouping is **not** a simple "pair every two cells",
-though: the marble bank interleaves image cells with mask/shadow cells, so naive
-pairing scrambles it. The correct cell→object grouping comes from the Track
-segment's animation scripts (the cell-pointer lists), which is the next decode.
-
-## 2. The per-course object-placement table
-
-The Track header's field `+4` (`$129FC`) points to a small struct whose first
-field is the **object-placement list**: an array of **3-byte records**, terminated
-by a leading `$FF`:
-
-```
-+0  byte   X   (isometric grid cell; screen seed = X*8+4)
-+1  byte   Y   (isometric grid cell; screen seed = Y*8+4)
-+2  byte   type (object kind, 0..7)
-```
-
-The records are walked two ways. A **proximity query** (`$012600`, and the
-filtered `place_objects $0122AC`) seeds each record's screen position (`$6C4`/`$6C6`),
-runs the isometric transform (`$6718`), and finds the record nearest the marble
-within a radius, storing its `type` at `$6A0` → the marble's `+$1B`. So `type`
-(0–7) is the **terrain/obstacle interaction kind** the marble reacts to (a hole, a
-ramp, a hazard, the goal …), not a free-standing sprite — the static scenery is
-already baked into the `.mlb` tilemap. The animated obstacles and the enemies are
-**actors** (the 3-record array at `$FD2C+$23C`, driven by the Track's animation
-scripts). Decoded straight from the Track files by
-[`extract/cmd/tracks`](extract/cmd/tracks):
-
-| Course | Track | Objects placed |
+| Course | Track | Objects |
 |---|---|---|
 | Practice | `PrcTrack` | 59 |
 | Beginner | `BegTrack` | 79 |
@@ -1085,19 +965,57 @@ scripts). Decoded straight from the Track files by
 | Silly | `SilTrack` | 104 |
 | Ultimate | `UltTrack` | 144 |
 
-What each `type` (0–7) *means* — the marble's reaction at that cell — is decided by
-the marble-physics dispatch on `$6A0` (Part V §3, still to do). The per-type
-object/animation definitions, the enemy actor templates and the animation scripts
-live in the other Track header pointers (`$1ED44` pointer array, `$89C2`, the
-animation table `$FD2C`); the Track even carries a per-course colour table
-(`$DFF180…$DFF192` words, e.g. practy `000 333 444 666 999 BBB DDD 822 C60 CC0`).
-Decoding those tables is the next step — it pins the enemy/marble start data and the
-correct cell→object grouping that fixes the flag/marble render with no guessing.
+**Still open.** What each `type` 0–7 *means* (the marble's reaction), the per-type
+sprite/animation definitions, and the enemy/marble start positions live in the
+other Track header pointers — the animation scripts at `$FD2C`, the pointer tables
+at `$1ED44`/`$89C2`, plus a per-course colour table embedded in the module.
+Decoding those is the next step; the engine side that consumes them is Part V.
 
-## 2. Physics, controls, scoring
+---
 
-*To follow.* The marble's physics and controls, the six courses and their
-hazards and enemies, the timer, scoring and progression.
+# Part V — Game mechanics
+
+## 1. The object/actor system
+
+The moving things in a course — the goal flag, the enemies and the
+marble-munchers — are **actors**, fed by the per-course `*Track` data (Part IV §5).
+Each frame `actor_update $01D3B2` walks an array of **20-byte actor records**:
+
+```
++0  long   pointer to the current sprite cell to draw
++4  long   animation-script pointer (8-byte entries: cell ptr + timing,
+           $FFFFFFFF-terminated → loop); advanced when the frame timer expires
++8  word   frame timer
++A  word   x position
++C  word   y position (biased by the scroll offset $D30C)
++E/+10     animation / wrap state
+```
+
+A cell is grouped into an animation by its **script** (a cell-pointer list in the
+Track segment, selected per actor state from `$FD2C`), and the actor carries the
+**position**; frame durations are randomised through the engine RNG (`$8F96`).
+
+**Drawing.** There are **no hardware sprites** — `$DFF0A0–$DFF0DC` are never
+touched, everything is blitted. The playfield is **4 bitplanes**, so every object
+is 16-colour: `blit_object $011D1C` loops the screen's plane-pointer table for
+**four planes**, consuming four consecutive one-plane blocks from the cell source,
+and `draw_object_wrap $0104C4` adds the vertical scroll wraparound (two blits
+across the 512-px seam). Because each `.ilb` descriptor cell stores only two
+planes, a 16-colour object spans **two consecutive cells** — the cell→object
+grouping the obstacle render still needs (Part IV §4).
+
+## 2. Terrain interaction
+
+The placement records (Part IV §5) are the marble's **terrain map**. A proximity
+query (`$012600` / `place_objects $0122AC`) finds the record nearest the marble,
+isometric-transforms it (`$6718`), and stores its `type` at `$6A0` → the marble's
+`+$1B`; the marble physics then reacts to that `type` (a hole, a ramp, a hazard,
+the goal). Naming each `type` 0–7 is the open decode.
+
+## 3. Physics, controls, scoring
+
+*To follow.* The marble's physics and controls, the timer, scoring and
+progression.
 
 ---
 

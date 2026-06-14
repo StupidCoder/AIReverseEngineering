@@ -6,7 +6,7 @@
 # NO SYMBOL table, so every routine name below is derived from behaviour.
 # Addresses are in the flat relocated image (base $0).
 # Reversed 2026-06-13 — focus so far: the C runtime, the asset-load path, and the
-# .ilb/.vlb/.mlb sprite-bank codec (Marble_Madness.md Part IV §3).
+# .ilb/.vlb/.mlb codec (Marble_Madness.md Part IV §3 tile map, §4 obstacles).
 #
 # Regenerate (from repo root; .adf not committed):
 #   go run "./Marble Madness (Amiga)/extract/cmd/decode" \
@@ -42,7 +42,7 @@
 0034AE  s_ilb_names      packed ".ilb" filename strings ("Practy.ilb" … "Silly.ilb").
 0034EE  t_ilb_names      table of 6 pointers to the .ilb filename strings, indexed by g_course.
 
-# --- the sprite/level-bank loader and codec (Part IV §3) ---
+# --- the sprite/level-bank loader and codec (Part IV §3 tile map, §4 obstacles) ---
 0080B4  ilb_load         load an .ilb/.vlb sprite bank for the current course: index a buffer table, read+unpack the WHOLE file (bank_read_unpack — one ByteRun1 stream), then walk the bank's descriptors IN the unpacked buffer at buf+2, stride $14=20. Each 20-byte descriptor: +0 type byte (1=stored cell, 0=composited), +1 flag byte (bit0 = process), +2 width in 16-px words, +4 height in rows, +6 one-plane byte size (=w*2*h), +8 source offset (relocated +buf), +$C dest cell ptr (allocated from buffer slack or relocated), +$10 aux ptr (relocated). Cells' source pixel data is contiguous after the descriptor array; plane count = source span / +6 (2 for small objects, 4 for scenery). Composites type-0 cells via composite_planes.
 007F38  mlb_load         load an .mlb level module (different container: flag $01 + a 5-entry offset-table header) through the SAME bank_read_unpack path, so it shares the ByteRun1 codec.
 007E4E  bank_read_unpack file loader: dos_open(name, MODE_OLDFILE) -> dos_read into the buffer -> dos_close; then, if the global flag $8351 is set, move the loaded (packed) data to the high end of the buffer and ByteRun1-decompress it in place (unpack_byterun1) back to the start. Returns the unpacked length.

@@ -102,6 +102,20 @@
 #   added to the marble velocity (in the $CCA-reading physics; other velocity ADDs at
 #   $013338 = object/enemy attraction toward obj+$78, $0167CA = a $168F8 directional
 #   push -- not yet isolated as the slope force).
+# The full marble per-frame velocity chain, traced (no assumptions):
+#   $013C38 save_prev_state (stores prev tile pos obj+$32/$34, prev z obj+$2A, prev
+#     terrain obj+$1D) -> NOT velocity.
+#   marble_input $12F8C  -> input ADD to velocity ($0130DA/$0130E0), then
+#   $14E7E -> $14D28 speed_cap_and_roll: computes speed (|vY|+3/8*|vX|), advances the
+#     roll anim/sound (obj+$D6, table $201A, $A5F0), and CLAMPS velocity to a max
+#     speed ($40000/$50000) by scaling vX/vY at $014E62/$014E6E -> friction, NOT slope.
+#   surface build: course_init/$E6B2 -> build_surface $DEBC -> sub_00E158 -> $CCA grid.
+016900  surface_interaction  per-object pass (called from object_draw $150F8) that is
+#   THE surface->velocity step. Reads the object's velocity (obj+0->-$1E, obj+4->-$22)
+#   and the $CCA surface (a4=$CCA), dispatches on the surface-cell state $CCA+$1F via a
+#   ~50-case jump table ($169FC), and modifies the velocity per case (e.g. $0167CA adds
+#   a $168F8 8-direction force). The marble's slope/collision response lives here; the
+#   exact slope case (vs wall/hole/edge) is the last thing to isolate.
 00E944  iso_to_cell      take the iso-projected SCREEN position ($6C4,$6C6) and derive the cell coordinates the region map / terrain_lookup use: $6CA = $6C4>>3, $6CC = $6C6>>3 (8-px iso cell), $6D2 = $6C4&7, $6D4 = $6C6&7 (sub-cell), $6D6 = 1 if $6D2<=$6D4 else 0 (which DIAGONAL HALF of the cell -> matches the iso diamond / ramp-edge split). So the region records are in iso-screen-cell space; each record's |byte0|,|byte1| is a start cell and the sign of byte0/byte1 is its diagonal direction. For practy all 10 boundaries are PARALLEL diagonals = a ladder of terraces; $FF-sided ones are the fall-off edges. OPEN: exact projection scale/offset to overlay them on the course art pixel-accurately.
 019390  trackball_decode read the mouse/TRACKBALL via JOY0DAT/JOY1DAT ($DFF00A/$DFF00C), per player (d5); decode the Amiga quadrature (EOR adjacent counter bits for direction, +/-$20 per step) into an X/Y delta. (CIA fire buttons read at $BFE001 / sub_018F90.) The delta is the marble's roll force.
 0192EC  control_update   per-player loop: trackball_decode then apply each player's delta to the marble via $18FCC, accumulating/scaling it into the roll-force accumulators $195EE/$195EA. The marble is a 3-D point mass: position (x,y,z) at obj+$C/+$10/+$14, velocity (vx,vy,vz) at obj+0/+4/+8, integrated each frame by object_draw $14EF0 (pos += velocity) then iso-projected by set_draw_pos $E872.

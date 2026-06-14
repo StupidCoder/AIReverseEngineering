@@ -161,8 +161,10 @@ Plus shared assets: `marbdat` / `marbdat.vlb` (the marble), and `birdink.vlb`
 and `ooze.vlb` (the creatures). The suffix conventions: `.ilb` is the per-course
 **sprite bank** (its container is decoded in Part IV §3); the rest are read off
 the names and sizes and stay **provisional** until Part IV decodes them — `.mlb`
-course/level data, `.vlb` vector or obstacle ("`obsc`") graphics, `*Snd` sound
-effects, and `*Track` music.
+course/level data, `.vlb` vector or obstacle ("`obsc`") graphics, and `*Snd` sound
+effects. (`*Track` turns out **not** to be music but the per-course **level/object
+layout** — actor placements and sprite-animation scripts, `LoadSeg`'d at course
+init; see Part V.)
 
 **Compression and encryption.** Several encodings appear on the disk, decoded in
 this writeup where possible. The two executables that matter most —
@@ -999,6 +1001,59 @@ OR-compositing precisely is the last step to per-frame-perfect sprites.
 ---
 
 # Part V — Game mechanics
+
+## 1. The object/actor system and the `*Track` level files
+
+The moving things in a course — the goal flag, enemies, the marble-munchers, the
+animated obstacles — are driven by an **actor system** in the engine, fed by the
+per-course **`*Track` file**. `*Track` is **not** music (that is `*Snd`); it is the
+**level/object layout**: where each object starts and how it animates.
+
+**Loading (`load_track_data $003176`).** At course init the engine indexes a
+6-entry table `t_track_names` (`$353C`, keyed by the course global `$5D6`) holding
+the names `PrcTrack`/`BegTrack`/`IntTrack`/`AerTrack`/`SilTrack`/`UltTrack`,
+**`LoadSeg`s** the file (`dos.library` −150, via `$8CF0`), and stores the seglist
+at `$3554`. The loaded segment opens with a header of **ten longword pointers**
+(seg `+0 … +$24`) that the engine fans out to the actor-system globals — notably
+`+$14 → $FD2C`, the **animation-script table**.
+
+**Actors (`actor_update $01D3B2`).** Each frame the engine walks an array of
+**20-byte actor records**:
+
+```
++0  long   pointer to the current sprite CELL to draw
++4  long   animation-script pointer (8-byte entries: cell ptr + timing,
+           $FFFFFFFF-terminated → loop); advanced when the frame timer expires
++8  word   frame timer
++A  word   x position
++C  word   y position (biased by the scroll offset $D30C)
++E/+10     animation / wrap state
+```
+
+So a cell is grouped into an animation by the **script** (a list of cell pointers
+in the Track segment), and the actor carries the **position**. Frame durations are
+randomised through the engine RNG (`$8F96`).
+
+**Drawing (`draw_object_wrap $0104C4` → `blit_object $011D1C`).** There are **no
+hardware sprites** (the program never touches `$DFF0A0–$DFF0DC`); everything is
+blitted. The playfield is **4 bitplanes**, so every on-screen object is 16-colour.
+`blit_object` reads the cell's width/source from its descriptor and loops the
+screen bitmap's plane-pointer table for **four planes**, advancing the source by
+one plane-size each step — i.e. it consumes **four consecutive one-plane blocks**
+from the cell source. `draw_object_wrap` adds vertical wraparound for the 512-tall
+scroll buffer (two blits across the seam).
+
+**Consequence for the sprite banks (corrects Part IV §3 rendering).** Because the
+blit pulls four planes and each `.ilb`/`.vlb` descriptor cell physically stores
+only two, a 16-colour object is built from **two consecutive 2-plane cells** — the
+goal flag is cells 0+1 (and 2+3 = a second wave frame), and the marble is an image
+pair. This is why those cells render grey and "interlaced" when drawn one
+descriptor at a time. The grouping is **not** a simple "pair every two cells",
+though: the marble bank interleaves image cells with mask/shadow cells, so naive
+pairing scrambles it. The correct cell→object grouping comes from the Track
+segment's animation scripts (the cell-pointer lists), which is the next decode.
+
+## 2. Physics, controls, scoring
 
 *To follow.* The marble's physics and controls, the six courses and their
 hazards and enemies, the timer, scoring and progression.

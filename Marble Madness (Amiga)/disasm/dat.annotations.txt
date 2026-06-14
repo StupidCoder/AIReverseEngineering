@@ -60,3 +60,22 @@
 # ramp, 7-15 = per-course object colours). Confirmed by reading $DFF180 live under
 # FS-UAE (= practy.mlb+0x17 byte-for-byte). The engine also programs the blitter
 # ($DFF040-$DFF066) and DMACON ($DFF096) directly and reads JOYxDAT for input.
+
+# --- the object / actor (sprite-animation) system (Part V) ---
+# The .ilb/.vlb cells are drawn as BLITTER objects (no hardware sprites: no
+# $DFF0A0-$DFF0DC anywhere). The playfield is 4 bitplanes, so each on-screen object
+# is 16-colour = 4 planes. A 4-plane object is built from TWO consecutive 2-plane
+# descriptor cells (e.g. the goal flag = cells 0+1; the marble = an image pair),
+# while the composited scenery cells (+0=00) already hold 4 planes in one cell.
+011D1C  blit_object      blit one object into the 4-plane playfield. Arg $8(a6) = a cell descriptor (the unpacked-.ilb 20-byte record); $E/$12/$16/$1A = x/screen-offset/word-x/y. Reads $2(a0)=width words, $6(a2)=one-plane size, $8(a0)=source. Loops over the screen bitmap's plane-pointer table at $7B30+8 for FOUR planes ($011E4C ADDA.w #$10 = 4 longs), advancing the source by one-plane-size each plane -> reads 4 sequential one-plane blocks from the cell source = 2 descriptor cells. Optional cookie-cut mask path when desc+1 bit0 set and desc+$C (mask) != 0 (minterm $FCA), else plain copy (minterm $5CC).
+0104C4  draw_object_wrap draw an object at (x,y) with vertical wraparound: clips to the $200 (512) tall scroll buffer and calls blit_object once or twice (top/bottom halves) so objects straddling the scroll seam render whole. Reads scroll offset via $7B28.
+01D3B2  actor_update     the per-frame actor update+draw loop. Walks an array of 20-byte actor records (stride $14): +0 = pointer to the current sprite CELL to draw (passed to draw_object_wrap), +4 = animation-script pointer (8-byte entries: cell ptr + timing; advanced when the +8 frame timer expires, $FFFFFFFF-terminated -> loop), +8 = frame timer, +A/+C = x/y position (y biased by scroll $D30C), +E/+10 = anim/wrap state. Pulls anim scripts from the per-course Track blob via $FD2C (e.g. $280(a0)/$284(a0)); per-actor sub-records live at $18A6 (stride $10). Frame durations randomised via rng $8F96.
+
+# --- per-course course/level setup (loads the Track "level layout" file) ---
+003286  course_init      (re)initialise the current course: free old per-course data (sub_003204), then mlb_load the course .mlb (t_mlb_names $3496) and load the rest of the per-course assets, all indexed by g_course $5D6.
+003176  load_track_data  load the per-course Track file: index t_track_names $353C by g_course, LoadSeg it via $8CF0, store the seglist at $3554, then distribute the loaded segment's header pointers (10 longs at seg+0..+$24) to the actor-system globals: +0->$9A6, +4->$129FC, +8->$12F74, +$C->$1ED44, +$10->$89C2, +$14->$FD2C (animation scripts), +$18->$19CD0, +$1C->$1ABE0, +$20->$1BE48, +$24->$1D334.
+003204  free_track_data  free the Track seglist ($3554) and null all the actor-system globals it populated.
+0353C   t_track_names    table of 6 pointers (indexed by g_course) to the Track filenames at $3506 ("PrcTrack","BegTrack","IntTrack","AerTrack","SilTrack","UltTrack"). NB: *Track is the per-course LEVEL/OBJECT LAYOUT data (actor placements + animation scripts), NOT music — music/SFX is the separate *Snd files.
+03554   g_trackseg       (global) seglist BPTR of the currently loaded course Track file (the per-course object/actor data blob).
+00FD2C  g_animscripts    (global) pointer into the loaded Track segment to its animation-script table (= Track seg header field +$14); the actor loop reads cell-animation scripts from here.
+008CF0  loadseg_file     LoadSeg(name) wrapper (dos.library -$96 via $24814) + return the first seg's data pointer (seglist walk $8CC0). Used to load the Track files.

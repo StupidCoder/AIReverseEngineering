@@ -1053,6 +1053,37 @@ though: the marble bank interleaves image cells with mask/shadow cells, so naive
 pairing scrambles it. The correct cell→object grouping comes from the Track
 segment's animation scripts (the cell-pointer lists), which is the next decode.
 
+## 2. The per-course object-placement table
+
+The Track header's field `+4` (`$129FC`) points to a small struct whose first
+field is the **object-placement list**: an array of **3-byte records**, terminated
+by a leading `$FF`:
+
+```
++0  byte   X   (isometric grid cell; screen seed = X*8+4)
++1  byte   Y   (isometric grid cell; screen seed = Y*8+4)
++2  byte   type (object kind, 0..7)
+```
+
+The consumer (`place_objects $0122AC`) walks the list, filters by `type`, seeds the
+screen position (`$6C4`/`$6C6`) and runs the isometric transform (`$6718`). Decoded
+straight from the Track files by [`extract/cmd/tracks`](extract/cmd/tracks):
+
+| Course | Track | Objects placed |
+|---|---|---|
+| Practice | `PrcTrack` | 59 |
+| Beginner | `BegTrack` | 79 |
+| Intermediate | `IntTrack` | 87 |
+| Aerial | `AerTrack` | 159 |
+| Silly | `SilTrack` | 104 |
+| Ultimate | `UltTrack` | 144 |
+
+What each `type` (0–7) *is* — which sprite/animation and behaviour, including the
+marble's start cell and the enemies — is held in the other Track header pointers
+(the per-type object/animation definitions, e.g. the animation table at `$FD2C`).
+Mapping `type` → object is the next decode; it will also pin the correct
+cell→object grouping that fixes the flag/marble render with no guessing.
+
 ## 2. Physics, controls, scoring
 
 *To follow.* The marble's physics and controls, the six courses and their

@@ -79,3 +79,14 @@
 03554   g_trackseg       (global) seglist BPTR of the currently loaded course Track file (the per-course object/actor data blob).
 00FD2C  g_animscripts    (global) pointer into the loaded Track segment to its animation-script table (= Track seg header field +$14); the actor loop reads cell-animation scripts from here.
 008CF0  loadseg_file     LoadSeg(name) wrapper (dos.library -$96 via $24814) + return the first seg's data pointer (seglist walk $8CC0). Used to load the Track files.
+
+# --- the per-course object PLACEMENT table (inside the Track segment) ---
+# Track header field +4 -> $129FC = a small struct {+0 = main placement list,
+# +4/+8 = a secondary list}. The placement list is an array of 3-BYTE RECORDS
+# [X][Y][type] terminated by a leading $FF. The engine places object kind `type`
+# (0..7) at the isometric grid cell (X,Y); the screen seed is X*8+4 / Y*8+4
+# ($6C4/$6C6) before the isometric transform ($6718). Decoded per course by
+# extract/cmd/tracks: practy 59, beginr 79, interm 87, aerial 159, silly 104,
+# ultima 144 objects.
+000690  g_placement      (global) the Track placement struct pointer (= $129FC); +0 = the [X][Y][type] object-placement list, $FF-terminated.
+0122AC  place_objects    walk the placement list ($129FC->+0), select records whose type byte (+2) matches the wanted kind ($1B of the request), seed X*8+4/Y*8+4 ($6C4/$6C6) and place/spawn the object (isometric transform $6718). The other Track header pointers ($12F74/$1ED44/$89C2/$19CD0/$1ABE0/$1BE48 and the anim table $FD2C) hold the per-type object/animation definitions — the type->sprite mapping is the next decode.

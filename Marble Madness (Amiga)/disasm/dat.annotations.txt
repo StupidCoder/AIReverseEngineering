@@ -135,10 +135,19 @@
 #   op16 MOVE ($1002E): each frame +$C += region.vX(+0), +$10 += region.vY(+4) -> the ref
 #     point DRIFTS = a MOVING slope/seesaw/sliding wall.
 #   op2 ($1007A): set +$1C/+$23/+$1A=2 + sound = state-change keyframe.
-#   So the "downhill reference data" = a per-region KEYFRAME STREAM (from the Track anim-
-#   script table $FD2C). Fixed-point <<19 matches the marble position scale so sub_016900
-#   subtracts them directly. CHAIN CLOSED: Track anim-script -> $FD68 keyframe -> region
-#   +$C/+$10 -> sub_016900 slope force -> marble velocity. OPEN: full 19-opcode vocabulary.
+#   So a scripted region's +$C/+$10 = a KEYFRAME STREAM (from the Track anim-script table
+#   $FD2C). Fixed-point <<19 matches the marble position scale so sub_016900 subtracts
+#   directly. OPEN: full 19-opcode vocabulary.
+# DATA CHECK (PrcTrack decoded): the practice course has TWO terrain structures:
+#   (1) $9A6 descriptor (Track header+0) = 66 STATIC slope records (8B each: 7x7 blocks,
+#       dir 0/4 = the checkerboard diagonals, descending baseHeight) -> build_region mesh.
+#       NO script, NO animation. THESE are the checkerboard slopes the player rolls down.
+#   (2) Track header+$14 anim-script list = only 13 DYNAMIC regions, codes 5/17/26-31
+#       (triggers / holes / start-finish / ball-catcher), NONE slope codes 11/13.
+#   So region_script $FD68 drives only the dynamic regions; static slopes are NOT scripted.
+#   OPEN (re-trace needed): how the 66-record corner-height MESH is sampled into the per-
+#   frame slope force (sub_016900's code-11/13 path is fed by region +$C/+$10, not the
+#   mesh; codes 11/13 never appear in the practice scripts).
 00F8FC  region_activate  per-frame pass over the 25 $CCA region structs (a4=$CCA, +=$56
 #   to a3=$CCA+$866). For each valid region (+$18) whose grid key +$52/+$54 brackets the
 #   marble tile, calls region_update $F96A to (de)activate it and run its enter/exit

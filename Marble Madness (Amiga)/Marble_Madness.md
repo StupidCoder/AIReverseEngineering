@@ -1297,20 +1297,46 @@ fills them. They are written by `region_script $FD68`, a per-region interpreter:
 | **16** (move) | every frame `+$C += region.vX (+0)`, `+$10 += region.vY (+4)` — the reference point **drifts**, i.e. a *moving* slope/seesaw/scrolling wall. |
 | **2** | sets `+$1C`/`+$23`/`+$1A`, plays a sound — a state-change keyframe. |
 
-So the long-sought "downhill reference data" is a **keyframe stream per region**:
-opcode 0 sets the ref point `(x,y,z)` as `word<<19/<<16` fixed-point plus a terrain code
-and a frame count; opcode 16 advances it by a velocity; others trigger sounds/state. The
-fixed-point `<<19` matches the marble's own position scale, so `sub_016900` can subtract
-them directly. This is exactly how Marble Madness animates its slopes, seesaws, sliding
-walls and pulsing hazards — and it closes the chain end to end: **Track anim-script →
-`region_script $FD68` keyframe → region `+$C/+$10` ref point → `sub_016900` slope
-force → marble velocity.**
+So a scripted region's `+$C/+$10` is a **keyframe stream**: opcode 0 sets the ref point
+`(x,y,z)` plus a terrain code and a frame count; opcode 16 advances it by a velocity;
+others trigger sounds/state. The fixed-point `<<19` matches the marble's own position
+scale, so `sub_016900` subtracts them directly.
 
-So "downhill" is a real per-region slope field: the **`$9A6` descriptor** lists
-rectangular regions with a base height and a 3-bit slope direction; `build_surface`
-expands them into the **`$CCA` region structs**; and `sub_016900` accelerates the
-marble toward each region's reference point. The visual `.mlb` ramps are tiles laid
-out to match this hidden field.
+### Static slopes are NOT scripted — the practice-course data
+
+Decoding `PrcTrack` settles which structure does what (and corrects an earlier
+over-generalisation). The course has **two independent terrain structures**:
+
+1. **The `$9A6` descriptor (Track header `+0`) — the static slope field.** Practice has
+   **66 region records** (`$9A6+$1A`), each an 8-byte `[x0,y0,xSize,ySize,baseHeight,
+   edgeShape,dir]`. They are **7×7 blocks** with slope direction `dir`=4 or 0 (the two
+   checkerboard diagonals) and steadily descending base heights — *exactly* the
+   checkerboard of slopes the course shows. These carry **no script and no animation**;
+   `build_region $E158` rasterises them once into the corner-height mesh at load.
+
+2. **The Track anim-script list (header `+$14`) — the dynamic regions.** Practice has
+   only **13** of these, and their terrain codes are 5/17/26–31 — all **triggers and
+   special features** (the rail-guarded holes, the start/finish zones, the ball-catcher),
+   *none* of them slope codes (11/13). These are the regions `region_script $FD68`
+   animates.
+
+So the answer to "is a static slope a one-frame animation?" is **no** — a static slope
+is a plain geometric record in the `$9A6` table, baked into the height mesh; scripts
+drive only the handful of dynamic/interactive regions. The `region_script` mechanism
+above is real but applies to those dynamic regions, not the checkerboard.
+
+> **Open:** this means the *force path for static slopes* is still to be re-traced. The
+> proven `sub_016900` slope force (codes 11/13, toward a region `+$C/+$10`) is fed by the
+> ≤25 dynamic/contact region structs — but the 66 static records live in the corner-height
+> mesh, and codes 11/13 never appear in the practice scripts. How the mesh's local
+> gradient is sampled into the slope force each frame is the next item (the earlier claim
+> that "`build_surface` expands `$9A6` into the `$CCA` region structs that `sub_016900`
+> reads" conflated the height mesh with the 86-byte region structs).
+
+So "downhill" is a real slope field: the **`$9A6` descriptor** lists 66 rectangular
+regions with a base height and a 3-bit slope direction, which `build_region` bakes into
+the `$CCA` corner-height mesh. The visual `.mlb` ramps are tiles laid out to match this
+hidden field. (How that mesh drives the per-frame force is the open item above.)
 
 ### Falling off — death
 

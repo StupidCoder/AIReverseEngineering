@@ -336,7 +336,7 @@ const (
 	ssaa    = 3    // supersample factor
 	wSX     = 13.0 // iso half-width
 	wSY     = 6.5  // iso half-height
-	wZScale = 1.74 // height scale (≈ the tilemap's vertical proportions)
+	wZScale = 1.566 // height scale (pixel-matched to the tilemap: a slope 32 px tall in the tilemap)
 	wPitDrop = 30.0
 	spawnStem = 20 // marker pin height (final px)
 	spawnR    = 5  // marker head radius (final px)

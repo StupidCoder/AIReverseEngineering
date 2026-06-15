@@ -31,6 +31,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"image"
 	"image/color"
@@ -284,15 +285,17 @@ func render(field map[[2]int]cell) *image.RGBA {
 }
 
 func main() {
-	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: regions <disk.adf> <outdir>")
+	flag.Float64Var(&wZScale, "z", wZScale, "wireframe height scale (0 = flat top-down iso)")
+	flag.Parse()
+	if flag.NArg() != 2 {
+		fmt.Fprintln(os.Stderr, "usage: regions [-z scale] <disk.adf> <outdir>")
 		os.Exit(2)
 	}
-	img, err := os.ReadFile(os.Args[1])
+	img, err := os.ReadFile(flag.Arg(0))
 	chk(err)
 	vol, err := adf.Open(img)
 	chk(err)
-	outdir := os.Args[2]
+	outdir := flag.Arg(1)
 	chk(os.MkdirAll(outdir, 0o755))
 
 	paths := map[string]string{}
@@ -336,12 +339,15 @@ const (
 	ssaa    = 3    // supersample factor
 	wSX     = 13.0 // iso half-width
 	wSY     = 6.5  // iso half-height
-	wZScale = 1.566 // height scale (pixel-matched to the tilemap: a slope 32 px tall in the tilemap)
 	wPitDrop = 30.0
 	spawnStem = 20 // marker pin height (final px)
 	spawnR    = 5  // marker head radius (final px)
 	spawnPad  = spawnStem + spawnR + 4 // extra top margin for the pins
 )
+
+// wZScale is the wireframe height scale, pixel-matched to the tilemap (a slope 32 px
+// tall in the tilemap). Override with -z; -z 0 gives a flat top-down iso map.
+var wZScale = 1.566
 
 // parseSpawns reads a creature-spawn list (Track header +$18 or +$20): the global's
 // pointer -> the list -> 8-byte [X][Y][animPtr][type] records, $FF-terminated.

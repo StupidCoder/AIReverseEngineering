@@ -3245,7 +3245,7 @@
 1E78  CD 12 06    CALL $0612
 1E7B  C9          RET
 
-; ==== sub_1E7C (5 callers) ====
+; ==== nt_buf_init  $1E7C  (5 callers) — point the name-table build buffer at RAM $D000 ($D236 = $D000). ====
 1E7C  FD CB 00 86 RES 0,(IY+0)
 1E80  CD 27 03    CALL $0327
 1E83  21 00 D0    LD HL,$D000
@@ -3287,7 +3287,7 @@
 1EBE  10 EC       DJNZ $1EAC
 1EC0  C9          RET
 
-; ==== sub_1EC1 (4 callers) ====
+; ==== nt_draw_rows  $1EC1  (4 callers) — build the screen's name table procedurally: per row, index the offset table $1F14 by ($D213-L)>>2 to pick a layout run, then CALL nt_writer $2F07 to place its tiles into the $D000 buffer; advance the dest $D213. (So screens like the SEGA logo have NO stored tilemap — it is composed in code from layout tables $1F14/$1F27/$1F39 then DMA'd to VRAM.) ====
 1EC1  D5          PUSH DE
 1EC2  C5          PUSH BC
 1EC3  3A 13 D2    LD A,($D213)
@@ -4443,7 +4443,7 @@
 2EF4  .byte 54 D2 A7 ED 42 DD 4E 0F DD 46 10 79 B0 C4 07 2F ; T...B.N..F.y.../
 2F04  .byte E1 C1 C9                                        ; ...
 
-; ==== sub_2F07 (7 callers) ====
+; ==== nt_writer  $2F07  (7 callers) — write a run of name-table entries into the $D000 build buffer from a layout source (BC): tile bytes with $FE = skip/transparent and $FF = end-of-run markers; bounds-checked against the buffer. ====
 2F07  7C          LD A,H
 2F08  A7          AND A
 2F09  C0          RET NZ

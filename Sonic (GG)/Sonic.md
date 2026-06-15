@@ -481,12 +481,22 @@ the logo exactly:
 ![SEGA logo, decompressed from bank 15 and decoded with palette $12](rendered/sega.tiles.png)
 
 This is the end-to-end proof that the `$0406` decompressor, the 4-bitplane tile
-decode and the 12-bit palette are all correct against real data. (The logo's tiles
-happen to sit in screen order, so the raw tile sheet already reads as the logo;
-screens whose name table is non-trivial will be composed with `RenderNameTable`.)
-The game's **title screen** proper is a later screen loaded by the same mechanism,
-and the **level** tiles/maps use the same decompressor — so the path from here to
-rendering any screen is now just *finding* each screen's block and palette.
+decode and the 12-bit palette are all correct against real data. **But note what it
+is: the tile *set* (the patterns in VRAM order), not the composed *screen*.** They
+coincide here only because the logo's tiles happen to sit in screen order. The logo's
+name table is not stored at all — it is **built procedurally**: `$1E7C` points a
+build buffer at RAM `$D000`, and `$1EC1`/`$2F07` place tiles into it from small layout
+tables (e.g. `$1F27`, with `$FE`/`$FF` as skip/end markers) before it is DMA'd to
+VRAM. So for this screen there is no tilemap block to load.
+
+A true screen render — composing a real name table over the tiles with
+`RenderNameTable` — wants a screen whose name table *is* stored or decompressed, and
+that is what the **levels** provide (their map is decompressed to RAM and drawn by
+`scroll_draw`). The fully general alternative, which gives the exact screen for any
+case including procedurally-built ones like this logo, is to run the boot on a Z80
+execution core and read back the actual VRAM — the "emulation as oracle" approach used
+for the other games in this repository. Either is the next step; the decompressor and
+the VDP decoders built here are the foundation both rest on.
 
 *Still open.* The sprite (object) tile format, the name-table layout per screen, the
 level map format (decompressed to RAM, drawn by `scroll_draw`), and the object data.

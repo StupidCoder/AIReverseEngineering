@@ -56,6 +56,9 @@
 04FA  bitmask_tab  8 single-bit masks: 01 02 04 08 10 20 40 80 (control-bitmap bit select, indexed i&7).
 1CD7  sega_logo  load the SEGA-logo boot screen (verified by rendering it): RST $20 (bank-3 setup); display OFF; decompress the BG tiles (A=$0C,HL=$FA74 -> normalised bank 15 $7A74 = file $3FA74; header match+$88/lit+$461/count=1024 -> 128 tiles) to VRAM $0000; decompress sprite tiles (A=$04,HL=$F600 -> bank 7 = file $1F600) to VRAM $2000; BG/sprite palette index $12 (the blue logo palette, bank-8 table -> file $23B10); clear the name table $3800 to tile $70; display ON; lay out the logo via the name table ($1E7C/$1E8A/$1F03/$1EC1). The actual game title screen is a LATER screen loaded the same way; loaded compressed tilemaps are a LEVEL feature (decompressed to RAM, drawn by scroll_draw).
 0AA3  palette_fade  cross-fade the CRAM palette toward a target index over 16 steps, interpolating the RAM working palette at $D3BD and applying it each vblank (CALL $0327).
+1E7C  nt_buf_init  point the name-table build buffer at RAM $D000 ($D236 = $D000).
+1EC1  nt_draw_rows  build the screen's name table procedurally: per row, index the offset table $1F14 by ($D213-L)>>2 to pick a layout run, then CALL nt_writer $2F07 to place its tiles into the $D000 buffer; advance the dest $D213. (So screens like the SEGA logo have NO stored tilemap — it is composed in code from layout tables $1F14/$1F27/$1F39 then DMA'd to VRAM.)
+2F07  nt_writer  write a run of name-table entries into the $D000 build buffer from a layout source (BC): tile bytes with $FE = skip/transparent and $FF = end-of-run markers; bounds-checked against the buffer.
 
 # --- RAM landmarks (work RAM $C000-$DFFF; Part II) ---
 # $D21A = VDP reg 1 shadow ; $D22C = BG palette index ; $D22D = sprite palette index

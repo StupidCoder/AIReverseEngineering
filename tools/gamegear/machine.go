@@ -140,30 +140,18 @@ func NewMachine(rom []byte) *Machine {
 	return m
 }
 
-func (m *Machine) bankByte(bank, off int) byte {
-	a := bank*0x4000 + off
-	if a < len(m.rom) {
-		return m.rom[a]
-	}
-	return 0xFF
-}
-
-// Read implements z80.Bus. The first 1 KB is always bank 0 (the Sega mapper fixes
-// it so the interrupt vectors stay reachable); the rest of each ROM window follows
-// its slot register. $C000-$FFFF is the 8 KB work RAM, mirrored.
+// Read implements z80.Bus. ROM addresses go through the shared FileOffset mapping
+// (the first 1 KB is fixed to bank 0; the rest of each window follows its slot
+// register); $C000-$FFFF is the 8 KB work RAM, mirrored.
 func (m *Machine) Read(a uint16) byte {
-	switch {
-	case a < 0x0400:
-		return m.bankByte(0, int(a))
-	case a < 0x4000:
-		return m.bankByte(m.slot[0], int(a))
-	case a < 0x8000:
-		return m.bankByte(m.slot[1], int(a-0x4000))
-	case a < 0xC000:
-		return m.bankByte(m.slot[2], int(a-0x8000))
-	default:
+	off, inRAM := FileOffset(m.slot, a)
+	if inRAM {
 		return m.ram[a&0x1FFF]
 	}
+	if off < len(m.rom) {
+		return m.rom[off]
+	}
+	return 0xFF
 }
 
 // Write implements z80.Bus. Only RAM is writable; writes to $FFFD-$FFFF also set

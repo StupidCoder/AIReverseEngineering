@@ -44,6 +44,7 @@ addresses (16-bit, `$0000`–`$FFFF`) unless a *file offset* is called out; byte
   - [1. The VDP formats](#1-the-vdp-formats)
   - [2. The graphics decompressor](#2-the-graphics-decompressor)
   - [3. First decompressed screen — the SEGA logo](#3-first-decompressed-screen--the-sega-logo)
+  - [4. The exact screen via emulation (the oracle)](#4-the-exact-screen-via-emulation-the-oracle)
 - [Part V — Game mechanics](#part-v--game-mechanics)
 - [Appendix A — Toolchain and reproduction](#appendix-a--toolchain-and-reproduction)
 
@@ -495,11 +496,37 @@ that is what the **levels** provide (their map is decompressed to RAM and drawn 
 `scroll_draw`). The fully general alternative, which gives the exact screen for any
 case including procedurally-built ones like this logo, is to run the boot on a Z80
 execution core and read back the actual VRAM — the "emulation as oracle" approach used
-for the other games in this repository. Either is the next step; the decompressor and
-the VDP decoders built here are the foundation both rest on.
+for the other games in this repository. That is §4.
 
-*Still open.* The sprite (object) tile format, the name-table layout per screen, the
-level map format (decompressed to RAM, drawn by `scroll_draw`), and the object data.
+## 4. The exact screen via emulation (the oracle)
+
+Rather than reconstruct the logo's procedural name table by hand, we let the game
+build it. [`tools/z80`](../../tools/z80) now has an **execution core** (`cpu.go`,
+the runnable counterpart of the decoder) wired, in [`tools/gamegear`](../../tools/gamegear)
+(`machine.go`), to a minimal Game Gear: 8 KB work RAM, the Sega cartridge mapper, and
+just enough of the 315-5124 VDP to capture what the code draws (VRAM, CRAM, the
+registers). It is not a cycle-accurate emulator and renders no pixels itself — it is
+an *oracle*: it runs the real ROM so the boot decompresses tiles, programs CRAM and
+builds the name table exactly as on hardware, then hands the VRAM back to be composed
+by `RenderNameTable`.
+
+[`extract/cmd/segascreen`](extract/cmd/segascreen) does this: it loads the cartridge,
+runs ~60 frames (the logo is built progressively over several vblanks), reads the name
+table from VRAM `$3800` and the palette from CRAM, and composes the screen. The logo
+occupies name-table rows 9–14 (98 non-background cells over the `$70` fill) — the
+**code-built tile map**, not a tile dump. Cropped to the Game Gear's 160×144 window:
+
+![SEGA logo — the exact boot screen, composed from the live name table the boot code built in VRAM](rendered/sega.gg.png)
+
+This differs from the §3 tile-set image in the way that matters: there the patterns
+happened to sit in screen order, so the sheet *looked* like the screen by luck; here
+the pixels are placed by the game's own name-table entries (each carrying its tile
+number, palette select and flip bits), read back after the code ran. The same machine
+will render the title and level screens once the boot reaches them — and, because it
+captures real VRAM, it is the reference any hand-written decoder is checked against.
+
+*Still open.* The sprite (object) tile format, the level map format (decompressed to
+RAM, drawn by `scroll_draw`), and the object data.
 
 # Part V — Game mechanics
 
@@ -512,13 +539,18 @@ structure, rings, scoring and progression.
 
 Static analysis only, with the Z80 toolchain in the shared `tools/` module:
 
-- [`tools/z80`](tools/z80) — a Z80 decoder (`Decode`/`Disassemble`) built on the
-  CPU's regular x/y/z/p/q opcode bit-fields, covering the `CB`/`ED`/`DD`/`FD`
-  prefix pages.
-- [`tools/cmd/disz80`](tools/cmd/disz80) — linear disassembler over a file slice
+- [`tools/z80`](../../tools/z80) — a Z80 decoder (`Decode`/`Disassemble`) built on
+  the CPU's regular x/y/z/p/q opcode bit-fields, covering the `CB`/`ED`/`DD`/`FD`
+  prefix pages, plus an **execution core** (`cpu.go`) for running real code.
+- [`tools/gamegear`](../../tools/gamegear) — the Game Gear hardware: the VDP tile,
+  palette and name-table decoders, and a minimal `Machine` (RAM + Sega mapper + VDP
+  ports) that drives the Z80 core as an emulation oracle (Part IV §4).
+- [`tools/cmd/disz80`](../../tools/cmd/disz80) — linear disassembler over a file slice
   mapped at a Z80 address: `disz80 -off FILEOFF -len N -base ADDR rom.gg`.
-- [`tools/cmd/codetracez80`](tools/cmd/codetracez80) — recursive-descent
+- [`tools/cmd/codetracez80`](../../tools/cmd/codetracez80) — recursive-descent
   disassembler from given entry points: `codetracez80 -load 0 -entry 0000,0038,0066 rom.gg`.
+- [`extract/cmd/segascreen`](extract/cmd/segascreen) — runs the boot on the oracle and
+  composes the exact SEGA logo screen from the live VRAM (Part IV §4).
 
 Reproduce the boot listing in §5:
 

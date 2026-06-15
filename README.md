@@ -65,24 +65,28 @@ AIReverseEngineering/
 ├── tools/                      # shared tooling (module stupidcoder.com/tools)
 │   ├── mos6502/                #   6502 disassembler + executable CPU core (any 6502 platform)
 │   ├── m68k/                   #   Motorola 68000 disassembler + CPU core (any 68k platform)
+│   ├── z80/                    #   Zilog Z80 disassembler + executable CPU core (any Z80 platform)
 │   ├── cmd/dis6502/            #   linear disassembler for a .prg file (6502)
 │   ├── cmd/dis68k/             #   linear disassembler for a raw 68000 blob
+│   ├── cmd/disz80/             #   linear disassembler for a raw Z80 slice
 │   ├── cmd/codetrace6502/      #   recursive-descent disassembler (6502)
 │   ├── cmd/codetrace68k/       #   recursive-descent disassembler (68000)
+│   ├── cmd/codetracez80/       #   recursive-descent disassembler (Z80)
 │   ├── c64/                    #   C64-specific tools
 │   │   ├── tap/                #     TAP container parser + segmentation
 │   │   ├── cbmtape/            #     standard KERNAL ROM tape-format decoder
 │   │   ├── c64/                #     machine model for running hostile loaders
 │   │   ├── gfx/                #     palette, char/sprite/bitmap rendering, lines, PNG/APNG
 │   │   └── cmd/tapdump/        #     pulse histogram + segment listing for a .tap
-│   └── amiga/                  #   Amiga-specific tools
-│       ├── adf/                #     AmigaDOS floppy image (ADF) reader — OFS/FFS
-│       ├── hunk/               #     AmigaDOS hunk loader — relocate to a flat image
-│       ├── iff/                #     IFF ILBM bitmap decoder
-│       ├── icon/               #     Workbench .info icon decoder
-│       ├── cmd/adfdump/        #     list and extract files from an .adf
-│       ├── cmd/amigapng/       #     render an IFF ILBM or .info icon to PNG
-│       └── cmd/hunkload/       #     segment map + flat relocated image of a hunk file
+│   ├── amiga/                  #   Amiga-specific tools
+│   │   ├── adf/                #     AmigaDOS floppy image (ADF) reader — OFS/FFS
+│   │   ├── hunk/               #     AmigaDOS hunk loader — relocate to a flat image
+│   │   ├── iff/                #     IFF ILBM bitmap decoder
+│   │   ├── icon/               #     Workbench .info icon decoder
+│   │   ├── cmd/adfdump/        #     list and extract files from an .adf
+│   │   ├── cmd/amigapng/       #     render an IFF ILBM or .info icon to PNG
+│   │   └── cmd/hunkload/       #     segment map + flat relocated image of a hunk file
+│   └── gamegear/               #   Game Gear VDP decoders + machine model (z80 oracle)
 │
 ├── Elite (C64)/
 │   ├── Elite.tap               # raw tape image
@@ -143,10 +147,13 @@ per-platform subfolder (`c64/`, `amiga/`, …).
 |-------------------|--------------|
 | `mos6502` | One opcode table driving both a `Disassemble` function and an executable `CPU` core (all documented opcodes, binary + BCD) — usable by any 6502 platform. |
 | `m68k` | Motorola 68000 toolkit mirroring `mos6502`: a `Decode`/`Disassemble` disassembler (full documented instruction set, all addressing modes) **and** an instruction-level `CPU` execution core over the same `Bus`/`Step()` interface. The core currently runs a minimal-but-correct opcode subset (MOVE/ALU/shift/branch/jump/DBcc/MOVEM/LINK with proper X/N/Z/V/C flags) and halts on anything not yet implemented, so gaps are explicit. Usable by any 68k platform (Amiga, ST, Genesis, …). |
+| `z80` | Zilog Z80 toolkit mirroring `mos6502`/`m68k`: a `Decode`/`Disassemble` disassembler over the CPU's x/y/z/p/q opcode bit-fields (all `CB`/`ED`/`DD`/`FD` prefix pages, including `DDCB` and the undocumented `IXH`/`IXL`/`SLL`) **and** a practically complete instruction-level `CPU` execution core (block moves, IM-1 interrupts, documented flags) over the same `Bus`/`Step()` interface. Usable by any Z80 platform (Game Gear, Master System, ZX, MSX, …). |
 | `cmd/dis6502` | Linear disassembler for a `.prg` file (2-byte load address + data), optionally over an address range. |
 | `cmd/dis68k` | Linear disassembler for a raw 68000 code blob loaded at a given base address (`-skip` steps past an AmigaDOS hunk header). |
 | `cmd/codetrace6502` | Recursive-descent 6502 disassembler: from given entry points (and seeded jump tables) it follows every branch/jump/call, marks reachable code vs data, lists routines and unresolved indirect jumps — so tables and graphics aren't mis-decoded as instructions. |
 | `cmd/codetrace68k` | The 68000 counterpart of `codetrace6502`, built on `m68k`: same recursive trace over a raw blob loaded at `-base` (`-skip` past a hunk header), reporting routines and unresolved register/indexed jumps. |
+| `cmd/disz80` | Linear disassembler for a raw Z80 code slice mapped at a given address (`-off`/`-len`/`-base`). |
+| `cmd/codetracez80` | The Z80 counterpart of `codetrace6502`, built on `z80`: recursive trace from given entry points over a banked ROM (`-load` selects the resident bank), with an `-annotate` file for naming routines. |
 | `c64/tap` | Parse a TAP v0/v1 image (C64/C16) into a pulse stream; `Segmentize` splits it at pauses. |
 | `c64/cbmtape` | Decode the standard Commodore KERNAL (ROM loader) tape encoding: blocks, headers, and paired header+data files with checksum verification. |
 | `c64/c64` | A minimal C64 machine model — RAM, the `mos6502` CPU, a CIA pulse-feed tape model, a PC-hook registry, a RAM write log and an optional read probe — for *running* a self-modifying loader instead of decoding it, or tracing which game routine touches which memory. Optional standard KERNAL tape hooks included. |
@@ -159,6 +166,7 @@ per-platform subfolder (`c64/`, `amiga/`, …).
 | `amiga/iff` | Decode an IFF `FORM…ILBM` bitmap (planar BODY, ByteRun1/uncompressed, CMAP palette) into a Go image. |
 | `amiga/icon` | Decode a Workbench `.info` icon (DiskObject + planar Image structs) into images, using the standard Workbench palette. |
 | `amiga/cmd/amigapng` | Render an IFF ILBM or a `.info` icon to PNG (auto-detects the format). |
+| `gamegear/gamegear` | Sega Game Gear VDP graphics: the 4-bitplane tile, 12-bit CRAM palette and name-table decoders, plus a minimal `Machine` (8 KB RAM + Sega cartridge mapper + VDP ports) that drives the `z80` core as an *emulation oracle* — run a real ROM, then read back VRAM/CRAM to compose the exact screen the code drew. Usable by any Game Gear (and, for the tiles, Master System) game. |
 
 ## Building and running
 

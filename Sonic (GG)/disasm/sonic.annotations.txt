@@ -130,3 +130,16 @@
 #   camera each frame -> feeds $31BC tile-stream + $3282 scroll-draw = $0130).
 # REMAINING (Part V): the one-time level loader + Sonic's level format (compressed block
 #   map drawn by scroll_draw, block/chunk defs, 3bpp level tiles via $31BC, objects).
+
+# --- the level map: located by the oracle (extract/cmd/leveltrace) ---
+# Drove the GG machine model into Zone 0 (Green Hills Act 1) by pressing Start;
+# rendered real gameplay (rendered/level_greenhills.png). At that point $D2AF = $7B99
+# with bank 4 paged in slot 1, i.e. the ZONE-0 LEVEL MAP lives in BANK 4 (file
+# $10000-$13FFF; the map pointer = file $13B99). Bank 4 is entirely level data (no
+# code, per the entropy scan). The data near the pointer is sparse (sky = $00 runs)
+# tile-index data with LOCALLY repeating tile groups (e.g. `78 79 7C 7D 88 89 8C 8D`
+# twice), but NOT a small global macro-block palette (16-byte groups are ~90%
+# distinct). scroll_draw $3282 copies it as name-table entries. The exact map encoding
+# (column/row order, stride, any block indirection) is the next decode -- now
+# localised to bank 4. (The simplified oracle renders the level but can't drive live
+# scrolling: input registers at $D203 but the player physics don't advance.)

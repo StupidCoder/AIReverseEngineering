@@ -117,6 +117,10 @@ type Machine struct {
 	ram    [0x2000]byte // 8 KB work RAM, mirrored $C000-$FFFF
 	slot   [3]int       // ROM bank mapped into slot 0/1/2 ($0000/$4000/$8000)
 
+	// Injected controller state (active-low, $FF = nothing pressed). Port $00 bit 7 is
+	// Start; port $DC is the D-pad/buttons (the game masks $7F). Set bits low to press.
+	Pad00, PadDC byte
+
 	// VRAM write watchpoint: when WatchHi > WatchLo, every VRAM write whose address
 	// falls in [WatchLo,WatchHi) records the CPU's PC in WatchPCs (a histogram of how
 	// many bytes each routine wrote there). It answers "which code drew this part of
@@ -136,6 +140,7 @@ func (m *Machine) Watch(lo, hi uint16) {
 func NewMachine(rom []byte) *Machine {
 	m := &Machine{rom: rom, nbanks: len(rom) / 0x4000}
 	m.slot = [3]int{0, 1, 2}
+	m.Pad00, m.PadDC = 0xFF, 0xFF // nothing pressed
 	m.CPU = z80.NewCPU(m)
 	return m
 }
@@ -184,6 +189,10 @@ func (m *Machine) In(port uint16) byte {
 		return m.VDP.line
 	case 0x7F:
 		return 0
+	case 0x00:
+		return m.Pad00 // Start = bit 7
+	case 0xDC:
+		return m.PadDC // D-pad / buttons
 	default:
 		return 0xFF
 	}

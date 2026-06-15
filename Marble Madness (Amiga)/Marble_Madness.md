@@ -905,28 +905,34 @@ unpacked buffer:
 
 The cells' pixel data is **contiguous in `+8` order**, so a cell's source span is
 the gap to the next `+8` (or the buffer end), and its **plane count = span ÷ the
-`+6` one-plane size**. The depth therefore **varies per cell**: small markers are 2
-bitplanes (4 colours), while the larger obstacle blocks are 4 bitplanes (16
-colours) — `interm.ilb`, for instance, mixes 16×33×2p markers with 96×64×4p,
-80×64×4p and 48×79×4p blocks. The planes are stored as sequential `+6`-byte blocks
-(confirmed by the compositor `$8026`). [`extract/cmd/sprites`](extract/cmd/sprites)
-unpacks each bank, derives per-cell geometry, and flow-packs the cells into one
-sheet per bank in [`rendered/`](rendered):
+`+6` one-plane size**, and the descriptor's **`+0` type byte** selects the pixel
+encoding. The depth varies per cell: small markers/sprites are 2 bitplanes (4
+colours), the larger obstacle blocks 4 bitplanes (16 colours) — `interm.ilb`, for
+instance, mixes 16×33×2p markers with 96×64×4p, 80×64×4p and 48×79×4p blocks.
 
-![Practice obstacle cells](rendered/practy.ilb.png)
+**Each cell is one complete animation frame** (the encoding, once an open question,
+is resolved). There are two storage layouts, picked by the type byte:
 
-**Open question — cell→object grouping.** The engine draws these obstacles as
-**4-bitplane (16-colour) blitter objects**, and an on-screen object is built from
-**two consecutive 2-plane cells** (the goal flag, for example, is cells 0+1, with a
-second wave frame at 2+3). Drawn one descriptor at a time, those cells come out
-grey and half-depth. Which cells pair, and how the frames sequence into
-animations, is held in the course's `*Track` data (§5) and the engine's actor
-system (Part V) — not yet fully decoded. The extractor currently renders each
-descriptor cell faithfully; the per-object grouping is the open refinement.
+- **type 1 — "stored" free sprites** (the goal flag, marble, creatures): the planes
+  are **row-interleaved** — each pixel row holds all of the cell's bitplanes back to
+  back (`row stride = planes·(w/8)`). Each cell is a standalone frame; cells do **not**
+  combine in pairs. `silly.ilb`'s four cells are the four wave frames of the checkered
+  goal flag (below). *(An earlier guess that a 16-colour object was two stacked 2-plane
+  cells — "the goal flag is cells 0+1" — was wrong; confirmed in-game and by the fixed
+  decode.)*
+- **type 0 — "composited" scenery**: sequential `+6`-byte plane blocks, OR-composited
+  by `$8026` (the larger isometric obstacle blocks).
 
-(The moving creatures and the marble live in separate `.vlb` files, which share
-this container but whose exact role — and what the "V" stands for — is still being
-pinned down; they are deliberately left out here.)
+[`extract/cmd/sprites`](extract/cmd/sprites) branches on the type byte and renders both
+layouts correctly, flow-packing the cells into one sheet per bank in
+[`rendered/`](rendered):
+
+![Silly goal-flag cells — four wave frames](rendered/silly.ilb.png)
+
+The moving creatures and the marble live in separate `.vlb` files (16×N×2p type-1
+sprites) that share this container: `marbdat.vlb` holds the rolling-marble frames plus
+the score/time HUD pop-ups (`250…6000`, `+3 SEC`…), `birdink`/`ooze`/`slink` the
+enemies. How the frames sequence into animations is the actor system's job (Part V).
 
 ## 5. Course layout (`*Track`)
 
@@ -1326,8 +1332,8 @@ render:
     mlb_draw_column() → draw_tile()       # $9910/$99C0 — .mlb tilemap background
     for each object: object_draw()        # $14EF0 — sprites
         actor_update() → draw_object_wrap() → blit_object()   # $1D3B2/$104C4/$11D1C
-            type-0 cell → 4 plane-blocks + cookie-cut mask    (scenery)
-            type-1 cell → row-interleaved 4-plane sprite       (flag/marble/creature)
+            type-0 cell → sequential plane-blocks + cookie-cut mask  (scenery)
+            type-1 cell → row-interleaved planes, one frame/cell     (flag/marble/creature)
 ```
 
 **Still open.** The exact message/signal that ticks the game-state machine once per
@@ -1355,13 +1361,12 @@ Track segment, selected per actor state from `$FD2C`), and the actor carries the
 **position**; frame durations are randomised through the engine RNG (`$8F96`).
 
 **Drawing.** There are **no hardware sprites** — `$DFF0A0–$DFF0DC` are never
-touched, everything is blitted. The playfield is **4 bitplanes**, so every object
-is 16-colour: `blit_object $011D1C` loops the screen's plane-pointer table for
-**four planes**, consuming four consecutive one-plane blocks from the cell source,
-and `draw_object_wrap $0104C4` adds the vertical scroll wraparound (two blits
-across the 512-px seam). Because each `.ilb` descriptor cell stores only two
-planes, a 16-colour object spans **two consecutive cells** — the cell→object
-grouping the obstacle render still needs (Part IV §4).
+touched, everything is blitted. The playfield is **4 bitplanes**; `blit_object
+$011D1C` loops the screen's plane-pointer table and `draw_object_wrap $0104C4` adds
+the vertical scroll wraparound (two blits across the 512-px seam). The free-sprite
+(type-1) cells store their planes **row-interleaved**, and **each cell is a single
+animation frame** (Part IV §3) — they are *not* combined in pairs. The actor's
+animation script (above) selects which cell to draw each frame.
 
 ## 3. Terrain interaction
 

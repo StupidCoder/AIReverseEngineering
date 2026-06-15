@@ -137,9 +137,12 @@ func mlbCourse(up []byte, planes [4]int, tilemap []byte, courseW int) (*image.Pa
 }
 
 // cell is one .ilb/.vlb sprite cell decoded from a 20-byte descriptor: w x h
-// pixels, planes bitplanes stored as sequential cz-byte blocks starting at src in
-// the unpacked buffer (cz = one-plane byte size = (w/8)*h).
-type cell struct{ w, h, planes, cz, src int }
+// pixels, planes bitplanes starting at src in the unpacked buffer (cz = one-plane
+// byte size = (w/8)*h). typ is the descriptor's +0 type byte: type-1 "stored"
+// cells (the free sprites — goal flag, marble, creatures) store their planes
+// ROW-INTERLEAVED (each pixel row holds all planes back to back) and are a single
+// animation frame; type-0 "composited" scenery cells store sequential plane blocks.
+type cell struct{ w, h, planes, cz, src, typ int }
 
 // parseCells reads the count descriptors at buf+2 (stride 20) and derives each
 // cell's plane count from its source span (gap to the next cell, or buffer end).
@@ -157,7 +160,7 @@ func parseCells(buf []byte, count int) []cell {
 		if o+20 > len(buf) {
 			break
 		}
-		ww, h, cz, src := wd(o+2), wd(o+4), wd(o+6), ln(o+8)
+		typ, ww, h, cz, src := int(buf[o]), wd(o+2), wd(o+4), wd(o+6), ln(o+8)
 		if cz <= 0 || src <= 0 || src >= len(buf) {
 			continue
 		}
@@ -173,20 +176,27 @@ func parseCells(buf []byte, count int) []cell {
 		} else if planes > 6 {
 			planes = 6
 		}
-		cs = append(cs, cell{w: ww * 16, h: h, planes: planes, cz: cz, src: src})
+		cs = append(cs, cell{w: ww * 16, h: h, planes: planes, cz: cz, src: src, typ: typ})
 	}
 	return cs
 }
 
-// drawCell blits one cell at (ox,oy). Each plane p is a cz-byte block at
-// src+p*cz; pixel value ORs the planes' bits (low plane = bit 0).
+// drawCell blits one cell at (ox,oy), ORing the planes' bits (low plane = bit 0).
+// type-1 "stored" cells (goal flag, marble, creatures) are ROW-INTERLEAVED: each
+// pixel row holds all planes consecutively (plane stride = bpr, row stride =
+// planes*bpr). type-0 "composited" cells store sequential cz-byte plane blocks.
 func drawCell(img *image.Paletted, buf []byte, c cell, ox, oy int) {
 	bpr := c.w / 8 // bytes per plane row
 	for y := 0; y < c.h; y++ {
 		for x := 0; x < c.w; x++ {
 			var v uint8
 			for p := 0; p < c.planes; p++ {
-				o := c.src + p*c.cz + y*bpr + x/8
+				var o int
+				if c.typ == 1 {
+					o = c.src + y*c.planes*bpr + p*bpr + x/8
+				} else {
+					o = c.src + p*c.cz + y*bpr + x/8
+				}
 				if o >= 0 && o < len(buf) {
 					v |= (buf[o] >> uint(7-x%8) & 1) << uint(p)
 				}

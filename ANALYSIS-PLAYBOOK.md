@@ -28,10 +28,12 @@ unlocks the next:
 | **II — Boot chain** | What runs first, and how does it bring in the rest? | autostart → bootstrap → turbo loader → multi-stage load | bootblock → dos.library → startup-sequence → launcher → loaders |
 | **III — Program architecture** | How does the loaded game decrypt/relocate/initialise itself? | decrypt+relocate, hardware init, IRQ architecture, memory map | multi-stage decrypt, the decryptor, copy protection, static limits |
 | **IV — Graphics & data** | What are the asset formats? | charsets, sprites, bitmaps, maps, compression | IFF ILBM, icons, custom sprite banks, level/sound modules |
-| **V — Game mechanics** | How do the objects behave? | object tables, movement/AI, collisions, scoring | object/region structs, height-field slope physics, the marble state machine, collisions |
+| **V — Game mechanics** | How do the objects behave? | object tables, movement/AI, collisions, scoring | object/actor structs, movement/physics, state machines, collisions, scoring |
 
-Write it up *as you go*, with byte examples and assembly snippets. The writeup is
-the deliverable; the tools are how you earn it.
+The cells name the *medium-typical* form each part tends to take — not a fixed
+checklist, and not the specifics of any one game (those live in the per-game writeups,
+§2–§3). Write it up *as you go*, with byte examples and assembly snippets. The writeup
+is the deliverable; the tools are how you earn it.
 
 ---
 

@@ -338,6 +338,22 @@
 # ($6C4/$6C6) before the isometric transform ($6718). Decoded per course by
 # extract/cmd/tracks: practy 59, beginr 79, interm 87, aerial 159, silly 104,
 # ultima 144 objects.
-000690  g_placement      (global) the Track placement struct pointer (= $129FC); +0 = the [X][Y][type] object-placement list, $FF-terminated.
-0122AC  place_objects    walk the placement list filtered by type byte (+2) == the request's $1B (proximity/picking helper). The placement `type` (0..7) is the marble's TERRAIN/OBSTACLE interaction kind (collision query $012600 finds the nearest record within a radius, isometric-transforms it $6718, and stores type->$6A0 = marble +$1B), NOT a free sprite index — static scenery is in the .mlb tilemap. The marble's reaction per type is the physics dispatch on $6A0 (Part V §3, TODO).
+000690  g_respawn_x      (global) RESPAWN X tile, computed by respawn_pick $1279C/$1288C from the placement table; reposition_marble $1448E does $690<<16 -> marble obj+$C. ($694 = respawn Y -> obj+$10; $6A0 = the picked placement type, $FF = none.)
+0122AC  place_objects    walk the placement list filtered by type byte (+2) == the request's $1B (proximity/picking helper). The placement `type` (beginr uses 0..12) is the marble's REGION/TERRAIN-interaction kind (collision query $012600 finds the nearest record within a radius, isometric-transforms it $6718, and stores type->$6A0 = marble +$1B = which region the marble is in), NOT a free sprite index — static scenery is in the .mlb tilemap. The marble's reaction per type is the physics dispatch on $6A0 (Part V §3, TODO).
+# THE PLACEMENT TABLE IS ALSO THE RESPAWN-ANCHOR MAP (the cyan overlay dots line the fall-off
+# edges). When the marble rolls off an edge it goes airborne and the state-transition routine
+# (case $F(a6)==4 at $14814) enters state 4 FALLING/SETTLING via BSR reposition_marble $1448E.
+01448E  reposition_marble  (a6 arg $8 = marble) JSR respawn_pick $1279C to fill $690/$694,
+#   then $144A0 marble obj+$C = $690<<16, obj+$10 = $694<<16; reset tile coords $6CA/$6CC=$FF;
+#   $E872 set_draw_pos + $EA10 surface_sample -> obj+$14 = the surface Z at the respawn cell.
+01279C  respawn_pick     pick the respawn position from the placement table. Clears $690/$694,
+#   $6A0=$FF; BSR $1288C (primary nearest-type-match). If $6A0 still $FF (none found), FALLBACK
+#   $127CE: walk the whole placement list, take the first record within radius $180 ($15FC8)
+#   whose type (+2) matches the marble's region code, store its (X*8+4,Y*8+4)->$690/$694.
+01288C  nearest_anchor   THE respawn selector: walk the placement list; consider ONLY records
+#   whose type (+2) == marble obj+$1D (the region the marble fell FROM, saved by save_prev_state
+#   $13C38); for each, octagonal distance (via $23EF8) from the marble's PRE-FALL tile obj+$32/
+#   $34 to the record (X,Y); keep the NEAREST within a $300 cap -> $690/$694/$6A0. So you respawn
+#   on the nearest edge anchor of the SAME region you fell from (the correct ledge, not across a
+#   gap). CONFIRMS the user's read: the cyan placement dots are the fall-off-edge respawn points.
 01D3EC  actor_setup      sets up the dynamic actors (enemies / animated obstacles): the 3-record actor array at $FD2C+$23C (stride $14, end +$3C); pulls templates/anim scripts from the Track segment (anim table at $FD2C+$280). Course-gated ($5D6==3 path tests $78E). The type(0..7)->object/anim definition tables are the other Track header pointers ($1ED44 ptr array @+$C, $89C2 @+$10, anim $FD2C @+$14) + a per-course copper-style colour table inside the +$10 block ($DFF180..$DFF192) — decode TODO.

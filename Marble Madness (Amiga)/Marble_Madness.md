@@ -961,15 +961,25 @@ actor-system globals — each one a different structure:
 ```
 +0  byte  X     (isometric grid cell; screen seed = X*8+4)
 +1  byte  Y     (isometric grid cell; screen seed = Y*8+4)
-+2  byte  type  (0..7 — the feature kind)
++2  byte  type  (the region/feature kind; Beginner uses 0..12)
 ```
 
-Each record marks a feature of kind `type` at iso grid cell `(X,Y)`. The engine's
-proximity query (`$012600`) finds the record nearest the marble, isometric-transforms
-it (`$6718`), and writes its `type` to the marble's `+$1B`. So this is the coarse
-**feature/interaction map** — distinct from the slope/wall geometry (the `$9A6` height
-field, Part V §4) and from the moving objects (the actor system, Part V §2). What each
-`type` denotes and exactly how `+$1B` is consumed is still partly open.
+Each record marks a point of kind `type` at iso grid cell `(X,Y)`. The engine's proximity
+query (`$012600`) finds the record nearest the marble and writes its `type` to the marble's
+`+$1B` — so `type` is the **region the marble is currently in**.
+
+**These are the respawn anchors** (confirmed by tracing the fall path — and visible in the
+overlay: the cyan dots line the fall-off edges). When the marble rolls off an edge it goes
+airborne and enters state 4 (FALLING/SETTLING); that transition calls the reposition routine
+`$1448E → $1279C → $1288C`, which **scans the placement table for the record nearest the
+marble's *pre-fall* tile (`obj+$32/$34`) whose `type` matches the region it fell from
+(`obj+$1D`)**, and drops the marble back at that record's `(X,Y)` (`$690/$694 → obj+$C/$10`,
+with the surface Z re-sampled there). Distance is the game's octagonal metric, capped at a
+threshold; a wider fallback pass (`$15FC8`, radius `$180`) catches the rest. So the `type`
+byte partitions the course into regions, and each region carries its own ring of edge
+respawn points — you reappear on the **correct ledge nearest where you fell**, not across a
+gap. (This is *also* the coarse feature/interaction map; it is distinct from the slope/wall
+geometry `$9A6` and the moving objects.) What every `type` value denotes is still partly open.
 
 **Creature spawns** (`+$18` and `+$20`). Two near-identical systems place the course's
 moving creatures as the marble approaches. Each is a list of **8-byte records**:

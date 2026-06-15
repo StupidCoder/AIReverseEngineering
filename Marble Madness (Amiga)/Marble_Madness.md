@@ -1222,23 +1222,42 @@ velocity (the bounce). The table groups as:
 
 ### The marble state machine — `$13E9A`
 
-All of the above runs under a 13-state machine: `marble_state_machine $13E9A` dispatches
-on `obj+$1A` (the marble state, 0..12) through a jump table at `$13F40` (`JMP
-$2(pc,d0.l)`, `CMPI #$C`). The **rolling** state runs input + friction + the
-slope-gradient force + edge collision; the others are the off-edge fall, the hole
-capture, and the dizzy/respawn animations.
+All of the above runs under a **12-state** machine: `marble_state_machine $13E9A`
+dispatches on `obj+$1A` (the marble's state, **0–11**; `CMPI.l #$C` rejects the rest)
+through a jump table at `$13F40` (`JMP $2(pc,d0.l)`). Three states are
+**player-controllable** — they run input (`$12F8C`) and physics (`$14EF0`); the others
+are animation/transition states that only redraw the marble at its current position
+(`$E74C`, no input). `obj+$1A` doubles as the per-surface max-speed selector (`$14E7E`),
+so the state also sets the friction/speed cap.
+
+| St | Handler | Ctrl? | Role — what the handler does |
+|---|---|---|---|
+| **0** | `$141DC` | ● | **Rolling** (normal play): input + physics. If the stun flag `+$DD` is set, hands off to **state 8**. |
+| 1 | `$1427C` | ● | Rolling + a short `+$60/+$61` frame animation that runs down, then → 0. |
+| 2 | `$1436E` | | Animation frame only — advances an animation cursor (`+$64`); no physics. |
+| 3 | `$13FBA` | | **Edge / landing reaction**: plays the sound for the terrain just hit (`+$62`), clears it, → 0. *Entered by the wall/edge handlers (`$16xx/$17xx`).* |
+| 4 | `$14072` | | **Falling / settling**: collision-queries the surface (`$15FC8`); on contact runs the "appear" animation and latches the region, then → 0. |
+| 5 | `$142FC` | ● | Rolling + a `+$60` countdown, then → 0 (a timed variant of state 1). |
+| 6 | `$13F70` | ● | **Course intro**: the entrance run; `+$61` counts down, then velocity is frozen. *Entered at course init (`$3380`).* |
+| 7 | `$1435E` | | Transient: save-state + clear `+$1C` (one-shot). |
+| **8** | `$143FC` | | **Dizzy (stunned)**: plays the swirl animation (`+$DE`), tallies `+$74`, then → 0. *Entered **only** from state 0 on a hard hit / survivable fall — recoverable, **not** death.* |
+| 9 | `$1439A` | | **Spawn / appear**: the marble materialising at start or respawn. *Entered from the spawn routine.* |
+| 10 | `$14100` | | **Hole / region capture**: runs the active region's script (`$FD68`) and sound, then → state 4. *Entered from the slope/region handlers (`$17AFA/$17CDA`).* |
+| 11 | `$143C8` | | Settle onto a scripted region — like state 4, latches the region on contact. |
 
 ### Falling off — death
 
 On **no** terrain (type resolves to `$FF`, `terrain_lookup $012D44`) the off-edge state
 (`$5E4`) fires and the marble falls; hazards and the marble-munchers are other death
-paths. The "dizzy" spin (Part IV §4) is one of the respawn animations.
+paths. A *survivable* hard hit (by another marble) or fall is **not** death — it sets the
+stun flag `+$DD`, and state 0 drops the marble into the **dizzy** spin (state 8 above),
+which plays out and returns to rolling.
 
 ### Still open
 
-Naming all 13 marble states, the full 19-opcode region-script vocabulary (0/2/16
-characterised), the exact 86-byte region-struct layout, and the death/respawn and
-scoring machines.
+The exact triggers for the two timed rolling states (1, 5), the full 19-opcode
+region-script vocabulary (0/2/16 characterised), the exact 86-byte region-struct layout,
+and the scoring machine.
 
 ---
 

@@ -204,7 +204,8 @@
 #   op6  $101EC LOOP-B       1w(count->+$25); top +$2E.    op7 $1020E NEXT-B (2nd dbra).
 #   op8  $100EC IF-MARBLE-ON-REGION 1w arg + LONG target: if a marble (obj $236+i*$F4) has
 #     state +$18==1 and is within 3 tiles of the region ref, JUMP target (else skip). NB this
-#     is NOT what the drawbridge uses (earlier mis-parse); practy region 0 uses it.
+#     is NOT what the drawbridge uses (earlier mis-parse). practy region 0 uses it = the
+#     AUTO-START RAMP (detects the idle marble at the start, grows a ramp to nudge it).
 #   *** CONTROL FLOW (how scripts chain): ***
 #   op9  $10238 JUMP  LONG : PC = target.
 #   op10 $10244 CALL  LONG : PC = target, save return -> +$32 (gosub).   op11 $1025C RETURN.
@@ -221,10 +222,9 @@
 #   STOP +$1C=15 ; op2 SPRITE; op12 LINK $1A4E; op3 STOP +$1C=30 } op5 NEXT-A. = an AUTONOMOUS
 #   timed open/close cycle alternating two linked bridge animations ($1A8A/$1A4E), holding 15
 #   then 30 ticks. NOT marble-triggered. (Marble_Madness.md Part IV.5 has the annotated listing.)
-# FUNNELS (beginr regions 3-7, terr 18/19/20=fall entrances, 21/22=wall exits): each script is
-#   just op0 KEYFRAME(terr) + op3 STOP, all linking the SHARED $1946 sub-script. No per-pair
-#   entrance->exit jump in the script; the hand-off most likely routes through the marble FALL/
-#   reposition path (state 4, reposition_marble $1448E). CONFIRM = OPEN.
+# FUNNELS (beginr regions 3-7): each script is just op0 KEYFRAME(terr) + op3 STOP. The
+#   entrance->exit LINK is NOT in the Track data - it is HARDCODED in the surface_interaction
+#   $16A00 code handlers (see funnel_in_top $17192 etc. below). The terrain code IS the pairing.
 # NB op14 SET-VEL / op16 MOVE (moving slopes/seesaws) are DEFINED but UNUSED by these 6 courses'
 #   top-level region scripts (only keyframe/loop/link/stop/conditional ops appear in the data).
 # DATA CHECK (PrcTrack decoded): the practice course has TWO terrain structures:
@@ -289,6 +289,19 @@
 #   keyframe terr=3, below the 5..59 range) driven by op8/9/10 in a longer script = the
 #   raise/lower mechanism (region-script opcode vocab still OPEN). So the velocity-trace jump-
 #   table classes (fall / wall / proximity / sound) line up exactly with the named features.
+017192  funnel_in_top    the code-18 handler = the TOP funnel ENTRANCE (beginr). When the marble
+#   (a5=$236/$32A) is in the entrance trigger box, TELEPORT it: clear airborne +$36, zero vel
+#   (vX kick $40000), obj+$C = $20C<<16 (X, fallback $204 via a $15FC8 collision test at
+#   $20C,$264 r$70), obj+$10 = $264<<16 (Y) = the EXIT cell ~(65,76); $E872 set_draw_pos + $EA10
+#   resample surface -> obj+$14 Z; state +$1A=3; sound $21D02/$21ADC. So the exit position is
+#   HARDCODED in the handler (the link), not Track data. (Non-marble objects -> $19A14.)
+0172E6  funnel_in_low    the code-19 AND code-20 handler (SHARED) = the LOWER funnel's TWO
+#   ENTRANCES. Same teleport, ONE hardcoded dest obj+$C=$29C<<16 / obj+$10=$2E4<<16 (fallback
+#   $2DC) = the EXIT cell ~(83,92). 2 entrances -> 1 exit precisely because codes 19+20 dispatch
+#   to this one handler with one baked-in destination.
+0173DA  funnel_out_top   the code-21 handler = the TOP funnel EXIT: a bounds-boxed wall ($180AC)
+#   that contains the marble where funnel_in_top drops it (region plotted at cell (67,78)).
+017424  funnel_out_low   the code-22 handler = the LOWER funnel EXIT wall ($180AC) at (84,94).
 016C0C  proximity_trigger  the code-5/26-31 handler (= the GOAL at the 2 flag regions). Inputs
 #   d5=refX-marbleX, d4=refY-marbleY (region ref minus marble). Computes the OCTAGONAL distance
 #   octd = max(|d5|,|d4|)*16 + 3/8*min(...)*... ; if octd < $38 -> set $6A1=$6A2=1 + sound

@@ -1138,11 +1138,31 @@ So the drawbridge is an **autonomous, timed open/close cycle**: it plants a fixe
 keyframe, registers itself as *the* drawbridge, then loops forever between two linked bridge
 animations (`$1A8A` and `$1A4E`) holding 15 and 30 ticks respectively. It is **not**
 marble-triggered (the earlier guess that it used the marble-conditional `op8` was a mis-parse;
-`op8` is actually used by a Practice trigger region). The **funnels** by contrast are trivial
-scripts — each is one `op0` KEYFRAME carrying the fall/wall terrain code plus an `op3` stop,
-all linking a shared `$1946` sub-script; there is **no in-script jump from a funnel entrance to
-its exit**, so that hand-off must route through the marble's fall/reposition path (state 4,
-`reposition_marble $1448E`) — still to be confirmed.
+`op8` is actually used by a Practice trigger region — the **auto-start ramp** that grows out of
+the floor to nudge an idle marble at the start; its growth frames are in `practy.ilb`.)
+
+**The funnels: the entrance→exit link is in the engine, not the Track data.** Each funnel
+region's script is trivial — one `op0` KEYFRAME carrying the funnel's terrain code plus an
+`op3` stop. The link lives in the per-terrain-code handlers of `surface_interaction $16900`
+(the `$16A00` jump table). When the marble rolls onto an *entrance* region, that code's handler
+**teleports it to a hardcoded exit position** — it clears the airborne flag, zeroes velocity
+(leaving an emergence kick), writes `obj+$C/$10` = the exit coordinates `<<16` (with a small
+collision fallback via `$15FC8`), re-samples the surface height (`$EA10`), sets state 3 and
+plays the funnel sound. The *exit* region's own handler (codes 21/22) is just a wall (`$180AC`)
+that contains the marble where it lands. Beginner has two funnels, and the **terrain codes are
+the pairing**:
+
+| Funnel | entrance code(s) → handler | exit code | teleport dest ≈ cell |
+|---|---|---|---|
+| top (1 in, 1 out) | 18 → `$17192` | 21 (region at (67,78)) | (65, 76) |
+| lower (2 in, 1 out) | 19 **and** 20 → `$172E6` (shared) | 22 (region at (84,94)) | (83, 92) |
+
+So the lower funnel's *two* entrances map to *one* exit precisely because codes 19 and 20
+dispatch to the **same handler** with the same baked-in destination, while the top funnel's
+code 18 has its own handler. The teleport targets land exactly on the exit regions I plotted —
+a clean cross-check. (The link being hardcoded per terrain code, rather than data-driven, is
+why these specific codes 18–22 appear only on Beginner: each course's bespoke features get
+their own codes and handlers.)
 
 **The goal is a radial proximity test, not a finish line.** Each of the two goal-flag regions
 is an independent `terr 5` proximity trigger (`proximity_trigger $16C0C`): it takes the vector

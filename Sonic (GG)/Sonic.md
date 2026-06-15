@@ -21,7 +21,7 @@ Methods: purely static analysis of the ROM image, plus the Z80 toolchain built f
 it in the shared `tools/` module — the disassemblers (`tools/cmd/disz80`,
 `tools/cmd/codetracez80`) over the `tools/z80` decoder. All addresses are Z80
 addresses (16-bit, `$0000`–`$FFFF`) unless a *file offset* is called out; bytes are
-8-bit. Part I is complete; the rest is stubbed.
+8-bit. Parts I–II are complete; the rest is stubbed.
 
 ---
 
@@ -34,6 +34,10 @@ addresses (16-bit, `$0000`–`$FFFF`) unless a *file offset* is called out; byte
   - [4. The cartridge header (`TMR SEGA`)](#4-the-cartridge-header-tmr-sega)
   - [5. The CPU vectors](#5-the-cpu-vectors)
 - [Part II — Boot and initialization](#part-ii--boot-and-initialization)
+  - [1. Cold-start init (`$0296`)](#1-cold-start-init-0296)
+  - [2. Cross-bank calls and the `RST` gateways](#2-cross-bank-calls-and-the-rst-gateways)
+  - [3. The frame-interrupt handler (`$0073`)](#3-the-frame-interrupt-handler-0073)
+  - [4. The main entry (`$1356`)](#4-the-main-entry-1356)
 - [Part III — Engine architecture](#part-iii--engine-architecture)
 - [Part IV — Graphics and data formats](#part-iv--graphics-and-data-formats)
 - [Part V — Game mechanics](#part-v--game-mechanics)
@@ -202,9 +206,168 @@ from the three hardware entry points (`$0000`, `$0038`, `$0066`) confirms this �
 
 # Part II — Boot and initialization
 
-*Stub.* Follows `JP $0296`: the mapper/stack/RAM setup, the VDP register
-initialization and the first palette/tilemap load, up to the main loop and the
-frame-interrupt handler at `$0073`.
+The reset code (Part I §5) ends with `JP $0296`. That is the real cold start: it
+programs the cartridge mapper, clears RAM and sets the stack, brings the VDP up in
+Mode 4, hides the sprites, runs a setup routine in another bank through the game's
+banked-call gateway, and hands off to the main entry at `$1356`. This part walks
+that path and the per-frame interrupt the init arms.
+
+## 1. Cold-start init (`$0296`)
+
+**Mapper.** First it re-asserts the default bank layout (Part I §2):
+
+```
+$0296  LD A,$80 / LD ($FFFC),A   ; mapper control ($80 = ROM mapping, no cart RAM)
+$029B  LD A,$00 / LD ($FFFD),A   ; slot 0 <- bank 0
+$02A0  LD A,$01 / LD ($FFFE),A   ; slot 1 <- bank 1
+$02A5  LD A,$02 / LD ($FFFF),A   ; slot 2 <- bank 2
+```
+
+**RAM clear + stack.** The classic Z80 "fill by overlapping `LDIR`" — write one
+zero, then copy it forward through itself:
+
+```
+$02AA  LD HL,$C000 / LD DE,$C001 / LD BC,$1FEF
+$02B3  LD (HL),L                 ; (HL) = $00  (L is $00)
+$02B4  LDIR                      ; propagate $00 across $C000..$DFEF
+$02B6  LD SP,HL                  ; SP = $DFEF
+```
+
+It clears the 8 KB of work RAM up to `$DFEF`, stopping 16 bytes short of the top so
+it does not clobber the mapper-register mirror at `$DFFC`–`$DFFF` (Part I §2), then
+parks the stack at the top of the cleared region.
+
+**VDP registers.** Eleven registers are written from a table at `$031C`, with a
+shadow copy kept in RAM at `$D219` (the interrupt handler reads it back, §3):
+
+```
+$02B7  LD HL,$031C / LD DE,$D219     ; table, RAM shadow
+$02BD  LD B,$0B / LD C,$8B           ; 11 registers
+$02C1  loop: LD A,(HL) / LD (DE),A / INC HL / INC DE
+             OUT ($BF),A             ; the value -> VDP control port $BF
+             LD A,C / SUB B / OUT ($BF),A   ; ($8B-B) = $80|reg -> control port
+             DJNZ loop
+```
+
+A VDP register write is two bytes to control port `$BF`: the value, then
+`$80 | regnum`. The table (`26 A2 FF FF FF FF FF 00 00 00 FF`):
+
+| Reg | Value | Meaning |
+|---|---|---|
+| 0 | `$26` | Mode Control 1: **Mode 4**, hide the left 8-px column |
+| 1 | `$A2` | Mode Control 2: display **off** (during init), frame interrupt **on**, 8×16 sprites |
+| 2 | `$FF` | name-table base → `$3800` |
+| 3, 4 | `$FF` | unused on this VDP |
+| 5 | `$FF` | sprite-attribute-table base → `$3F00` |
+| 6 | `$FF` | sprite-pattern base → `$2000` |
+| 7 | `$00` | backdrop colour = palette entry 0 |
+| 8, 9 | `$00` | horizontal / vertical scroll = 0 |
+| 10 | `$FF` | line counter (line interrupt off) |
+
+The display stays off here and is turned on later once the first screen is built;
+the detailed register semantics are Part IV.
+
+**Hide the sprites.** A VDP fill clears the Sprite Attribute Table:
+
+```
+$02CD  LD HL,$3F00 / LD BC,$0040 / LD A,$E0
+$02D5  CALL $05F0
+```
+
+`$05F0` is the engine's **VDP fill** primitive — `fill(addr=HL, count=BC, byte=A)`:
+
+```
+$05F0  LD E,A
+       LD A,L / OUT ($BF),A          ; VRAM address, low byte
+       LD A,H / OR $40 / OUT ($BF),A ; address high | $40  ($40 = "write VRAM")
+       loop: LD A,E / OUT ($BE),A    ; byte -> VDP data port $BE
+             DEC BC / LD A,B / OR C / JR NZ
+       RET
+```
+
+The high address byte is OR'd with the VDP's write-VRAM command (`$00` read VRAM,
+`$40` write VRAM, `$80` write register, `$C0` write CRAM). Here it writes `$E0`
+across the 64 bytes of the Sprite Attribute Table at `$3F00`, setting every sprite's
+Y off-screen — **hiding all 64 sprites** before the display comes on.
+
+**Handoff.**
+
+```
+$02D8  CALL $02F8       ; run a setup routine in bank 3 (§2)
+$02DB  LD IY,$D200      ; IY = the game-state RAM block
+$02DF  JP $1356         ; -> main entry (§4)
+```
+
+## 2. Cross-bank calls and the `RST` gateways
+
+`$02F8` is one of three short **banked-call thunks** at the bottom of the home bank,
+and they are exactly the `RST $18/$20/$28` vectors (Part I §5: `$0018 JP $02E2`,
+`$0020 JP $02F8`, `$0028 JP $0309`). Each pages a fixed bank into slot 1, calls a
+fixed entry in it, then restores the previous bank:
+
+```
+$02F8  DI
+       LD A,$03 / LD ($FFFE),A       ; slot 1 <- bank 3
+       CALL $4006                    ; call the bank-3 routine
+       LD A,($D22F) / LD ($FFFE),A   ; slot 1 <- previous bank (shadow)
+       EI
+       RET
+```
+
+So a one-byte `RST $20` is a gateway into bank 3 at `$4006` (and `RST $18`→`$4012`,
+`RST $28`→`$4015`); bank 3 holds a dispatcher the engine reaches through these
+1-byte calls. The "previous bank" is read back from a RAM **shadow** at `$D22F`: the
+game keeps `$D22F` = the current slot-1 bank and `$D230` = the current slot-2 bank so
+banked calls can nest and restore correctly. (The banking/dispatch system is Part III.)
+
+## 3. The frame-interrupt handler (`$0073`)
+
+The `$0038` maskable-interrupt vector is `JP $0073` — the per-frame (vblank) handler
+that drives timing once `EI` runs at the main entry:
+
+```
+$0073  DI / PUSH AF / PUSH HL / PUSH DE / PUSH BC
+       IN A,($BF)               ; read VDP status — acknowledges the interrupt
+       BIT 7,(IY+6) / JR Z,…    ; only do frame work when a game-state flag is set
+       … VDP scroll + line-counter (reg 10 / $8A) setup …
+       PUSH IX / PUSH IY
+       LD HL,($D22F)            ; preserve the banked context across the IRQ
+       …
+```
+
+Reading the VDP status port `$BF` is the interrupt acknowledge (it clears the
+pending-interrupt flag). The handler is gated on a game-state bit (`IY+6` bit 7),
+preserves the index registers and the bank shadows, and reprograms the VDP **line
+counter** to fire a mid-frame line interrupt — the standard trick for a fixed status
+bar above a scrolling playfield.
+
+## 4. The main entry (`$1356`)
+
+```
+$1356  SET 0,(IY+0)                       ; arm the main game-state flag
+       EI                                 ; interrupts on — the frame handler now runs
+       LD A,$01 / LD ($FFFE),A / LD ($D22F),A   ; slot 1 <- bank 1 (+ shadow)
+       LD A,$02 / LD ($FFFF),A / LD ($D230),A   ; slot 2 <- bank 2 (+ shadow)
+       RES 0,(IY+2) / RES 1,(IY+2)
+       CALL $0645 / CALL $1CD7 / CALL $0AA3     ; subsystem init
+       LD A,$03 / LD ($D240),A                  ; game mode <- 3
+       …
+```
+
+The handoff into the game proper: enable interrupts, set the bank shadows to the
+running configuration, clear state flags, run the subsystem initializers, and set
+the top-level **game-mode** variable `$D240` (the state-machine selector — title,
+level, … — the subject of Part III). From here control is in the main loop.
+
+### RAM landmarks established so far
+
+| Address | Use |
+|---|---|
+| `$D200` | game-state block (the `IY` base; `IY+0/+2/+6` are flag bytes) |
+| `$D219`… | shadow copy of VDP registers 0–10 |
+| `$D22F` | current **slot-1** bank number (for banked-call restore) |
+| `$D230` | current **slot-2** bank number |
+| `$D240` | top-level **game mode** |
 
 # Part III — Engine architecture
 

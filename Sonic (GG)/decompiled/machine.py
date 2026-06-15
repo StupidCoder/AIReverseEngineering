@@ -169,6 +169,11 @@ def mem_fill(addr, val, count):
     for i in range(count):
         mem[addr + i] = val
 
+def copy_rom(src_off, dest_z80, count):
+    """Copy `count` ROM bytes (flat file offset) into work RAM (the LDIR idiom)."""
+    for i in range(count):
+        mem[dest_z80 + i] = rom[src_off + i]
+
 def vdp_load_regs(table, count, shadow):
     """Load VDP registers 0..count-1 from a ROM table, mirroring to `shadow`  ($02B7)."""
     for i in range(count):

@@ -10,8 +10,13 @@ Run:  python3 -c "import boot; boot.reset()"   (will stop at the first stub)
 from machine import (
     mem, vdp, flags, load_rom, u16,
     di, ei, im, set_sp, page, mapper_control, vcounter,
-    mem_fill, vdp_load_regs, vdp_fill, display, decompress, nt_load_rle,
+    mem_fill, copy_rom, vdp_load_regs, vdp_fill, display, decompress, nt_load_rle,
 )
+
+# The scene table lives in bank 5 at Z80 $5600; with bank 5 paged into slot 1 that is
+# flat file offset $15600.  Each entry is a word: the offset (from $5600) of a 40-byte
+# scene descriptor.
+SCENE_TABLE = 5 * 0x4000 + (0x5600 - 0x4000)   # = $15600
 
 # ---------------------------------------------------------------------------
 # CPU entry points (Part I §5 / Part II)
@@ -170,6 +175,43 @@ def scene_overlay_ptr():                         # $0CDC — table $1163 indexed
 
 
 # ---------------------------------------------------------------------------
+# The scene interpreter (Part III §1) — runs one attract-sequence scene
+# ---------------------------------------------------------------------------
+
+def scene_run():                                # $1414 -> 0 restart / 1 next / 2 re-run
+    set_slot(1, 5)                               # the scene table lives in bank 5
+    i = mem[0xD2D4] if mem.iy_bit(6, 4) else mem.scene   # Start jumps to a target scene
+    off = u16(SCENE_TABLE + i * 2)               # this scene's descriptor offset
+    if off == 0:
+        return run_special_scene()              # $1FAE (no descriptor)
+    return run_scene_descriptor(SCENE_TABLE + off)   # $185D
+
+
+def run_scene_descriptor(desc):                 # $185D
+    display(False)
+    copy_rom(desc, 0xD355, 0x28)                 # the 40-byte descriptor -> work RAM $D355
+    mem.set_iy(11, mem.iy(5)); mem.set_iy(12, mem.iy(6))  # snapshot the flag bytes
+    init_scene_state()                           # $1884.. clear a swathe of scene RAM
+    # The scene's actual behaviour — what it draws and how long it runs — is driven by
+    # the 40 descriptor bytes now at $D355 and a per-scene script, branching on $D238.
+    # That is DATA, not code: see the note in the worklist. << the wall
+    return run_scene_behaviour(desc)
+
+
+# ===========================================================================
+# WORKLIST / FRONTIER NOTE — the data-driven wall (Part III §1)
+# ---------------------------------------------------------------------------
+# scene_run reaches a clean, readable shell, but the scene's *behaviour* is encoded
+# as a 40-byte descriptor (now copied to $D355) plus a per-scene script, interpreted
+# by the rest of $185D and the per-frame handlers. The 40 fields are not yet decoded
+# (that needs tracing how $D355+n is consumed across the scene handlers). So the
+# descriptor stays raw bytes for now and run_scene_behaviour is the frontier — this is
+# exactly the predicted "logic lives in data" boundary, not a control-flow dead end.
+#   Next, to push past it: decode the $D355 descriptor fields into a Scene dataclass.
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
 # helpers that wrap a couple of two-step idioms for readability
 # ---------------------------------------------------------------------------
 
@@ -208,9 +250,11 @@ def _noop(*_):  # an effect we haven't translated yet but that doesn't block the
     pass
 
 # frontier — translating outward stops here
-def scene_run():            _todo("$1414", "run the bank-5 scene descriptor")
+def run_scene_behaviour(desc):  _todo("$1885+", "per-scene script over the $D355 descriptor (data-driven)")
 
 # modelled structurally for now (so the spine runs end to end)
+def run_special_scene():    _noop()   # $1FAE: scenes with no descriptor
+def init_scene_state():     _noop()   # $1884+: clear the scene RAM block
 def place_scene_markers():  _noop()   # $0CF3: per-scene route-marker math (blinking route)
 def b3_rst18(fn):           _noop()   # bank3 RST$18 dispatch: banked setup
 def palette_fade_to(src):   _noop()   # $0AAB: load + fade the palette toward its target

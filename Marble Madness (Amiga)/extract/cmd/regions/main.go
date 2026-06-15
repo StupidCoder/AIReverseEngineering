@@ -180,7 +180,7 @@ func seqRange(a, b, step int) []int {
 
 const tileS = 12
 
-func iso(tx, ty int) (int, int) { return (tx - ty) * tileS, (tx + ty) * tileS / 2 }
+func iso(tx, ty int) (int, int) { return (ty - tx) * tileS, (tx + ty) * tileS / 2 }
 
 // fillDiamond draws a tile diamond centred at (cx,cy), half-width tileS.
 func fillDiamond(img *image.RGBA, cx, cy int, c color.RGBA) {
@@ -377,7 +377,7 @@ func renderWire(field map[[2]int]cell, lo, hi int) *image.RGBA {
 		return float64(c.h) - base
 	}
 	proj := func(tx, ty int, z float64) (float64, float64) {
-		return float64(tx-ty) * wSX, float64(tx+ty)*wSY - z*wZScale
+		return float64(ty-tx) * wSX, float64(tx+ty)*wSY - z*wZScale
 	}
 	// bounds over all projected vertices
 	minX, minY, maxX, maxY := 1e18, 1e18, -1e18, -1e18

@@ -866,15 +866,8 @@ constant and the height varies per course — practice 36×75, up through ultima
 
 [`extract/cmd/sprites`](extract/cmd/sprites) decodes every `.mlb` and writes the
 tile set (`<course>.tiles.png`) and the assembled course (`<course>.png`) to
-[`rendered/`](rendered).
-
-The `.mlb` tilemap above is only the *visual* surface. The physics rolls the marble
-on a separate **height field** built from the Track's `$9A6` slope records (Part V §4).
-A 3-D wireframe of that height field for the same practice course — the checkerboard
-slope facets, the two recessed holes, and the zigzag canyon dropping to the GOAL —
-lines up tile-for-tile with the tilemap:
-
-![Practice course height-field wireframe](rendered/practy.wire.png)
+[`rendered/`](rendered). The `.mlb` tilemap is only the *visual* surface; the physics
+rolls the marble on a separate height field (Part V §4).
 
 ## 4. Obstacles (`.ilb`)
 
@@ -1072,11 +1065,8 @@ render:
 ```
 
 **Still open.** The exact message/signal that ticks the game-state machine once per
-world frame — the hand-off between the Framer's vblank and the main thread's update
-(the `$5DB` "new world frame" flag is the visible half of it) — is the one link not
-yet pinned. It is the natural entry point for the next trace: input (`JOYxDAT`) →
-the marble's velocity → collision against the terrain `type` (`$6A0`, §3) → the
-`object_draw` integrator above.
+world frame — the Framer-vblank ↔ main-thread hand-off (the `$5DB` "new world frame"
+flag is its visible half) — is the one link in the loop not yet pinned.
 
 ## 2. The object/actor system
 
@@ -1109,313 +1099,146 @@ grouping the obstacle render still needs (Part IV §4).
 
 ## 3. Terrain interaction
 
-> **Superseded by §4.** Earlier drafts treated the `[X][Y][type]` placement records
-> (Part IV §5) as the terrain map. The velocity trace in §4 disproves that: the
-> placement table only spawns visible **objects**, while the marble's slope/terrain
-> response comes from the **`$CCA` surface-region structs** built from the `$9A6`
-> course descriptor. The terrain code the physics dispatches on is the region
-> struct's `+$1F` (5..59), not the placement `type`.
+The `[X][Y][type]` placement table (Part IV §5) only spawns visible **objects** — it is
+*not* the terrain map. The marble's terrain response comes from two other structures
+(both detailed in §4): the **`$9A6` static slope field** (the ramps, walls and pits) and
+a few **scripted `$CCA` regions** (seesaws, holes, triggers).
 
 ## 4. Physics and controls
 
 ### Controls — the trackball
 
-Input is read straight off the **mouse/trackball quadrature counters**
-`JOY0DAT`/`JOY1DAT` (`$DFF00A`/`$DFF00C`), per player, plus the CIA fire buttons
-(`$BFE001`). `trackball_decode $019390` decodes the Amiga quadrature (XOR of
-adjacent counter bits → direction, `±$20` per step) into an X/Y delta; the control
-update (`$0192EC` → `$18FCC`) accumulates and scales that delta into the marble's
-roll force (`$195EE`/`$195EA`). So the controller is a relative motion device — the
-faster you spin it, the more force — which is exactly the arcade trackball.
+Input is the **mouse/trackball quadrature counters** `JOY0DAT`/`JOY1DAT`
+(`$DFF00A`/`$DFF00C`), per player, plus the CIA fire buttons (`$BFE001`).
+`trackball_decode $019390` turns the Amiga quadrature (XOR of adjacent counter bits →
+direction, `±$20`/step) into an X/Y delta; `control_update $0192EC` accumulates and
+scales it into the roll-force accumulators `$195EE`/`$195EA`. It is a relative device —
+spin faster, push harder — exactly the arcade trackball.
 
-### The marble is a 3-D object
+### The marble is a 3-D point mass
 
-The marble isn't a 2-D sprite on a 2-D map — it's a point mass in **3-D world
-space**. Each object carries a position `(x,y,z)` at `obj+$C/+$10/+$14` and a
-velocity `(vx,vy,vz)` at `obj+0/+4/+8`. Every frame `object_draw $14EF0` integrates
-`pos += velocity`, then `set_draw_pos $E872` **iso-projects** `(x,y,z)` to the
-screen (`$E944`). The isometric look is a *projection* of a real 3-D simulation.
+The marble (object `$236`) is not a 2-D sprite: it is a point mass with velocity
+`(vx,vy,vz)` at `obj+0/+4/+8` and position `(x,y,z)` at `obj+$C/+$10/+$14`. Each frame
+`object_draw $14EF0` integrates `pos += velocity`, then `set_draw_pos $E872`
+**iso-projects** to the screen (`$E944`) — the iso look is a projection of a real 3-D
+simulation. Exactly three things write the velocity:
 
-### What makes it roll downhill — traced end to end
+- **input** — `marble_input $12F8C` adds the scaled trackball force (`$0130DA/$0130E0`);
+- **friction / speed cap** — `$14D28` computes the octagonal speed `|vY|+3⁄8·|vX|`,
+  drives the roll anim/sound, and clamps each component to a per-surface max (`$40000`
+  vs `$50000`, selected by `obj+$1A` via `$14E7E` — that selector *is* the ice/grating
+  friction);
+- **the surface force** — below.
 
-This was settled by tracing the actual velocity writes, not by reading the data and
-guessing. The chain is:
+The terrain comes in **two independent systems**: a **static slope field** (the ramps,
+walls and pits of the course itself) and a few **scripted dynamic regions** (seesaws,
+the rail-guarded holes, triggers). Different data, different force code.
 
-**1. Where velocity lives.** The marble (object `$236`) keeps velocity at `obj+0`
-(`vX`), `obj+4` (`vY`), `obj+8` (`vZ`) and position at `obj+$C/+$10/+$14`. Every
-frame `object_draw $14EF0` does `pos += velocity`, then iso-projects (Part V §1). So
-to make the marble roll, *something must add to `obj+0`/`obj+4`*. There are exactly
-three writers: trackball input, the speed-cap/friction pass, and the slope force.
+### The static slope field — `$9A6` → a corner-height mesh
 
-**2. Input** adds the trackball force (`marble_input $12F8C`): it scales the
-accumulated `$195EA/$195EE` deltas and does `ADD.l d0,(a0)` / `ADD.l d0,$4(a0)` at
-`$0130DA`/`$0130E0`. **Friction/speed cap** (`$14D28`) computes the octagonal speed
-`|vY| + 3⁄8·|vX|`, drives the roll animation/sound, and clamps each component to a
-max (`$40000` or `$50000`, selected per-surface) at `$14E62`/`$14E6E` — it *limits*
-velocity, it is not the slope.
-
-**3. The slope force** is in `surface_interaction sub_016900` (`a5` = the marble).
-It **loops over all 25 region structs** (`a4`, stride `$56`; loop `$016986…$01802A`,
-counter vs `$19`=25), and for every *valid* region (`+$18≠0`) computes
-
-```
-d5 = region.refX ($C(a4)) − marbleX ($6C4)     ; vector marble → this region's ref point
-d4 = region.refY ($10(a4)) − marbleY ($6C6)
-```
-
-then dispatches on the region's **terrain code** `$1F(a4)` (value 5..59) through the
-jump table at `$016A00` (55 `BRA.w` entries, `JMP $2(pc,d0.l)`, `d0=(code−5)*4`). For
-a slope code (11 → `$17AA8`, 13 → `$17C88`) the handler first range-checks `(d5,d4)`
-— so a region only acts while the marble is **within its bounds** — then normalises it
-to a unit vector (`JSR $23EB4`), multiplies by 4 (`ASL.l #2`) and does
-
-```
-$017BDE  ADD.l d0,(a5)        ; vX += ux·4
-$017BE8  ADD.l d0,$4(a5)      ; vY += uy·4
-```
-
-That is the whole of "downhill": **each frame, every region the marble overlaps
-accelerates it toward that region's reference point `(refX,refY)`.** Because the
-course is tiled into many small regions, each with its ref point biased toward its
-low side, the net pull follows the terrain. A dead-zone box (`$17AE8…`) leaves the
-marble at rest when already centred, so it settles into dips. After the loop
-(`$01807C…$01809E`) any wall flags raised during it (`$6A1`/`$6A2`) snap the marble
-position back to the wall edge (`$6B8`/`$6BC`) and **negate** the velocity — the
-bounce.
-
-### The terrain-code jump table (`$016A00`)
-
-The per-region code `$1F` selects one of ~50 behaviours. Grouped by what each handler
-does to the velocity (proven by disassembling every target):
-
-| Codes | Handler | Behaviour |
-|---|---|---|
-| 6–9, 14, 15, 17, 25, 40–44 | `$18024` | **Flat** — no force (default). |
-| **11, 13** | `$17AA8` / `$17C88` | **Slope** — `vXY += unit(ref−pos)·4` (above). |
-| 12 | `$178A6` | **Strong slope / funnel** — sets velocity directly toward ref. |
-| 5, 26–31 | `$16C0C…` | **Proximity trigger** — within distance `$38` of the ref, set flags `$6A1/$6A2` and play a sound (`$21ADC`). Region edges / event zones. |
-| 16, 50–55 | `$16F28…` | Directional sound-only variants of the trigger. |
-| 21, 22, 33, 35, 36, 38, 39 | → `$180AC` | **Wall / edge** — delegate to the shared edge handler. |
-| 10, 18, 19, 20, 32, 34, 37 | `$16ADC…` | **Hard edge / fall / goal** — set or clear velocity and call the draw/iso/fall helpers (`$E872`, `$EA10`, `$15FC8`, `$FD68`). |
-| 45–49, 56–59, 23, 24 | `$17E4E…` | Small geometric variants (corner/border tests), fall through to flat. |
-
-So the friction surfaces the user expected (ice = low friction, grating = high
-friction) are **not** separate jump-table cases: friction is the per-region
-*max-speed selector* read by `$14E7E` (`$40000` vs `$50000`), set on the marble's
-`+$1A` when it enters a region. The jump table is purely the *shape* response
-(flat / slope / wall / trigger).
-
-### The data format behind the reference points
-
-The structure the physics reads is **not** the `.mlb` tilemap and **not** the small
-`[X][Y][type]` placement table (Part IV §5 / §3 below — those place visible objects).
-It is an array of **surface-region structs** built fresh at course load into the
-buffer at **`$CCA`**:
-
-- **25 region structs, `$56` (86) bytes each** (`build_surface` walks `$CCA` …
-  `$CCA+$866`, stride `$56`; the activator loop `$12B02` and the physics `sub_016900`
-  use the same stride). Proven fields:
-  - `+$0C`/`+$10` — **downhill reference point** `(refX,refY)` in screen space (the
-    point a slope pulls the marble toward);
-  - `+$18` — valid flag; `+$1A` — contact/anim state; `+$1E` — counter;
-  - `+$1F` — **terrain code** (5..59, the jump-table index above);
-  - `+$19`/`+$1B` — neighbour / transition code (sound + edge selection);
-  - `+$52`/`+$54` — the region's grid key `(col,row)`, matched against the marble's
-    tile each frame to pick the **active** region (`$F906` loop);
-  - `+$36` — slope's live target, refreshed from the marble object (`$FD2C`) for
-    codes 11/13 at `$12B42`/`$12B58` (this is what makes a slope keep pushing as the
-    marble moves across it).
-
-- These structs are built at course load by **`build_surface $DEBC` → `build_region
-  $E158`** from the **course descriptor at Track header `+0` (`$9A6`)**, whose fields
-  are: `+$08` a command/coordinate stream (bit-selector + `[col,row]+value` words,
-  terminated `$FFFE`/`$FFFF`); `+$18` world height; `+$1A` region count; `+$1C` the
-  **region-record table**; `+$20` a table of edge-shape sub-records; `+$24` width;
-  `+$26` a per-column word array.
-
-### How a region is defined — `build_region $E158`, traced
-
-Each region is one **8-byte record** plus a referenced height profile:
+The slopes the marble rolls down live in the **course descriptor at Track header `+0`
+(`$9A6`)**: a count (`+$1A`) of **8-byte region records** (table at `+$1C`), over a
+world height (`+$18`) and width (`+$24`). Each record:
 
 | Bytes | Field | Meaning |
 |---|---|---|
-| `[0]` | `x0` (signed) | iso-grid origin X |
-| `[1]` | `y0` | iso-grid origin Y |
-| `[2]` | `xSize` | region width → covers `x0 … x0+xSize−1` |
-| `[3]` | `ySize` | region height → covers `y0 … y0+ySize−1` |
+| `[0]`/`[1]` | `x0,y0` (x signed) | iso-**tile** origin (a diamond on screen, not a screen box) |
+| `[2]`/`[3]` | `xSize,ySize` | rectangle extent, in iso tiles |
 | `[4..5]` | `baseHeight` (word) | the region's reference height |
-| `[6]` low 5 bits | `edgeShape` | index into the `$9A6+$20` table → a **height-profile byte array** |
-| `[7]` low 3 bits | `dir` (0–7) | **slope direction**; indexes `$2504` → step `(dx,dy)` |
-| `[7]` bit 3 | `flip` | negate the profile (down-slope vs up-slope) |
+| `[6]` lo 5 | `edgeShape` | → a height-delta **profile** (table at `+$20`) |
+| `[7]` lo 3 / bit 3 | `dir` / `flip` | slope direction (one of the 4 iso diagonals, `$2504`) / negate the profile |
 
-`$E158` then **rasterises the region into the `$CCA` corner-height mesh** — a 22-wide
-grid of 8-byte cells, each cell holding **four corner heights** at `+0/+2/+4/+6`:
+`build_region $E158` rasterises every record into the **`$CCA` corner-height mesh** — a
+22-wide grid of 8-byte cells, each holding the **four corner heights** of one iso tile.
+It walks the rectangle diagonally along `dir` and writes `value = baseHeight ±
+profile[i]`, the profile advanced one byte per cell and restarted on a `$80` marker (so
+`00 02 04 06 … 80` is a repeating ramp); shared corners between adjacent cells are
+written consistently. So each region is a flat iso-tile rectangle carrying a *base
+height + direction + 1-D profile*, and all 66 composite into one continuous **2.5-D
+height map**. The **triangular slope faces** the game shows are emergent: a height-map
+quad with non-coplanar corners is two triangles (the engine picks one per the
+iso-diamond half — see the force below).
 
-1. It picks the direction step from `$2504`. That table holds only the four iso
-   diagonals `(±1,±1)`; the 3-bit `dir` selects one of **8** fills (4 diagonals × 2
-   loop-transpose orders, `dir<4` vs `dir≥4`), i.e. the 8 isometric slope facings.
-2. It walks the rectangle **diagonally** in iso space. For each step the grid cell is
-   `row = xAcc + yAcc − originX`, `col = originY − xAcc + (row>>1)`, address
-   `$CCA + (row·22 + col)·8` (odd rows are clamped to 21 columns — the iso half-cell
-   offset). The walk order follows `(dx,dy)`, so it sweeps **up the slope**.
-3. The height written is `value = baseHeight ± profile[i]`, where `profile` is the
-   `edgeShape` byte array, advanced one byte per cell and **restarted on a `$80`
-   marker** (so a profile like `00 02 04 06 … 80` is a repeating linear ramp). `flip`
-   chooses `+` vs `−`. So the height **ramps along the diagonal** — that gradient *is*
-   the slope.
-4. A boundary test writes `value` into the correct corner word(s) of the cell
-   (`+0/+2/+4/+6`) depending on whether the position sits on the region's left/right
-   (`x0`/`xEnd`) or top/bottom (`y0`/`yEnd`) edge, replicating shared corners so
-   adjacent cells agree — producing a **continuous corner-height terrain mesh**.
+The **downhill force** is the gradient of that mesh, taken each frame from `object_draw`:
 
-So a region is a rectangle with a base height and a *direction + 1-D profile* that
-ramps the height across it; `$E158` paints that ramp into the shared corner-height
-grid.
+1. **`surface_sample $EA10`** reads the four mesh cells around the marble (the corner
+   blocks `$1EBA/$1EC2/$1ECA/$1ED2`), uses `$6D6` (the iso-diamond half) to pick **which
+   of the tile's two triangles** the marble is over, and from its corners computes the
+   surface **gradient** `$6D8`/`$6DA` and the interpolated height `Z`.
+2. **`apply_slope_force $14A88`** amplifies a steep gradient ×4 and accelerates the marble
+   down it: `vX -= gradientX<<11` (`$14AEA`), `vY -= gradientY<<11` (`$14AF6`). The
+   **Aerial** course (`$5D6==4`) *adds* instead — its inverted / low gravity.
 
-**What shape is a region, really?** Not a 3-D polygon, and not a screen-space bounding
-box. The footprint is an **axis-aligned rectangle in iso-*tile* coordinates** — so on
-screen it is a *diamond*, not a screen-aligned box. It is never simply flat: it carries
-a base height (z), a slope direction (one of the four iso diagonals), and a 2-D
-height-delta profile (e.g. edge[1] `00 02 04 06 06 06 06 02 04 06 08 08…` = a staircase
-ramp; edge[2] `00 fe fc fa 80 …` = a descending ramp with ragged `$80`-broken rows).
-`$E158` composites all 66 records into a single **corner-height mesh** (each iso tile =
-four corner heights). That mesh — a 2.5-D height-map on the iso grid — is the actual
-surface; the **triangular slope faces** the game shows are quads in it whose four corners
-are non-coplanar (the standard height-map two-triangle split), plus profile/overlap
-tapering that narrows a slope's influence to a wedge. So the regions are rectangles; the
-*triangles are emergent from the height field*. (Practice histogram: 18× `7×7` slope
-tiles for the checkerboard, plus flat rectangles of every aspect ratio — `41×3`, `7×22`,
-`17×16` — for corridors and plateaus.)
+The **walls** fall out of the same mesh: `surface_sides $EF90` turns a height step
+between neighbour cells into a per-side flag `$6A4-$6A7`, and `edge_collision $EB64`
+clamps the velocity against it. One height map → both the roll and the walls, with no
+per-cell terrain codes.
 
-This is verified visually by `extract/cmd/regions`, which replays the `$E158` height
-generation (`baseHeight ± profile`, the profile consumed in `$E158`'s exact diagonal
-fill order) and plots each course two ways: `rendered/<course>.regions.png` (iso tiles
-coloured by slope direction) and `rendered/<course>.wire.png` (a 3-D wireframe of the
-height mesh — a dimetric projection that lifts height up-screen, with hidden-line
-removal, drawn with the Go standard library and 3× supersampling; shown in Part IV §3).
-The practice render reproduces the course feature-for-feature from nothing but the 66
-records: the top checkerboard with its **two holes**, the descending **zigzag canyon**,
-and the flat run-out areas; the wireframe shows the individual `7×7` slope facets bending
-up and down.
+`extract/cmd/regions` replays the `$E158` height generation and plots each course as an
+iso slope-direction map (`rendered/<course>.regions.png`) and a 3-D wireframe of the
+mesh (`rendered/<course>.wire.png` — dimetric, hidden-line, 3× supersampled, Go
+standard library). From nothing but the 66 records the practice render reproduces the
+course feature-for-feature — the checkerboard of `7×7` slope facets, its two recessed
+holes, the descending zigzag canyon, and the flat run-outs:
 
-### How regions become contact structs
+![Practice course height-field wireframe](rendered/practy.wire.png)
 
-`$CCA` is a **multi-phase work buffer** — verified by the identical literal `$0CCA`
-used with three different strides: `build_region` writes it as **8-byte** corner-height
-cells; the region init `region_clear $8F42` clears it as **86-byte** structs
-(`+$18=0`, `+$C/+$10=0`, `+$1F=0`, `+$19=index`); and a particle/effect system
-(`$1E21C`) reuses it as **8-byte** pos+vel records. The 86-byte structs are populated by
-**`region_build_list $F7EA`**, which walks a per-course source list (`[x][y][scriptPtr]`
-records from Track header `+0`/`$FD2C`); for each it allocates a struct (`$F6B2`), writes
-its grid key `+$52`/`+$54 = (x,y)`, and calls **`region_update $F96A`**, which stores the
-record's long as the region's **script pointer `+$3A`** and sets `+$18`/`+$1A`.
-**`region_activate $F8FC`** then matches each region's `+$52`/`+$54` against the marble
-tile every frame to set its `+$18` valid flag — the gate `sub_016900`'s loop tests.
+### The scripted dynamic regions — `sub_016900`
 
-### The reference point is *scripted* — `region_script $FD68`
+A few moving/interactive surfaces are a separate system (the practice course has **13**:
+the two rail-guarded holes, the start/finish triggers, the ball-catcher). At load
+`region_build_list $F7EA` reads a per-course `[x][y][scriptPtr]` list (Track header
+`+$14` → `$FD2C`) into an array of **86-byte region structs** at `$CCA` (`region_clear
+$8F42` inits them; `$CCA` is a multi-phase work buffer — also the height mesh and a
+particle pool). Each frame `region_activate $F8FC` matches a region's grid key
+`+$52/+$54` to the marble's tile and sets its `+$18` valid flag.
 
-The decisive find: a region's `+$C/+$10` reference is **not a static field** — it is
-emitted by a tiny **per-region bytecode animation script**. `region_clear` zeroes
-`+$C/+$10`; an exhaustive scan of the whole binary finds *no* ordinary instruction that
-fills them. They are written by `region_script $FD68`, a per-region interpreter:
-
-- `+$3A` = script base pointer (from the Track source list / the anim-script table at
-  `$FD2C`); `+$36` = the script **program counter** (advances 2 bytes per word read);
-  `+$1E` = the current keyframe's **duration in frames** (counted down; at 1 the next
-  opcode is fetched). A word opcode `0..$12` dispatches through a 19-entry table at
-  `$FD96`. The key opcodes:
+A region's **reference point `+$C/+$10`** is not a stored field — it is emitted by a
+per-region **bytecode animation script** (`region_script $FD68`): `+$3A` = script base,
+`+$36` = PC, `+$1E` = the current keyframe's duration. A word opcode (19-entry table at
+`$FD96`) drives it; the key ones:
 
 | Op | Effect |
 |---|---|
-| **0** (keyframe) | reads 5 words → `+$C` = refX (`word<<19`), `+$10` = refY (`word<<19`), `+$14` = refZ (`word<<16`), `+$1E` = duration, `+$1F` = **terrain code**. This is what plants the downhill reference point and the region's terrain type. |
-| **16** (move) | every frame `+$C += region.vX (+0)`, `+$10 += region.vY (+4)` — the reference point **drifts**, i.e. a *moving* slope/seesaw/scrolling wall. |
-| **2** | sets `+$1C`/`+$23`/`+$1A`, plays a sound — a state-change keyframe. |
+| **0** keyframe | `+$C/$10` = refX/refY (`word<<19`), `+$14` = refZ (`word<<16`), `+$1E` = duration, `+$1F` = **terrain code** |
+| **16** move | `+$C += vX`, `+$10 += vY` each frame — a *moving* slope / seesaw / sliding wall |
+| **2** | sets state + plays a sound |
 
-So a scripted region's `+$C/+$10` is a **keyframe stream**: opcode 0 sets the ref point
-`(x,y,z)` plus a terrain code and a frame count; opcode 16 advances it by a velocity;
-others trigger sounds/state. The fixed-point `<<19` matches the marble's own position
-scale, so `sub_016900` subtracts them directly.
+`surface_interaction sub_016900` applies them: it loops the 25 region structs (`a4`,
+stride `$56`), and for each valid one takes `(refX−marbleX, refY−marbleY)` and dispatches
+on its terrain code `+$1F` (5..59) through a 55-entry jump table at `$016A00`. Slope
+codes (11/13) push the marble toward the reference point (`vXY += unit(ref−pos)·4`,
+`$017BDE/$017BE8`), gated by a bounds box; trigger codes raise the wall flags
+`$6A1/$6A2`, which at the loop tail snap the marble to `$6B8/$6BC` and **negate** its
+velocity (the bounce). The table groups as:
 
-### Static slopes are NOT scripted — the practice-course data
+| Codes | Behaviour |
+|---|---|
+| 6–9, 14, 15, 17, 25, 40–44 | flat — no force |
+| **11, 13** / 12 | slope toward ref / funnel (set velocity) |
+| 5, 16, 26–31, 50–55 | proximity trigger (flag + sound) |
+| 21, 22, 33, 35, 36, 38, 39 | wall / edge (→ `$180AC`) |
+| 10, 18, 19, 20, 32, 34, 37 | hard edge / fall / goal |
 
-Decoding `PrcTrack` settles which structure does what (and corrects an earlier
-over-generalisation). The course has **two independent terrain structures**:
+### The marble state machine — `$13E9A`
 
-1. **The `$9A6` descriptor (Track header `+0`) — the static slope field.** Practice has
-   **66 region records** (`$9A6+$1A`), each an 8-byte `[x0,y0,xSize,ySize,baseHeight,
-   edgeShape,dir]`. They are **7×7 blocks** with slope direction `dir`=4 or 0 (the two
-   checkerboard diagonals) and steadily descending base heights — *exactly* the
-   checkerboard of slopes the course shows. These carry **no script and no animation**;
-   `build_region $E158` rasterises them once into the corner-height mesh at load.
-
-2. **The Track anim-script list (header `+$14`) — the dynamic regions.** Practice has
-   only **13** of these, and their terrain codes are 5/17/26–31 — all **triggers and
-   special features** (the rail-guarded holes, the start/finish zones, the ball-catcher),
-   *none* of them slope codes (11/13). These are the regions `region_script $FD68`
-   animates.
-
-So the answer to "is a static slope a one-frame animation?" is **no** — a static slope
-is a plain geometric record in the `$9A6` table, baked into the height mesh; scripts
-drive only the handful of dynamic/interactive regions. The `region_script` mechanism
-above is real but applies to those dynamic regions, not the checkerboard.
-
-### The static-slope force: the height-field gradient
-
-The force path for the static slopes is **separate** from `sub_016900` (which serves the
-scripted dynamic regions). It is the **gradient of the corner-height mesh**, sampled and
-applied each frame from `object_draw`:
-
-1. **`surface_sample $EA10`** reads the four mesh cells around the marble (the corner-height
-   blocks `$1EBA/$1EC2/$1ECA/$1ED2`, filled from `$CCA`). `$6D6` — the iso-diamond half —
-   picks **which of the tile's two triangles** the marble is over, and from that triangle's
-   corner heights it computes the surface **gradient** `$6D8`/`$6DA` (the height slope in x
-   and y) and the interpolated surface Z. (So the triangular slope faces are real: the
-   gradient comes from one triangle of the quad.)
-2. **`apply_slope_force $14A88`** then does, with the gradient amplified ×4 when steep:
-
-   ```
-   $14AEA  SUB.l d0,(a5)      ; vX -= gradientX << 11
-   $14AF6  SUB.l d0,$4(a5)    ; vY -= gradientY << 11
-   ```
-
-   i.e. accelerate the marble **down** the height gradient. The Aerial course (`$5D6==4`)
-   **adds** instead of subtracts — its famous inverted/low gravity.
-
-In parallel, **`surface_sides $EF90`** classifies the four sides of the marble's cell from
-the neighbour corner heights (height discontinuity → wall) into the per-side flags
-`$6A4-$6A7`, and **`edge_collision $EB64`** clamps the velocity against those walls. So the
-single corner-height mesh built from the 66 `$9A6` records yields **both** the downhill roll
-(gradient) **and** the walls (height steps) — no separate per-cell terrain codes needed.
-
-This sits under the marble **state machine** (`marble_state_machine $13E9A`): a 13-entry
-jump table (`JMP $2(pc,d0.l)`, table `$13F40`) dispatched on `obj+$1A` = the marble state
-(0..12: rolling, airborne, falling, captured, …). The rolling state runs the input,
-friction, the gradient force above, and edge collision; other states handle the off-edge
-fall, the hole capture, the dizzy/respawn animations.
-
-So "downhill" on a static slope is a real height-field simulation: the **`$9A6` descriptor**
-lists 66 rectangular regions with a base height and slope direction, `build_region` bakes
-them into the `$CCA` corner-height mesh, and `$EA10`/`$14A88` roll the marble down that
-mesh's gradient each frame. The visual `.mlb` ramps are tiles laid out to match it.
+All of the above runs under a 13-state machine: `marble_state_machine $13E9A` dispatches
+on `obj+$1A` (the marble state, 0..12) through a jump table at `$13F40` (`JMP
+$2(pc,d0.l)`, `CMPI #$C`). The **rolling** state runs input + friction + the
+slope-gradient force + edge collision; the others are the off-edge fall, the hole
+capture, and the dizzy/respawn animations.
 
 ### Falling off — death
 
-If the marble ends up on **no** terrain (its type resolves to `$FF`, e.g.
-`terrain_lookup` at `$012D44`), the off-the-edge state (`$5E4`) fires and the marble
-**falls**. Hazard types and the marble-munchers are other death paths, all signalled
-through the same `+$1B` terrain type and the placement-list collision query (§3).
-The "dizzy" spin we decoded in Part IV §4 is one of these death/respawn animations.
+On **no** terrain (type resolves to `$FF`, `terrain_lookup $012D44`) the off-edge state
+(`$5E4`) fires and the marble falls; hazards and the marble-munchers are other death
+paths. The "dizzy" spin (Part IV §4) is one of the respawn animations.
 
 ### Still open
 
-Both force paths are now pinned by code: the **static-slope** roll is the height-field
-gradient (`surface_sample $EA10` → `apply_slope_force $14A88`, `v -= gradient<<11`), and
-the **scripted dynamic regions** pull toward a `region_script $FD68` keyframe reference
-(`sub_016900`). Walls fall out of the same mesh (`surface_sides $EF90` → `edge_collision
-$EB64`). All of it sits under the marble **state machine** (`marble_state_machine $13E9A`,
-13 states on `obj+$1A`). What remains: naming all 13 marble states and the full 19-opcode
-region-script vocabulary (only 0/2/16 characterised), the exact 86-byte region-struct
-layout, and the full death/respawn and scoring machines.
+Naming all 13 marble states, the full 19-opcode region-script vocabulary (0/2/16
+characterised), the exact 86-byte region-struct layout, and the death/respawn and
+scoring machines.
 
 ---
 

@@ -96,13 +96,17 @@
 #   selector read by $14E7E ($14D28). The 12 handlers (●=player-controllable: input $12F8C
 #   + physics $14EF0; others redraw at current pos via $E74C, no input):
 #     s0 $141DC ● ROLLING (normal play); if stun flag +$DD set -> state 8.
-#     s1 $1427C ● rolling + a +$60/$61 frame anim runs down, -> 0.
+#     s1 $1427C ● LANDING: marble drops off a ledge -> airborne (+$36=2, in the update
+#                 $14EF0); on touchdown $14884 sets s1 with the fall height -> impact-scaled
+#                 bounce anim (+$60 eased to +$61), -> 0.
 #     s2 $1436E   animation frame only (advances anim cursor +$64).
 #     s3 $13FBA   EDGE/LANDING reaction: plays the sound for terrain +$62, clears, -> 0
 #                 (entered by the wall/edge handlers $16xx/$17xx).
 #     s4 $14072   FALLING/SETTLING: collision-query $15FC8; on contact runs appear-anim +
 #                 latch region $14706, -> 0.
-#     s5 $142FC ● rolling + a +$60 countdown, -> 0 (timed variant of s1).
+#     s5 $142FC ● OBJECT BUMP: the collision scan $1A86C (Track actor list $1ABE0, only
+#                 courses $5D6 in {1,2,5}) drops the marble here on contact -> flat +$60
+#                 countdown, -> 0.
 #     s6 $13F70 ● COURSE INTRO entrance run (entered at course_init $3380); +$61 down, freeze vel.
 #     s7 $1435E   transient: save-state + clear +$1C.
 #     s8 $143FC   DIZZY (stunned): plays the swirl anim +$DE, tallies +$74, -> 0. Entered

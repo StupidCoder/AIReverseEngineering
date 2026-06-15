@@ -1233,11 +1233,11 @@ so the state also sets the friction/speed cap.
 | St | Handler | Ctrl? | Role — what the handler does |
 |---|---|---|---|
 | **0** | `$141DC` | ● | **Rolling** (normal play): input + physics. If the stun flag `+$DD` is set, hands off to **state 8**. |
-| 1 | `$1427C` | ● | Rolling + a short `+$60/+$61` frame animation that runs down, then → 0. |
+| 1 | `$1427C` | ● | **Landing**: after the marble drops off a ledge (it goes airborne, `+$36=2`, in the update `$14EF0`), touchdown calls `$14884` with the fall height → plays an impact-scaled bounce (`+$60` eased toward `+$61`), then → 0. |
 | 2 | `$1436E` | | Animation frame only — advances an animation cursor (`+$64`); no physics. |
 | 3 | `$13FBA` | | **Edge / landing reaction**: plays the sound for the terrain just hit (`+$62`), clears it, → 0. *Entered by the wall/edge handlers (`$16xx/$17xx`).* |
 | 4 | `$14072` | | **Falling / settling**: collision-queries the surface (`$15FC8`); on contact runs the "appear" animation and latches the region, then → 0. |
-| 5 | `$142FC` | ● | Rolling + a `+$60` countdown, then → 0 (a timed variant of state 1). |
+| 5 | `$142FC` | ● | **Object bump**: the collision scan `$1A86C` (the Track actor list `$1ABE0`, only on some courses) drops the marble here on contact → a brief flat `+$60` countdown, then → 0. |
 | 6 | `$13F70` | ● | **Course intro**: the entrance run; `+$61` counts down, then velocity is frozen. *Entered at course init (`$3380`).* |
 | 7 | `$1435E` | | Transient: save-state + clear `+$1C` (one-shot). |
 | **8** | `$143FC` | | **Dizzy (stunned)**: plays the swirl animation (`+$DE`), tallies `+$74`, then → 0. *Entered **only** from state 0 on a hard hit / survivable fall — recoverable, **not** death.* |
@@ -1255,9 +1255,8 @@ which plays out and returns to rolling.
 
 ### Still open
 
-The exact triggers for the two timed rolling states (1, 5), the full 19-opcode
-region-script vocabulary (0/2/16 characterised), the exact 86-byte region-struct layout,
-and the scoring machine.
+The full 19-opcode region-script vocabulary (0/2/16 characterised), the exact 86-byte
+region-struct layout, and the scoring machine.
 
 ---
 

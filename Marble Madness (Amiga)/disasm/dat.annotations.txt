@@ -88,6 +88,33 @@
 # PROVEN velocity facts: the marble (player 1) is object $236 (player 2 $32A); its
 # velocity is obj+0/+4/+8 and position obj+$C/+$10/+$14 (object_draw $14EF0 at
 # $14FFC integrates pos += velocity).
+013E9A  marble_state_machine  THE marble STATE MACHINE (a5=marble). d7 = obj+$1A = the
+#   marble state (0..12). Prologue $13EAC: for most states runs a wobble/settle anim
+#   (obj+$EA gate, obj+$72/$73 bob counter+dir, obj+$7A timer); states 2,4,7,A,B skip it.
+#   $13F2C: d0=state; CMPI.l #$C; BCC $14486 (default); ASL #2; JMP $2(pc,d0.l) -> 13-entry
+#   table at $13F40. Targets: s0 $141DC, s1 $1427C, s2 $1436E, s3 $13FBA, s4 $14072,
+#   s5 $142FC, s6 $13F70, s7 $1435E, s8 $143FC, s9 $1439A, s10 $14100, s11 $143C8, s12
+#   $13F72. obj+$1A doubles as the per-region max-speed selector read by $14E7E ($14D28).
+# THE STATIC-SLOPE FORCE (the long-open path: how the $9A6 height MESH rolls the marble):
+#   NOT sub_016900 (that is the scripted dynamic regions). It is the HEIGHT-FIELD GRADIENT,
+#   read each frame by object_draw -> $EA10 then applied by $14A88.
+00EA10  surface_sample   read the marble's 2x2 mesh cells (the four 8-byte corner-height
+#   blocks $1EBA/$1EC2/$1ECA/$1ED2, filled from the $CCA mesh) and interpolate. $6D6 (iso
+#   diamond half) picks which TRIANGLE of the cell the marble is in; $6D8/$6DA = the surface
+#   GRADIENT (corner-height differences along x/y); then height = $6D8*$6D2 + $6DA*$6D4
+#   (sub-cell), <<$D, + cornerZ<<$10 = the interpolated surface Z. So the triangular slope
+#   faces are real: the gradient is taken from one of the two triangles of the tile quad.
+00EF90  surface_sides    classify the 4 sides of the marble's cell from neighbour corner
+#   heights ($1EBA..$1ED2): set side TYPE flags $6A4-$6A7 (0/1/3 = none/edge/wall) and side
+#   values $6A8/$6AA/$6AC/$6AE. Feeds edge collision $EB64.
+00EB64  edge_collision   per-side wall/edge response: when the marble's sub-cell pos
+#   ($6D2/$6D4) crosses a boundary and that side's flag ($6A4-$6A7) is a wall, clamp the
+#   velocity component ($EB2C/$EB48 adjust obj+0/+4).
+014A88  apply_slope_force  THE static-slope downhill force (a5=marble). Read gradient
+#   $6D8/$6DA (from surface_sample $EA10), x4 if steep (|g|>=$C), then marble velocity
+#   -= gradient<<$B:  $14AEA SUB.l d0,(a5) vX -= gX<<11 ; $14AF6 SUB.l d0,$4(a5) vY -= gY<<11
+#   = accelerate DOWNHILL (down the height gradient). Course 4 (aerial $5D6==4) ADDs instead
+#   = inverted gravity. Called from the rolling-state handler at $0156DC.
 012F8C  marble_input     INPUT -> velocity. For the marble ($236) reads the trackball
 #   force ($195EA/$195EE; player 2 $195EC/$195F0), NEGates X, scales (*$160, >>8, * a
 #   per-state factor from obj+$60/$1A, <<3), and ADDS it to the velocity:

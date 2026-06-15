@@ -1348,18 +1348,44 @@ is a plain geometric record in the `$9A6` table, baked into the height mesh; scr
 drive only the handful of dynamic/interactive regions. The `region_script` mechanism
 above is real but applies to those dynamic regions, not the checkerboard.
 
-> **Open:** this means the *force path for static slopes* is still to be re-traced. The
-> proven `sub_016900` slope force (codes 11/13, toward a region `+$C/+$10`) is fed by the
-> ≤25 dynamic/contact region structs — but the 66 static records live in the corner-height
-> mesh, and codes 11/13 never appear in the practice scripts. How the mesh's local
-> gradient is sampled into the slope force each frame is the next item (the earlier claim
-> that "`build_surface` expands `$9A6` into the `$CCA` region structs that `sub_016900`
-> reads" conflated the height mesh with the 86-byte region structs).
+### The static-slope force: the height-field gradient
 
-So "downhill" is a real slope field: the **`$9A6` descriptor** lists 66 rectangular
-regions with a base height and a 3-bit slope direction, which `build_region` bakes into
-the `$CCA` corner-height mesh. The visual `.mlb` ramps are tiles laid out to match this
-hidden field. (How that mesh drives the per-frame force is the open item above.)
+The force path for the static slopes is **separate** from `sub_016900` (which serves the
+scripted dynamic regions). It is the **gradient of the corner-height mesh**, sampled and
+applied each frame from `object_draw`:
+
+1. **`surface_sample $EA10`** reads the four mesh cells around the marble (the corner-height
+   blocks `$1EBA/$1EC2/$1ECA/$1ED2`, filled from `$CCA`). `$6D6` — the iso-diamond half —
+   picks **which of the tile's two triangles** the marble is over, and from that triangle's
+   corner heights it computes the surface **gradient** `$6D8`/`$6DA` (the height slope in x
+   and y) and the interpolated surface Z. (So the triangular slope faces are real: the
+   gradient comes from one triangle of the quad.)
+2. **`apply_slope_force $14A88`** then does, with the gradient amplified ×4 when steep:
+
+   ```
+   $14AEA  SUB.l d0,(a5)      ; vX -= gradientX << 11
+   $14AF6  SUB.l d0,$4(a5)    ; vY -= gradientY << 11
+   ```
+
+   i.e. accelerate the marble **down** the height gradient. The Aerial course (`$5D6==4`)
+   **adds** instead of subtracts — its famous inverted/low gravity.
+
+In parallel, **`surface_sides $EF90`** classifies the four sides of the marble's cell from
+the neighbour corner heights (height discontinuity → wall) into the per-side flags
+`$6A4-$6A7`, and **`edge_collision $EB64`** clamps the velocity against those walls. So the
+single corner-height mesh built from the 66 `$9A6` records yields **both** the downhill roll
+(gradient) **and** the walls (height steps) — no separate per-cell terrain codes needed.
+
+This sits under the marble **state machine** (`marble_state_machine $13E9A`): a 13-entry
+jump table (`JMP $2(pc,d0.l)`, table `$13F40`) dispatched on `obj+$1A` = the marble state
+(0..12: rolling, airborne, falling, captured, …). The rolling state runs the input,
+friction, the gradient force above, and edge collision; other states handle the off-edge
+fall, the hole capture, the dizzy/respawn animations.
+
+So "downhill" on a static slope is a real height-field simulation: the **`$9A6` descriptor**
+lists 66 rectangular regions with a base height and slope direction, `build_region` bakes
+them into the `$CCA` corner-height mesh, and `$EA10`/`$14A88` roll the marble down that
+mesh's gradient each frame. The visual `.mlb` ramps are tiles laid out to match it.
 
 ### Falling off — death
 
@@ -1371,13 +1397,14 @@ The "dizzy" spin we decoded in Part IV §4 is one of these death/respawn animati
 
 ### Still open
 
-The slope force, the terrain-code table, the region-struct layout, the `$9A6` record
-format **and the reference-point source** (the `region_script $FD68` keyframe stream)
-are now pinned by code — the marble-physics chain is traced end to end. What remains:
-the full 19-opcode region-script vocabulary (only opcodes 0/2/16 are characterised
-above), the exact bit-for-bit layout of all 86 bytes of the region struct, and the
-full death/respawn and scoring state machines. The friction surfaces are the per-region
-max-speed selector (`+$1A` → `$14E7E`), not separate jump-table cases.
+Both force paths are now pinned by code: the **static-slope** roll is the height-field
+gradient (`surface_sample $EA10` → `apply_slope_force $14A88`, `v -= gradient<<11`), and
+the **scripted dynamic regions** pull toward a `region_script $FD68` keyframe reference
+(`sub_016900`). Walls fall out of the same mesh (`surface_sides $EF90` → `edge_collision
+$EB64`). All of it sits under the marble **state machine** (`marble_state_machine $13E9A`,
+13 states on `obj+$1A`). What remains: naming all 13 marble states and the full 19-opcode
+region-script vocabulary (only 0/2/16 characterised), the exact 86-byte region-struct
+layout, and the full death/respawn and scoring machines.
 
 ---
 

@@ -1077,33 +1077,37 @@ by `type` (`tracks` prints the histogram).
 
 **Visualising the layers.** `extract/cmd/regions` draws the slope field as a 3-D
 wireframe (Part V §4) and overlays the other Track layers at their **true** `(X,Y)`,
-never snapped: **placement objects** as cyan dots, and each **creature spawn** (`+$18`
-magenta, `+$20` orange) as a three-part marker — a hollow **diamond** at the trigger/home
-cell, a **connector line** to the verified spawn position, and a solid **pin** at that
-position, with the rest of the `animPtr` list (the likely patrol route) as small dots. For
-Beginner (below) the 79 placement dots land squarely **on** the course — which doubles as a
-*calibration*: features must sit on the course, so their fit confirms the `(X,Y)` grid
-matches the slope mesh. The 2 magenta `+$18` spawns are Beginner's two **black enemy
-marbles**, and the small dots trailing each pin are that marble's patrol route — which
-matches the marble's idle path in live play to the pixel. Its animated drawbridge and funnel
-are dynamic regions (`+$14`).
+never snapped:
 
-![Beginner course Track layers — slope wireframe + placement objects (cyan) + +$18 spawns (magenta)](rendered/beginr.wire.png)
+| Overlay | Marker | Track |
+|---|---|---|
+| placement objects | cyan dots | `+4` |
+| black marble | **magenta** pin + patrol polyline | `+$18` |
+| ooze | **orange** pins (one per RNG candidate, no path) | `+$20` |
+| slinkies (marble munchers) | **green** pin + patrol polyline | `+$1C` actor list |
+| dynamic regions (drawbridge etc.) | **yellow** boxes | `+$14` |
 
-What the markers expose rather than hide:
+For the path creatures (black marbles, slinkies) the waypoint list is drawn as a
+**connecting polyline** through the sequence — `pos[0]` is the start pin — so the patrol
+*order* is legible and can be compared against the in-game movement. For Beginner (below)
+the 79 placement dots land squarely **on** the course, which doubles as a *calibration*:
+features must sit on the course, so their fit confirms the `(X,Y)` grid matches the slope
+mesh. The 2 magenta paths are Beginner's two **black enemy marbles** (their polylines match
+the marbles' idle paths in live play to the pixel); the 3 green paths clustered mid-course
+are the **three slinkies**; the yellow boxes are the **dynamic regions**, among which the
+opening/closing drawbridge lives.
 
-- The spawn **pins** (verified positions, from the `animPtr`) land **on** the course; the
-  **home diamonds** (the record `(trigX,trigY)`) often sit **off** to the side, connected by
-  the line. That offset is real data, not a coordinate error — the placement dots calibrate
-  the grid, so an off-course home cell means the trigger genuinely lives beside the path
-  (consistent with the scroll-trigger reading: the player reaches that cell, the enemy
-  marble spawns onto the course). Earlier we mistook the home cell for the spawn position; the
-  pixel-consistent ~32×8-tile offset the eye caught is exactly this record→`animPtr` split.
+![Beginner course Track layers — slope wireframe + placement objects (cyan) + black-marble/slinky patrols + dynamic regions](rendered/beginr.wire.png)
 
-**Still open.** What each placement `type` 0–7 *means*, the per-type object/animation
-definitions (`+$C`/`+$10`), the enemy/marble start positions, and the last unidentified
-header pointer (`+$18` and `+$20` are now the creature spawns above; only `+$24` — null
-on Practice — remains blank). The engine side that consumes all of this is Part V.
+The marker positions are the creatures' verified spawn/waypoint positions (from the path
+pointer), drawn on the course; the record's trigger/home cell is *not* drawn here — earlier
+we mistook that home cell for the spawn position, and the pixel-consistent ~32×8-tile offset
+the eye caught was exactly the record→path split that this corrects.
+
+**Still open.** What each placement `type` *means*, the per-type object/animation definitions
+(`+$C`; `+$24` is Silly's), the waypoint direction bytes and the region-script opcode
+vocabulary (the enemy-AI pass), and pinning exactly which dynamic regions form the drawbridge
+span. The engine side that consumes all of this is Part V.
 
 ---
 

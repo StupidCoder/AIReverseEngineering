@@ -16,18 +16,22 @@
 // the profile consumed one byte per cell in $E158's exact diagonal fill order
 // (reset on a $80 marker) — and plots the result in iso tile space.
 //
-// The wireframe also overlays the other Track layers at their TRUE (X,Y), never snapped:
-// placement objects (cyan dots, Track +4), +$18 creature spawns (magenta) and +$20 spawns
-// (orange). The placement dots double as a calibration — course features must sit on the
-// course, so their fit confirms the (X,Y) grid matches the slope mesh.
+// The wireframe also overlays the other Track layers at their TRUE (X,Y), never snapped.
+// The placement dots double as a calibration — course features must sit on the course, so
+// their fit confirms the (X,Y) grid matches the slope mesh. The overlays:
 //
-// A creature spawn is NOT positioned by its record (X,Y). The spawner ($197D2) reads the
-// world position from the record's animPtr data (animPtr[0]<<19, animPtr[1]<<19 -> obj+$C/
-// +$10), and stores the record (X,Y) in obj+$80/$82 as a TRIGGER/HOME cell (the scroll
-// position at which the group spawns). So each pin draws the home cell as a hollow diamond,
-// a connector line to the verified spawn position (solid pin head), and the rest of the
-// animPtr list — most likely the patrol route(s) of the spawned group — as small dots.
-// Off-course home diamonds are real (the trigger is beside the path), not snapped away.
+//	placement objects     cyan dots          (Track +4)
+//	+$18 black marble      magenta pin+path   (Track +$18, spawner $197D2)
+//	+$20 ooze              orange pins        (Track +$20, spawner $1B7B0; RNG def-table)
+//	+$1C slinkies          green pin+path     (Track +$1C actor list $1ABE0; spawn $1A548)
+//	+$14 dynamic regions   yellow boxes       (Track +$14; animated terrain — the drawbridge)
+//
+// The black marbles and slinkies are positioned by a waypoint list (NOT their record
+// (X,Y), which is a trigger/home cell): the spawner reads pos = pathPtr[0]<<19,
+// pathPtr[1]<<19, and pathPtr points to the creature's PATROL ROUTE. Those waypoints are
+// drawn as a connecting polyline (pos[0] = the start pin) so the patrol SEQUENCE is visible.
+// Ooze (+$20) has no per-record route — its candidate positions come from the RNG def table
+// — so each is drawn as its own pin with no connecting line.
 //
 // Usage: regions <disk.adf> <outdir>
 //
@@ -325,8 +329,10 @@ func main() {
 		objects := parsePlacement(prog.Image)
 		spawnsA := parseSpawns(prog.Image, 0x18)
 		spawnsB := parseSpawns(prog.Image, 0x20)
+		actors := parseActors(prog.Image)
+		dynRegions := parseDynRegions(prog.Image)
 		writePNG(filepath.Join(outdir, c.key+".regions.png"), render(field))
-		writePNG(filepath.Join(outdir, c.key+".wire.png"), renderWire(field, lo, hi, objects, spawnsA, spawnsB))
+		writePNG(filepath.Join(outdir, c.key+".wire.png"), renderWire(field, lo, hi, objects, spawnsA, spawnsB, actors, dynRegions))
 		fmt.Printf("%s: %d tiles, height %d..%d -> %s.{regions,wire}.png\n", c.key, len(field), lo, hi, c.key)
 	}
 }
@@ -354,18 +360,17 @@ const (
 // tall in the tilemap). Override with -z; -z 0 gives a flat top-down iso map.
 var wZScale = 1.566
 
-// spawn is one Track creature-spawn record. home is the record's (X,Y) — a trigger/home
-// cell (the spawner $197D2/$1B7B0 fires it against the marble's cell, i.e. when the scroll
-// reaches it). pos is the creature's position list: the spawner reads the WORLD position
-// from the first two bytes of the record's animPtr data (record +$2), which is a
-// $FF-terminated list of 6-byte [X][Y][...] entries. pos[0] is the verified spawn position;
-// pos[1:] are the BLACK ENEMY MARBLE's patrol waypoints — confirmed in-game to trace the
-// marble's idle path to the pixel (it patrols this loop until the player nears, then hunts).
-// One record = one black marble (not a group). The 4 trailing bytes look like per-waypoint
-// direction codes (0..8) — to be pinned with the enemy AI.
+// spawn is one moving-creature record (a Track +$18/+$20 spawn, or a +$1C actor). home is
+// the record's (X,Y) — a trigger/home cell, not the spawn position. pos is the creature's
+// world-position list, read from the record's path pointer (record +$2). When hasPath is
+// true (black marbles +$18, slinkies +$1C) pos is an ORDERED patrol route: pos[0] = the
+// verified spawn position, pos[1:] = the looping waypoints (confirmed in-game to trace the
+// idle path to the pixel). When hasPath is false (ooze +$20, whose record pointer is null)
+// pos holds the RNG def-table candidate positions — unordered, so no connecting line.
 type spawn struct {
-	home [2]int
-	pos  [][2]int
+	home    [2]int
+	pos     [][2]int
+	hasPath bool
 }
 
 // parseSpawns reads a creature-spawn list (Track header +$18 or +$20).
@@ -387,13 +392,62 @@ func parseSpawns(im []byte, hdrOff uint32) []spawn {
 		}
 		s := spawn{home: [2]int{int(im[o]), int(im[o+1])}}
 		if ap := u32(im, o+2); ap != 0 && int(ap) < len(im) {
+			// black marble (+$18) patrol route: 6-byte [X][Y][dir·4] entries
 			for p := ap; int(p)+2 <= len(im) && im[p] != 0xFF && len(s.pos) < 24; p += 6 {
 				s.pos = append(s.pos, [2]int{int(im[p]), int(im[p+1])})
 			}
+			s.hasPath = true
 		} else {
-			s.pos = defs()
+			s.pos = defs() // ooze (+$20): unordered RNG def-table positions
 		}
 		out = append(out, s)
+	}
+	return out
+}
+
+// parseActors reads the Track +$1C actor list ($1ABE0) = the SLINKIES (marble munchers).
+// $1ABE0 is a pointer table; entry[0] is an 8-byte record list [homeX][homeY][pathPtr:4]
+// [type][pad]. The actor's position is pathPtr[0]<<19, pathPtr[1]<<19, and pathPtr is an
+// $FF-terminated 3-byte [X][Y][dir] WAYPOINT list = the slinky's patrol path (spawner $1A548).
+func parseActors(im []byte) []spawn {
+	tbl := u32(im, 0x1C)
+	if tbl == 0 || int(tbl)+4 > len(im) {
+		return nil
+	}
+	rec := u32(im, tbl) // entry[0] = record list
+	if rec == 0 || int(rec) >= len(im) {
+		return nil
+	}
+	var out []spawn
+	for o := rec; int(o)+8 <= len(im) && len(out) < 200; o += 8 {
+		if im[o] == 0xFF {
+			break
+		}
+		s := spawn{home: [2]int{int(im[o]), int(im[o+1])}, hasPath: true}
+		if pp := u32(im, o+2); pp != 0 && int(pp) < len(im) {
+			for p := pp; int(p)+3 <= len(im) && im[p] != 0xFF && len(s.pos) < 40; p += 3 {
+				s.pos = append(s.pos, [2]int{int(im[p]), int(im[p+1])})
+			}
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// parseDynRegions reads the Track +$14 dynamic-region source list ([x][y][scriptPtr:4]
+// 6-byte records, $FF-terminated) and returns each region's grid cell. These are the
+// scripted animated-terrain regions (seesaws, sliding walls, the opening/closing drawbridge).
+func parseDynRegions(im []byte) [][2]int {
+	block := u32(im, 0x14)
+	if block == 0 || int(block)+4 > len(im) {
+		return nil
+	}
+	var out [][2]int
+	for o := u32(im, block); int(o)+6 <= len(im) && len(out) < 200; o += 6 {
+		if im[o] == 0xFF {
+			break
+		}
+		out = append(out, [2]int{int(im[o]), int(im[o+1])})
 	}
 	return out
 }
@@ -427,7 +481,7 @@ func dot(img *image.RGBA, cx, cy, r int, c color.RGBA) {
 	}
 }
 
-func renderWire(field map[[2]int]cell, lo, hi int, objects [][2]int, spawnsA, spawnsB []spawn) *image.RGBA {
+func renderWire(field map[[2]int]cell, lo, hi int, objects [][2]int, spawnsA, spawnsB, actors []spawn, dynRegions [][2]int) *image.RGBA {
 	base := float64(lo)
 	dz := func(c cell) float64 {
 		if c.h < 8000 {
@@ -459,13 +513,15 @@ func renderWire(field map[[2]int]cell, lo, hi int, objects [][2]int, spawnsA, sp
 	for _, s := range objects {
 		upd(s[0], s[1], cellAt(s[0], s[1]))
 	}
-	for _, layer := range [][]spawn{spawnsA, spawnsB} {
+	for _, layer := range [][]spawn{spawnsA, spawnsB, actors} {
 		for _, s := range layer {
-			upd(s.home[0], s.home[1], cellAt(s.home[0], s.home[1]))
 			for _, p := range s.pos {
 				upd(p[0], p[1], cellAt(p[0], p[1]))
 			}
 		}
+	}
+	for _, r := range dynRegions {
+		upd(r[0], r[1], cellAt(r[0], r[1]))
 	}
 	const M = 30
 	W := int(maxX-minX) + 2*M
@@ -537,44 +593,63 @@ func renderWire(field map[[2]int]cell, lo, hi int, objects [][2]int, spawnsA, sp
 		bx, by := sp(s[0], s[1], cellAt(s[0], s[1]))
 		dot(big, bx, by, 2*ssaa, color.RGBA{90, 230, 235, 255})
 	}
-	// Creature spawns, on top (+$18 magenta, +$20 orange). For each: a hollow diamond at
-	// the home/trigger cell, a line from it to the spawn position, small dots for the rest
-	// of the animPtr position list (the creature's group/path), and a solid pin at pos[0]
-	// (the verified spawn position the spawner uses).
-	pins := func(spawns []spawn, col color.RGBA) {
-		for _, s := range spawns {
-			hx, hy := sp(s.home[0], s.home[1], cellAt(s.home[0], s.home[1]))
+	// pin draws a solid marker (stem + white-cored head) at a projected ground point.
+	pin := func(px, py int, col color.RGBA) {
+		topY := py - spawnStem*ssaa
+		for w := -1; w <= 1; w++ {
+			line(big, px+w, py, px+w, topY, col)
+		}
+		dot(big, px, topY, spawnR*ssaa, col)
+		dot(big, px, topY, spawnR*ssaa-2, color.RGBA{255, 255, 255, 255}) // white core
+		dot(big, px, topY, spawnR*ssaa-4, col)
+	}
+	// creatures draws a moving-creature layer. For path creatures (black marbles, slinkies)
+	// it connects the waypoint sequence with a polyline (so the patrol ORDER is visible),
+	// dots the intermediate waypoints, and pins pos[0] (the start/spawn position). For
+	// ooze (no ordered route) it just pins each candidate position.
+	creatures := func(layer []spawn, col color.RGBA) {
+		for _, s := range layer {
 			if len(s.pos) == 0 {
 				continue
 			}
-			px0, py0 := sp(s.pos[0][0], s.pos[0][1], cellAt(s.pos[0][0], s.pos[0][1]))
-			// home cell: hollow diamond outline (drawn 2px wide so it reads at full brightness)
-			for k := 0; k < 4; k++ {
-				dx, dy := []int{0, spawnR, 0, -spawnR}[k], []int{-spawnR, 0, spawnR, 0}[k]
-				nx, ny := []int{spawnR, 0, -spawnR, 0}[k], []int{0, spawnR, 0, -spawnR}[k]
-				line(big, hx+dx*ssaa, hy+dy*ssaa, hx+nx*ssaa, hy+ny*ssaa, col)
-				line(big, hx+dx*ssaa+1, hy+dy*ssaa, hx+nx*ssaa+1, hy+ny*ssaa, col)
+			pts := make([][2]int, len(s.pos))
+			for i, p := range s.pos {
+				x, y := sp(p[0], p[1], cellAt(p[0], p[1]))
+				pts[i] = [2]int{x, y}
 			}
-			// connector home -> spawn position
-			line(big, hx, hy, px0, py0, col)
-			line(big, hx+1, hy, px0+1, py0, col)
-			// the rest of the position list: small dots
-			for _, p := range s.pos[1:] {
-				bx, by := sp(p[0], p[1], cellAt(p[0], p[1]))
-				dot(big, bx, by, 2*ssaa, col)
+			if !s.hasPath {
+				for _, pt := range pts {
+					pin(pt[0], pt[1], col)
+				}
+				continue
 			}
-			// the verified spawn position: solid pin
-			topY := py0 - spawnStem*ssaa
-			for w := -1; w <= 1; w++ {
-				line(big, px0+w, py0, px0+w, topY, col)
+			// connecting polyline through the waypoint sequence (2px wide for visibility)
+			for i := 0; i+1 < len(pts); i++ {
+				line(big, pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1], col)
+				line(big, pts[i][0]+1, pts[i][1], pts[i+1][0]+1, pts[i+1][1], col)
 			}
-			dot(big, px0, topY, spawnR*ssaa, col)
-			dot(big, px0, topY, spawnR*ssaa-2, color.RGBA{255, 255, 255, 255}) // white core
-			dot(big, px0, topY, spawnR*ssaa-4, col)
+			for i := 1; i < len(pts); i++ {
+				dot(big, pts[i][0], pts[i][1], 2*ssaa, col)
+			}
+			pin(pts[0][0], pts[0][1], col) // start of the patrol
 		}
 	}
-	pins(spawnsA, color.RGBA{255, 60, 210, 255}) // +$18 = magenta
-	pins(spawnsB, color.RGBA{255, 170, 30, 255}) // +$20 = orange
+	// Dynamic regions (animated terrain — the drawbridge etc.): a hollow yellow box at the
+	// region's grid cell. No path.
+	regCol := color.RGBA{240, 225, 80, 255}
+	for _, r := range dynRegions {
+		bx, by := sp(r[0], r[1], cellAt(r[0], r[1]))
+		const rr = 4 * ssaa
+		for d := 0; d <= 1; d++ { // 2px wide so the box survives downsampling
+			line(big, bx-rr, by-rr+d, bx+rr, by-rr+d, regCol)
+			line(big, bx+rr-d, by-rr, bx+rr-d, by+rr, regCol)
+			line(big, bx-rr, by+rr-d, bx+rr, by+rr-d, regCol)
+			line(big, bx-rr+d, by-rr, bx-rr+d, by+rr, regCol)
+		}
+	}
+	creatures(spawnsA, color.RGBA{255, 60, 210, 255}) // +$18 = magenta (black marble)
+	creatures(spawnsB, color.RGBA{255, 170, 30, 255}) // +$20 = orange (ooze)
+	creatures(actors, color.RGBA{90, 235, 110, 255})  // +$1C = green (slinkies)
 	return downsample(big, ssaa)
 }
 

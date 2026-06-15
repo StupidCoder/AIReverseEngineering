@@ -43,9 +43,7 @@ addresses (16-bit, `$0000`–`$FFFF`) unless a *file offset* is called out; byte
 - [Part IV — Graphics and data formats](#part-iv--graphics-and-data-formats)
   - [1. The VDP formats](#1-the-vdp-formats)
   - [2. The graphics decompressor](#2-the-graphics-decompressor)
-  - [3. First decompressed screen — the SEGA logo](#3-first-decompressed-screen--the-sega-logo)
-  - [4. The exact screen via emulation (the oracle)](#4-the-exact-screen-via-emulation-the-oracle)
-  - [5. The title screen (tracing forward)](#5-the-title-screen-tracing-forward)
+  - [3. The opening screens: how they are built](#3-the-opening-screens-how-they-are-built)
 - [Part V — Game mechanics](#part-v--game-mechanics)
 - [Appendix A — Toolchain and reproduction](#appendix-a--toolchain-and-reproduction)
 
@@ -469,96 +467,97 @@ Decoding walks `count` units; for unit *i*, control bit *i* (`bitmap[i>>3] &
 So the literal stream is the set of distinct 4-byte tile rows in first-appearance
 order, and the bitmap + match offsets reconstruct the full tile data from them.
 
-## 3. First decompressed screen — the SEGA logo
+## 3. The opening screens: how they are built
 
-The first thing the console shows is the **SEGA logo** screen, loaded by `$1CD7`
-(`sega_logo`): it decompresses its background tiles from `(bank $0C, $FA74)` —
-normalised to **bank 15**, file `$3FA74` — into VRAM, and uses background palette
-index `$12`. Running the decompressor on that block yields a clean, self-consistent
-result: `count = 1024` four-byte units = `4096` bytes = exactly **128 tiles**; the
-palette resolves through the bank-8 table to a blue-on-white set. Decoding those
-tiles with that palette ([`extract/cmd/titlegfx`](extract/cmd/titlegfx)) reproduces
-the logo exactly:
+The two screens the console shows before the menu — the **SEGA logo** and the
+**title** — are interesting because they reach the same VRAM by *opposite* routes.
+The logo's tile map is **computed in code**; the title's is a **stored, compressed
+map** loaded wholesale. Both then get a per-frame sprite layer and, on the title, a
+blinking text overlay. This section follows the actual routines.
 
-![SEGA logo, decompressed from bank 15 and decoded with palette $12](rendered/sega.tiles.png)
+To do that I let the game run and watched what it did, using the Game Gear machine
+model in [`tools/gamegear`](../../tools/gamegear) (the `z80` core wired to RAM, the
+Sega mapper and a VDP that captures VRAM/CRAM) as an *oracle*. Two things make it a
+tracing tool rather than just a renderer: [`extract/cmd/screentrace`](extract/cmd/screentrace)
+fingerprints VRAM every frame (so palette fades don't hide the moments the picture
+actually changes), and the VDP carries a **write watchpoint** — arm a VRAM address
+range and it records the PC of every routine that writes there. The final images
+below are read back from the real VRAM the code produced; the addresses are from the
+disassembler. Each confirms the other.
 
-This is the end-to-end proof that the `$0406` decompressor, the 4-bitplane tile
-decode and the 12-bit palette are all correct against real data. **But note what it
-is: the tile *set* (the patterns in VRAM order), not the composed *screen*.** They
-coincide here only because the logo's tiles happen to sit in screen order. The logo's
-name table is not stored at all — it is **built procedurally**: `$1E7C` points a
-build buffer at RAM `$D000`, and `$1EC1`/`$2F07` place tiles into it from small layout
-tables (e.g. `$1F27`, with `$FE`/`$FF` as skip/end markers) before it is DMA'd to
-VRAM. So for this screen there is no tilemap block to load.
+### The SEGA logo — a procedural reveal (`$1CD7`)
 
-A true screen render — composing a real name table over the tiles with
-`RenderNameTable` — wants a screen whose name table *is* stored or decompressed, and
-that is what the **levels** provide (their map is decompressed to RAM and drawn by
-`scroll_draw`). The fully general alternative, which gives the exact screen for any
-case including procedurally-built ones like this logo, is to run the boot on a Z80
-execution core and read back the actual VRAM — the "emulation as oracle" approach used
-for the other games in this repository. That is §4.
+`sega_logo` first decompresses its tiles (`$0406` from `(bank $0C,$FA74)`, 96 logo
+tiles to VRAM `$0000`; a sprite set to `$2000`) and selects palette index `$12`, the
+blue-on-white set. Then it **clears the whole name table to tile `$70`** (`$1D1B`: a
+896-entry fill, which the watchpoint sees as 896 writes from `$1D1F`). There is no
+stored tile map for the logo at all.
 
-## 4. The exact screen via emulation (the oracle)
+The picture is built by a loop (`$1D3E`–`$1D5C`) that walks a position counter
+`$D213` from `$2C` to `$6C` in steps of 4 — sixteen iterations, one per column. Each
+iteration calls `$1E8A`, which writes **one vertical 6-tile column** straight into the
+name table: it derives the column's VRAM address from `$D213`, then writes tiles
+`c, c+16, c+32, … c+80` down the column (stride `$40` = one row), high byte `$00`.
+Because the column index is `c` and each row adds 16, cell *(row,col)* ends up holding
+tile `col + 16·row` — a plain `0…95` identity grid over a 16×6 rectangle. The logo
+tiles are stored in reading order, so the "map" *is* the identity; the cleverness is
+that the loop lays it down **one column at a time, left to right**, so the logo wipes
+in. (Render it mid-build and you get `SEG` before the `A` — exactly that left-to-right
+edge.) In lockstep, `$1EC1`→`$2F07` build a small **sprite** display list in RAM at
+`$D000` — three rows of entries, `$FE`=skip / `$FF`=end, offset per row by the
+symmetric table at `$1F14` (`00 FD FB F8 … F0 … F8 FB FD`, i.e. an arc) — which the
+frame interrupt flushes to the sprite-attribute table at `$3F00`/`$3F80` (`$033F`)
+every vblank. That is the moving highlight that sweeps the letters.
 
-Rather than reconstruct the logo's procedural name table by hand, we let the game
-build it. [`tools/z80`](../../tools/z80) now has an **execution core** (`cpu.go`,
-the runnable counterpart of the decoder) wired, in [`tools/gamegear`](../../tools/gamegear)
-(`machine.go`), to a minimal Game Gear: 8 KB work RAM, the Sega cartridge mapper, and
-just enough of the 315-5124 VDP to capture what the code draws (VRAM, CRAM, the
-registers). It is not a cycle-accurate emulator and renders no pixels itself — it is
-an *oracle*: it runs the real ROM so the boot decompresses tiles, programs CRAM and
-builds the name table exactly as on hardware, then hands the VRAM back to be composed
-by `RenderNameTable`.
+So the logo is: an identity background grid revealed column-by-column, plus an
+animated sprite shine. Read back from the oracle's VRAM, the finished frame is:
 
-[`extract/cmd/segascreen`](extract/cmd/segascreen) does this: it loads the cartridge,
-runs ~60 frames (the logo is built progressively over several vblanks), reads the name
-table from VRAM `$3800` and the palette from CRAM, and composes the screen. The logo
-occupies name-table rows 9–14 (98 non-background cells over the `$70` fill) — the
-**code-built tile map**, not a tile dump. Cropped to the Game Gear's 160×144 window:
+![SEGA logo — the name table the boot code built, column by column](rendered/sega.gg.png)
 
-![SEGA logo — the exact boot screen, composed from the live name table the boot code built in VRAM](rendered/sega.gg.png)
+### The title — a stored, compressed map (`$0C20`)
 
-This differs from the §3 tile-set image in the way that matters: there the patterns
-happened to sit in screen order, so the sheet *looked* like the screen by luck; here
-the pixels are placed by the game's own name-table entries (each carrying its tile
-number, palette select and flip bits), read back after the code ran. And because it
-captures real VRAM, it is the reference any hand-written decoder is checked against.
+The title takes the other approach. `$0C20` decompresses three tile blocks (`$0406`
+from bank `$0C` to VRAM `$0000`, and two blocks from bank 9 to `$2000`/`$3000`), then
+**loads the name table from a stored map** with `$0502` — twice:
 
-## 5. The title screen (tracing forward)
+```
+$0C4C  HL=$6962  BC=$019B  DE=$3800  $D20F=$10   ; base layer, 411 entries, priority bit
+$0C5F  HL=$6AFD  BC=$0170  DE=$3800  $D20F=$00   ; overlay,    368 entries
+```
 
-The same oracle reaches the **title screen** with no new tooling — just more frames.
-After the SEGA logo, the attract sequence runs on its own (the unmapped controller
-ports read `$FF`, so nothing is "pressed"), and the title loads itself. Following the
-boot frame by frame ([`extract/cmd/screentrace`](extract/cmd/screentrace), which
-fingerprints VRAM each frame so palette fades don't hide the discrete screen loads)
-gives a clean timeline:
+`$0502` is a tiny **RLE name-table loader**: it streams tile bytes from the source
+(in bank 5), expanding runs of a repeated tile, until an `$FF` terminator, and writes
+each entry as *(tile byte, `$D20F`)* — so `$D20F` supplies the shared high byte
+(palette select and the priority bit) for the whole layer. The two passes compose the
+image: a priority base (`$D20F=$10`, drawn in front of sprites) and a plain overlay
+(`$00`). 411 + 368 ≈ the 767 non-background cells the screen ends up with — a
+full-screen picture loaded in one shot (the watchpoint attributes those ~768 writes to
+`$0502`'s literal and run loops at `$052D`/`$054B`). No per-tile code, no reveal: the
+map was authored offline and compressed into the ROM.
 
-| frame | name-table cells | what happened |
-|------:|-----------------:|---------------|
-| 6 | 0 | name table cleared to the `$70` fill |
-| 9–47 | 6 → 98 | the SEGA logo draws in, row by row |
-| 47–335 | 98 | logo holds, then its palette fades out |
-| **335** | **767** | the **title** name table is loaded in one shot |
-| 335–650 | 767 | the title's palette fades in; `PRESS START BUTTON` appears |
+![Sonic title screen — the stored map loaded by $0502, with the blinking prompt](rendered/title.gg.png)
 
-At ~650 frames the title is fully lit; `segascreen` now takes a frame count and an
-output name, so `segascreen rom.gg out 650 title` composes it the same way as the logo:
+### `PRESS START BUTTON` — a text overlay (`$0612`)
 
-![Sonic title screen — composed from the live name table at frame 650](rendered/title.gg.png)
+The prompt is not part of the stored map; it is painted on afterwards and blinks
+(the oracle shows it off at frame 620, on at 660, off again at 700). It is drawn by
+`$0612`, a **name-table string blitter**: it reads a packed *(row,col)* header,
+computes the `$3800` address, then writes a run of tile bytes from a source list
+(terminated by `$FF`), again taking the high byte from `$D20F`. Its inner loop
+(`$063A`) is the single busiest name-table writer in the whole attract sequence,
+because it repaints the prompt every time it toggles. The blink and the "is Start
+held?" test share one input byte: `$0602` reads the controller — Start from GG port
+`$00` bit 7, the D-pad from port `$DC` — into `(IY+3)`, the same flag the logo checks
+(`BIT 7,(IY+3)` at `$1D47`) so the sequence can be skipped.
 
-Two things are worth recording. First, this screen is **767 background cells across
-all 24 visible rows** — a full-screen image (Sonic, the banner, `PRESS START BUTTON`,
-`© 1991 SEGA`), every pixel a background tile placed through the name table; the oracle
-renders it whole. Its tiles are decompressed from the compressed bank (`$0406` called
-with `A=9`, e.g. at `$190F`), confirming bank 9's role from Part I §6.
+### A note on the sequence (and a correction)
 
-Second, a correction to earlier notes: **`$D240` is not the top-level "game mode".**
-It holds `$0A` unchanged across this entire logo→title transition, and the
-disassembly shows it used as a name-table scroll/row index (`$0E35`, `$4969`,
-multiplied by 10) and as a frame countdown (`$472E`), not as a screen selector. The
-attract progression is **timed/scripted**, not a single mode byte — mapping that
-script is Part III's job; the oracle reaches the screens regardless.
+The progression logo → title → menu is **timed/scripted**, not a single mode switch.
+In particular `$D240` — earlier guessed to be the top-level "game mode" — holds `$0A`
+unchanged across the whole logo→title transition; the disassembly shows it used as a
+name-table scroll index (`$0E35`/`$4969`, ×10) and a frame countdown (`$472E`), not a
+screen selector. Mapping the actual attract script is Part III's job; the point here
+is the drawing, and the drawing is fully accounted for above.
 
 *Still open.* The sprite (object) tile format, the level map format (decompressed to
 RAM, drawn by `scroll_draw`), and the object data.
@@ -579,18 +578,25 @@ Static analysis only, with the Z80 toolchain in the shared `tools/` module:
   prefix pages, plus an **execution core** (`cpu.go`) for running real code.
 - [`tools/gamegear`](../../tools/gamegear) — the Game Gear hardware: the VDP tile,
   palette and name-table decoders, and a minimal `Machine` (RAM + Sega mapper + VDP
-  ports) that drives the Z80 core as an emulation oracle (Part IV §4).
+  ports) that drives the Z80 core as an emulation oracle, with a per-region write
+  counter and a **VRAM write watchpoint** (record the PC of whatever draws a given
+  address range) used to attribute each part of a screen to its routine (Part IV §3).
 - [`tools/cmd/disz80`](../../tools/cmd/disz80) — linear disassembler over a file slice
   mapped at a Z80 address: `disz80 -off FILEOFF -len N -base ADDR rom.gg`.
 - [`tools/cmd/codetracez80`](../../tools/cmd/codetracez80) — recursive-descent
   disassembler from given entry points: `codetracez80 -load 0 -entry 0000,0038,0066 rom.gg`.
 - [`extract/cmd/segascreen`](extract/cmd/segascreen) — runs the boot on the oracle and
-  composes an exact attract screen from the live VRAM: `segascreen rom.gg out [frames]
-  [name]` (the SEGA logo by default, the title screen at `650 title`; Part IV §4–§5).
+  composes an exact opening screen from the live VRAM: `segascreen rom.gg out [frames]
+  [name]` (the SEGA logo by default, the title screen at `650 title`; Part IV §3).
 - [`extract/cmd/screentrace`](extract/cmd/screentrace) — fingerprints VRAM each frame
-  to time the discrete screen loads through the attract sequence (Part IV §5).
+  to time the discrete screen loads and reports, via the watchpoint, which routines
+  drew the name table (Part IV §3).
+- [`extract/decomp`](extract/decomp) + [`extract/cmd/titlegfx`](extract/cmd/titlegfx) —
+  a standalone Go reimplementation of the `$0406` decompressor (Part IV §2) and a
+  harness that runs it on the logo tile block, cross-checking the algorithm against
+  the game's own decompressor as exercised by the oracle.
 
-Reproduce the boot listing in §5:
+Reproduce the boot listing in Part I §5:
 
 ```sh
 go run stupidcoder.com/tools/cmd/disz80 -off 0 -len 0x0C -base 0 \

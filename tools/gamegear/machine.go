@@ -27,6 +27,31 @@ type VDP struct {
 	readBuf byte   // VRAM read prefetch buffer
 	status  byte   // status flags (bit7 = frame interrupt pending)
 	line    byte   // current scanline, for the V-counter port ($7E)
+
+	// Writes counts VRAM byte-writes per 1 KB region (addr>>10), a cheap way to see
+	// which regions a screen actually touches — tile patterns ($0000-$37FF), the name
+	// table ($3800-$3EFF), the sprite-attribute table ($3F00-$3FFF). Reset with
+	// ResetWrites. CRAMWrites does the same for the 64-byte CRAM as a single counter.
+	Writes     [16]uint32
+	CRAMWrites uint32
+}
+
+// ResetWrites zeroes the VRAM/CRAM write counters (call before the window of interest).
+func (v *VDP) ResetWrites() {
+	v.Writes = [16]uint32{}
+	v.CRAMWrites = 0
+}
+
+// ActiveSprites counts SAT entries (Y table at $3F00) whose Y is not the $D0 line
+// terminator or the $E0 "off-screen/hidden" value — i.e. sprites actually on screen.
+func (v *VDP) ActiveSprites() int {
+	n := 0
+	for i := 0; i < 64; i++ {
+		if y := v.VRAM[0x3F00+i]; y != 0xD0 && y != 0xE0 {
+			n++
+		}
+	}
+	return n
 }
 
 // writeControl handles a write to the control port ($BF): two bytes form a command.
@@ -53,8 +78,11 @@ func (v *VDP) writeData(b byte) {
 	v.latched = false
 	if v.code == 3 {
 		v.CRAM[v.addr&0x3F] = b
+		v.CRAMWrites++
 	} else {
-		v.VRAM[v.addr&0x3FFF] = b
+		a := v.addr & 0x3FFF
+		v.VRAM[a] = b
+		v.Writes[a>>10]++
 	}
 	v.addr++
 	v.readBuf = b
@@ -88,6 +116,19 @@ type Machine struct {
 	nbanks int
 	ram    [0x2000]byte // 8 KB work RAM, mirrored $C000-$FFFF
 	slot   [3]int       // ROM bank mapped into slot 0/1/2 ($0000/$4000/$8000)
+
+	// VRAM write watchpoint: when WatchHi > WatchLo, every VRAM write whose address
+	// falls in [WatchLo,WatchHi) records the CPU's PC in WatchPCs (a histogram of how
+	// many bytes each routine wrote there). It answers "which code drew this part of
+	// the screen?" — the PC is the instruction after the OUT, enough to name the loop.
+	WatchLo, WatchHi uint16
+	WatchPCs         map[uint16]int
+}
+
+// Watch arms the VRAM write watchpoint over [lo,hi) and clears any prior hits.
+func (m *Machine) Watch(lo, hi uint16) {
+	m.WatchLo, m.WatchHi = lo, hi
+	m.WatchPCs = map[uint16]int{}
 }
 
 // NewMachine builds a machine from a cartridge image and resets it to power-on
@@ -165,6 +206,11 @@ func (m *Machine) In(port uint16) byte {
 func (m *Machine) Out(port uint16, v byte) {
 	switch byte(port) {
 	case 0xBE:
+		if m.WatchPCs != nil && m.VDP.code != 3 {
+			if a := m.VDP.addr & 0x3FFF; a >= m.WatchLo && a < m.WatchHi {
+				m.WatchPCs[m.CPU.PC]++
+			}
+		}
 		m.VDP.writeData(v)
 	case 0xBF:
 		m.VDP.writeControl(v)

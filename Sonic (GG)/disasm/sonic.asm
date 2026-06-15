@@ -177,6 +177,8 @@
 0126  32 30 D2    LD ($D230),A
 0129  FD CB 00 4E BIT 1,(IY+0)
 012D  C4 3F 03    CALL NZ,$033F
+
+; --- screen_finalize  $0130 — page banks 8/9 into slots 1/2; (IY+7).7? CALL $31BC (tile stream); ($D2AC).7? CALL $3282 (companion loader, tilemap? not yet traced); restore banks 1/2; write VDP reg 1 from shadow $D21A (turns the DISPLAY ON); SET (IY+0).0. ---
 0130  3E 08       LD A,$08
 0132  32 FE FF    LD ($FFFE),A
 0135  32 2F D2    LD ($D22F),A
@@ -203,7 +205,7 @@
 016D  FD CB 00 C6 SET 0,(IY+0)
 0171  C9          RET
 
-; ==== sub_0172 (1 caller) ====
+; ==== palette_dispatch  $0172  (1 caller) — BIT (IY+6).7: clear -> load_palette $0586 ; set -> palette_special $0185. ====
 0172  FD CB 06 7E BIT 7,(IY+6)
 0176  20 04       JR NZ,$017C
 0178  CD 86 05    CALL $0586
@@ -215,7 +217,7 @@
 0180  FD CB 06 7E BIT 7,(IY+6)
 0184  C8          RET Z
 
-; ==== sub_0185 (1 caller) ====
+; ==== palette_special  $0185  (1 caller) — if $D2DC is 0/$FF -> load_palette; else load a full 32-colour CRAM palette from a home-bank table ($0216, or $0256 if (IY+7).4) via cram_load32. ====
 0185  3A DC D2    LD A,($D2DC)
 0188  A7          AND A
 0189  28 ED       JR Z,$0178
@@ -228,7 +230,7 @@
 019B  CD 9F 01    CALL $019F
 019E  C9          RET
 
-; ==== sub_019F (1 caller) ====
+; ==== cram_load32  $019F  (1 caller) — write the whole 32-colour CRAM (64 bytes) from (HL): CRAM addr 0 + $C0 cmd, then 32x (2 bytes -> data port $BE). ====
 019F  06 20       LD B,$20
 01A1  3E 00       LD A,$00
 01A3  D3 BF       OUT ($BF),A
@@ -296,10 +298,14 @@
 0213  F1          POP AF
 0214  FB          EI
 0215  C9          RET
+
+; --- palette_data_A  $0216 — hardcoded 32-colour (64-byte) CRAM palette in the home bank (logo/title?). (data) ---
 0216  .byte 20 04 40 07 70 07 A0 09 74 0B 10 0E E3 0B 50 0F ;  .@.p...t.....P.
 0226  .byte 40 08 10 09 FB 0A B6 09 70 03 FB 07 20 05 FA 0F ; @.......p... ...
 0236  .byte 40 04 00 0B 77 0F FB 0B B7 0B BB 0F 00 00 FF 0F ; @...w...........
 0246  .byte 70 07 97 0B BB 0F 90 0A FB 0F DC 0F B7 0B 77 0B ; p.............w.
+
+; --- palette_data_B  $0256 — hardcoded 32-colour CRAM palette (alternate). (data) ---
 0256  .byte 20 04 40 07 70 07 A0 09 74 0B 10 0E E3 0B 50 0F ;  .@.p...t.....P.
 0266  .byte 40 08 10 09 FB 0A B6 09 70 03 FB 07 20 05 FA 0F ; @.......p... ...
 0276  .byte 00 07 00 0B 77 0F FB 0B B7 0B BB 0F 00 00 FF 0F ; ....w...........
@@ -687,7 +693,7 @@
 0580  C2 78 05    JP NZ,$0578
 0583  C3 56 05    JP $0556
 
-; ==== sub_0586 (1 caller) ====
+; ==== load_palette  $0586  (1 caller) — page bank 8 into slot 1; CRAM addr 0 + $C0 cmd; load BG palette [$D22C] (16 colours) then sprite palette [$D22D] (15) via palette_by_index; restore slot 1 <- bank 1. (1 caller: $0178.) ====
 0586  3E 08       LD A,$08
 0588  32 FE FF    LD ($FFFE),A
 058B  32 2F D2    LD ($D22F),A
@@ -713,7 +719,7 @@
 05C0  32 2F D2    LD ($D22F),A
 05C3  C9          RET
 
-; ==== sub_05C4 (2 callers) ====
+; ==== palette_by_index  $05C4  (2 callers) — A = palette index -> bank-8 pointer table at $7400: ptr = *($7400+A*2); data = ptr + $7400; then write B colours (2 bytes each) to CRAM ($BE). A=$FF/$FE select the RAM working palettes $D3BD/$D3DF. ====
 05C4  21 BD D3    LD HL,$D3BD
 05C7  FE FF       CP $FF
 05C9  28 17       JR Z,$05E2
@@ -4693,7 +4699,7 @@
 31A5  .byte 66 03 09 7D 07 CB 14 07 CB 14 07 CB 14 6C 26 00 ; f..}.........l&.
 31B5  .byte 5C 19 11 00 C0 19 C9                            ; \......
 
-; ==== sub_31BC (1 caller) ====
+; ==== tile_load_3bpp  $31BC  (1 caller) — stream tiles from a bank-8 source to VRAM $3680: per tile row writes 3 stored bitplanes (OUTI x3) + a zero 4th plane (OUT $BE,0) — i.e. tiles are stored 3bpp (8 colours) and expanded to the VDP's 4bpp. $D289/$D28B = source cursor/end, $D28D = group count. ====
 31BC  ED 5B 89 D2 LD DE,($D289)
 31C0  2A 8B D2    LD HL,($D28B)
 31C3  A7          AND A

@@ -39,7 +39,21 @@
 # --- main entry (Part II §4) ---
 1356  main_entry   post-init entry: SET (IY+0).0; EI; set the running bank shadows (slot1=bank1/$D22F, slot2=bank2/$D230); RES (IY+2).0/1; CALL subsystem inits $0645/$1CD7/$0AA3; set top-level game mode $D240=3.
 
+# --- graphics load (banks 8/9 hold tiles/tilemaps/palettes; Part IV, in progress) ---
+0130  screen_finalize  page banks 8/9 into slots 1/2; (IY+7).7? CALL $31BC (tile stream); ($D2AC).7? CALL $3282 (companion loader, tilemap? not yet traced); restore banks 1/2; write VDP reg 1 from shadow $D21A (turns the DISPLAY ON); SET (IY+0).0.
+0172  palette_dispatch  BIT (IY+6).7: clear -> load_palette $0586 ; set -> palette_special $0185.
+0185  palette_special  if $D2DC is 0/$FF -> load_palette; else load a full 32-colour CRAM palette from a home-bank table ($0216, or $0256 if (IY+7).4) via cram_load32.
+019F  cram_load32   write the whole 32-colour CRAM (64 bytes) from (HL): CRAM addr 0 + $C0 cmd, then 32x (2 bytes -> data port $BE).
+0216  palette_data_A  hardcoded 32-colour (64-byte) CRAM palette in the home bank (logo/title?).
+0256  palette_data_B  hardcoded 32-colour CRAM palette (alternate).
+0586  load_palette  page bank 8 into slot 1; CRAM addr 0 + $C0 cmd; load BG palette [$D22C] (16 colours) then sprite palette [$D22D] (15) via palette_by_index; restore slot 1 <- bank 1. (1 caller: $0178.)
+05C4  palette_by_index  A = palette index -> bank-8 pointer table at $7400: ptr = *($7400+A*2); data = ptr + $7400; then write B colours (2 bytes each) to CRAM ($BE). A=$FF/$FE select the RAM working palettes $D3BD/$D3DF.
+31BC  tile_load_3bpp  stream tiles from a bank-8 source to VRAM $3680: per tile row writes 3 stored bitplanes (OUTI x3) + a zero 4th plane (OUT $BE,0) — i.e. tiles are stored 3bpp (8 colours) and expanded to the VDP's 4bpp. $D289/$D28B = source cursor/end, $D28D = group count.
+
 # --- RAM landmarks (work RAM $C000-$DFFF; Part II) ---
+# $D21A = VDP reg 1 shadow ; $D22C = BG palette index ; $D22D = sprite palette index
+# $D289/$D28B = tile-stream source cursor/end ; $D28D = tile-stream count
+# bank 8 $7400 = palette pointer table ; banks 8/9 = graphics data
 # $D200 = game-state block (IY base; IY+0/+2/+6 are flag bytes)
 # $D219 = shadow copy of VDP registers 0-10
 # $D22F = current slot-1 bank number ; $D230 = current slot-2 bank number

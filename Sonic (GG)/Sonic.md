@@ -33,6 +33,7 @@ addresses (16-bit, `$0000`–`$FFFF`) unless a *file offset* is called out; byte
   - [3. The memory map](#3-the-memory-map)
   - [4. The cartridge header (`TMR SEGA`)](#4-the-cartridge-header-tmr-sega)
   - [5. The CPU vectors](#5-the-cpu-vectors)
+  - [6. What's in each bank](#6-whats-in-each-bank)
 - [Part II — Boot and initialization](#part-ii--boot-and-initialization)
   - [1. Cold-start init (`$0296`)](#1-cold-start-init-0296)
   - [2. Cross-bank calls and the `RST` gateways](#2-cross-bank-calls-and-the-rst-gateways)
@@ -201,6 +202,37 @@ fixed page-0 address, so the game routes its hottest common subroutines through 
 from the three hardware entry points (`$0000`, `$0038`, `$0066`) confirms this —
 `RST $38` alone has dozens of callers — and that is where Part II picks up, following
 `JP $0296` into the initialization proper.
+
+## 6. What's in each bank
+
+§2 explained *how* banks are paged; this is *what* they hold, as far as the analysis
+has reached. Banks 0, 3 and 8 are **traced** (Parts II / IV); the rest are
+characterised here by content and by how the code pages them, and will be pinned down
+as later parts trace them. Two cheap signals: the Shannon **entropy** of each 16 KB
+bank (compressed data runs ~7 bits/byte, code and tables ~6, sparse data lower), and
+whether the bank is paged with an **immediate** `LD A,n / LD ($FFFE/$FFFF),A` (a
+fixed resource) or from a **variable** (which signals level-number-driven paging —
+there are both in this ROM).
+
+| Bank | File offset | Entropy | Role | Status |
+|---:|---|---:|---|---|
+| 0 | `$00000` | 6.85 | **main game code** — vectors, init, the VDP / load / maths routines | traced (Part II) |
+| 1 | `$04000` | 6.72 | game code (the default slot-1 bank; the most-paged of all) | traced (called) |
+| 2 | `$08000` | 6.43 | code / data (the default slot-2 bank) | paged ×9 |
+| 3 | `$0C000` | 5.50 | the **`RST` dispatcher** — opens with a `JP` table (`C3 …`) | traced (Part II §2) |
+| 4 | `$10000` | 5.96 | data (sparse, leading zeros) | inferred |
+| 5 | `$14000` | 5.89 | data | inferred |
+| 6 | `$18000` | 6.18 | a pointer / resource **table** (4-byte records) + data | inferred |
+| 7 | `$1C000` | 6.23 | data | inferred |
+| 8 | `$20000` | 5.58 | **graphics** — tile patterns + the palette pointer table (`$7400`) | traced (Part IV) |
+| 9 | `$24000` | 7.01 | **compressed** graphics / data | inferred (high entropy) |
+| 10 | `$28000` | 6.11 | compressed data — likely **zone / level** data | inferred |
+| 11–15 | `$2C000`–`$3FFFF` | 6.2–6.5 | **zone / level data and graphics**, paged by level number | inferred |
+
+So your intuition holds: bank 0 is the engine, banks 8–9 hold graphics, and the upper
+banks (10–15) carry the bulk, high-entropy data the code reaches through *variable*
+bank writes — exactly the shape of level/zone assets spread across the ROM. Tying each
+upper bank to a specific zone is a Part IV/V job, once the level loader is traced.
 
 ---
 

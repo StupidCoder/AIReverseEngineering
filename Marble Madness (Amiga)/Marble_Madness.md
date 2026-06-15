@@ -1016,6 +1016,26 @@ regions** (the scripted seesaws/holes/triggers, `+$14`), the **coarse zones** (`
 and the two **creature-spawn** lists (`+$18`/`+$20`). Object-placement also breaks down
 by `type` (`tracks` prints the histogram).
 
+**Visualising the layers.** `extract/cmd/regions` draws the slope field as a 3-D
+wireframe (Part V §4) and overlays the other Track layers at their **true** `(X,Y)`,
+never snapped: **placement objects** as cyan dots, **`+$18` spawns** as magenta pins,
+**`+$20` spawns** as orange pins. For Practice (below) the placement dots land squarely
+**on** the course — which doubles as a *calibration*: features must sit on the course, so
+their fit confirms the `(X,Y)` grid matches the slope mesh.
+
+![Practice course Track layers — slope wireframe + placement objects (cyan)](rendered/practy.wire.png)
+
+Two honest caveats the markers expose rather than hide:
+
+- On courses *with* creature spawns, the spawn pins land **off** the slope band (in the
+  gaps beside the course). Since the placement objects calibrate, that is real — the
+  creatures are placed off the path — not a coordinate error.
+- The `+$18` record's `(X,Y)` **is** the spawn position (verified: the spawner writes
+  `obj+$C/$10` from it). The `+$20` record's `(X,Y)` is **not** — the `+$20` spawner takes
+  its position from a randomised definition table and stores the record's `(X,Y)` in a
+  separate field (`obj+$34/$36`). So the orange pins mark the `+$20` record cell, *not* the
+  verified creature location; that gap is left visible for the eye to interpret.
+
 **Still open.** What each placement `type` 0–7 *means*, the per-type object/animation
 definitions (`+$C`/`+$10`), the enemy/marble start positions, and the last unidentified
 header pointer (`+$18` and `+$20` are now the creature spawns above; only `+$24` — null
@@ -1227,11 +1247,10 @@ per-cell terrain codes.
 `extract/cmd/regions` replays the `$E158` height generation and plots each course as an
 iso slope-direction map (`rendered/<course>.regions.png`) and a 3-D wireframe of the
 mesh (`rendered/<course>.wire.png` — dimetric, hidden-line, 3× supersampled, Go
-standard library). From nothing but the 66 records the practice render reproduces the
-course feature-for-feature — the checkerboard of `7×7` slope facets, its two recessed
-holes, the descending zigzag canyon, and the flat run-outs:
-
-![Practice course height-field wireframe](rendered/practy.wire.png)
+standard library; **shown with the Track's other layers in Part IV §5**). From nothing
+but the 66 records the practice render reproduces the course feature-for-feature — the
+checkerboard of `7×7` slope facets, its two recessed holes, the descending zigzag canyon,
+and the flat run-outs.
 
 ### The scripted dynamic regions — `sub_016900`
 

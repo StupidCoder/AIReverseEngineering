@@ -16,14 +16,18 @@
 // the profile consumed one byte per cell in $E158's exact diagonal fill order
 // (reset on a $80 marker) — and plots the result in iso tile space.
 //
-// NOTE this is the STATIC slope field (the checkerboard). The handful of dynamic
-// regions (seesaws / holes / triggers) live in a separate scripted list at Track
-// header +$14 and are not drawn here.
+// The wireframe also overlays the other Track layers at their TRUE (X,Y), never snapped:
+// placement objects (cyan dots, Track +4), +$18 creature spawns (magenta pins) and +$20
+// spawns (orange pins). The placement dots double as a calibration — course features must
+// sit on the course, so their fit confirms the (X,Y) grid matches the slope mesh. (NB the
+// +$18 record (X,Y) is the verified spawn position; the +$20 record (X,Y) is a secondary
+// field — its spawner positions from a definition table — so those pins mark the record
+// cell, not the verified creature location. The mismatch is left visible, not hidden.)
 //
 // Usage: regions <disk.adf> <outdir>
 //
 //	writes <outdir>/<course>.regions.png (iso tiles coloured by slope direction)
-//	   and <outdir>/<course>.wire.png    (3-D wireframe of the height mesh)
+//	   and <outdir>/<course>.wire.png    (3-D wireframe + the Track marker layers)
 package main
 
 import (
@@ -310,8 +314,11 @@ func main() {
 		prog, err := hunk.Load(data, 0)
 		chk(err)
 		field, lo, hi := buildField(prog.Image)
+		objects := parsePlacement(prog.Image)
+		spawnsA := parseSpawns(prog.Image, 0x18)
+		spawnsB := parseSpawns(prog.Image, 0x20)
 		writePNG(filepath.Join(outdir, c.key+".regions.png"), render(field))
-		writePNG(filepath.Join(outdir, c.key+".wire.png"), renderWire(field, lo, hi))
+		writePNG(filepath.Join(outdir, c.key+".wire.png"), renderWire(field, lo, hi, objects, spawnsA, spawnsB))
 		fmt.Printf("%s: %d tiles, height %d..%d -> %s.{regions,wire}.png\n", c.key, len(field), lo, hi, c.key)
 	}
 }
@@ -331,9 +338,45 @@ const (
 	wSY     = 6.5  // iso half-height
 	wZScale = 2.6  // height exaggeration
 	wPitDrop = 30.0
+	spawnStem = 20 // marker pin height (final px)
+	spawnR    = 5  // marker head radius (final px)
+	spawnPad  = spawnStem + spawnR + 4 // extra top margin for the pins
 )
 
-func renderWire(field map[[2]int]cell, lo, hi int) *image.RGBA {
+// parseSpawns reads a creature-spawn list (Track header +$18 or +$20): the global's
+// pointer -> the list -> 8-byte [X][Y][animPtr][type] records, $FF-terminated.
+func parseSpawns(im []byte, hdrOff uint32) [][2]int { return parseXY(im, u32(im, u32(im, hdrOff)), 8) }
+
+// parsePlacement reads the object-placement table (Track header +4 -> +0): 3-byte
+// [X][Y][type] records, $FF-terminated.
+func parsePlacement(im []byte) [][2]int { return parseXY(im, u32(im, u32(im, 4)), 3) }
+
+// parseXY collects the [X][Y] of each stride-byte record from off until a leading $FF.
+func parseXY(im []byte, off uint32, stride int) [][2]int {
+	var out [][2]int
+	for o := off; int(o)+stride <= len(im) && len(out) < 1000; o += uint32(stride) {
+		if im[o] == 0xFF {
+			break
+		}
+		out = append(out, [2]int{int(im[o]), int(im[o+1])})
+	}
+	return out
+}
+
+// dot fills a small diamond of radius r at (cx,cy).
+func dot(img *image.RGBA, cx, cy, r int, c color.RGBA) {
+	for dy := -r; dy <= r; dy++ {
+		w := r - abs(dy)
+		for dx := -w; dx <= w; dx++ {
+			px, py := cx+dx, cy+dy
+			if px >= 0 && py >= 0 && px < img.Rect.Dx() && py < img.Rect.Dy() {
+				img.SetRGBA(px, py, c)
+			}
+		}
+	}
+}
+
+func renderWire(field map[[2]int]cell, lo, hi int, objects, spawnsA, spawnsB [][2]int) *image.RGBA {
 	base := float64(lo)
 	dz := func(c cell) float64 {
 		if c.h < 8000 {
@@ -344,16 +387,32 @@ func renderWire(field map[[2]int]cell, lo, hi int) *image.RGBA {
 	proj := func(tx, ty int, z float64) (float64, float64) {
 		return float64(ty-tx) * wSX, float64(tx+ty)*wSY - z*wZScale
 	}
-	// bounds over all projected vertices
+	// cellAt returns the mesh cell at (x,y), or a floor-plane cell if it isn't on the
+	// mesh — so markers are plotted at their TRUE (x,y), never snapped elsewhere.
+	cellAt := func(x, y int) cell {
+		if c, ok := field[[2]int{x, y}]; ok {
+			return c
+		}
+		return cell{h: lo}
+	}
+	// bounds over the mesh AND every marker (markers can sit off the mesh)
 	minX, minY, maxX, maxY := 1e18, 1e18, -1e18, -1e18
+	upd := func(x, y int, c cell) {
+		px, py := proj(x, y, dz(c))
+		minX, maxX = math.Min(minX, px), math.Max(maxX, px)
+		minY, maxY = math.Min(minY, py), math.Max(maxY, py)
+	}
 	for t, c := range field {
-		x, y := proj(t[0], t[1], dz(c))
-		minX, maxX = math.Min(minX, x), math.Max(maxX, x)
-		minY, maxY = math.Min(minY, y), math.Max(maxY, y)
+		upd(t[0], t[1], c)
+	}
+	for _, layer := range [][][2]int{objects, spawnsA, spawnsB} {
+		for _, s := range layer {
+			upd(s[0], s[1], cellAt(s[0], s[1]))
+		}
 	}
 	const M = 30
 	W := int(maxX-minX) + 2*M
-	H := int(maxY-minY) + 2*M
+	H := int(maxY-minY) + 2*M + spawnPad // extra top room for the spawn pins
 	big := image.NewRGBA(image.Rect(0, 0, W*ssaa, H*ssaa))
 	bg := color.RGBA{8, 10, 18, 255}
 	for i := 0; i < len(big.Pix); i += 4 {
@@ -361,7 +420,7 @@ func renderWire(field map[[2]int]cell, lo, hi int) *image.RGBA {
 	}
 	sp := func(tx, ty int, c cell) (int, int) {
 		x, y := proj(tx, ty, dz(c))
-		return int((x - minX + M) * ssaa), int((y - minY + M) * ssaa)
+		return int((x - minX + M) * ssaa), int((y - minY + M + spawnPad) * ssaa)
 	}
 	get := func(tx, ty int) (cell, bool) { c, ok := field[[2]int{tx, ty}]; return c, ok }
 	lineCol := func(a, b cell) color.RGBA {
@@ -413,6 +472,29 @@ func renderWire(field map[[2]int]cell, lo, hi int) *image.RGBA {
 		line(big, x01, y01, x11, y11, lineCol(c01, c11))
 		line(big, x00, y00, x11, y11, color.RGBA{30, 36, 54, 255}) // faint triangulation diagonal
 	}
+	// Markers are plotted at their TRUE (x,y); off-mesh ones sit on the floor plane (not
+	// snapped) so the data is shown honestly — placement objects also double as a
+	// calibration that the (x,y) grid matches the slope mesh.
+	// Placement objects (the "Objects" count): small cyan dots on the terrain, first.
+	for _, s := range objects {
+		bx, by := sp(s[0], s[1], cellAt(s[0], s[1]))
+		dot(big, bx, by, 2*ssaa, color.RGBA{90, 230, 235, 255})
+	}
+	// creature-spawn pins, drawn on top: +$18 magenta, +$20 orange
+	pins := func(spawns [][2]int, col color.RGBA) {
+		for _, s := range spawns {
+			bx, by := sp(s[0], s[1], cellAt(s[0], s[1]))
+			topY := by - spawnStem*ssaa
+			for w := -1; w <= 1; w++ { // a few-px stem
+				line(big, bx+w, by, bx+w, topY, col)
+			}
+			dot(big, bx, topY, spawnR*ssaa, col)
+			dot(big, bx, topY, spawnR*ssaa-2, color.RGBA{255, 255, 255, 255}) // white core for contrast
+			dot(big, bx, topY, spawnR*ssaa-4, col)
+		}
+	}
+	pins(spawnsA, color.RGBA{255, 60, 210, 255}) // +$18 = magenta
+	pins(spawnsB, color.RGBA{255, 170, 30, 255}) // +$20 = orange
 	return downsample(big, ssaa)
 }
 

@@ -256,11 +256,24 @@ time each would have saved:
   course tilemap) feature-for-feature; doing that comparison caught a real
   horizontal-mirror bug and a profile-indexing error (visible as speckle) that
   code-reading alone had missed.
-- **The user's hands-on knowledge outranks a plausible code reading.** "Dizzy" was
-  asserted as a death/respawn animation straight from the code; the user, from
-  *playing the game*, knew it is a recoverable stun. State game behaviour as fact only
-  once it is traced; otherwise flag it as inference and defer to the domain expert in
-  the loop.
+- **Never fudge data to make the picture look right — a marker in the "wrong" place is
+  information, not a defect.** When spawn markers landed off the course mesh, the
+  tempting fix was to snap each to the nearest tile; that would have *hidden* the exact
+  gap worth seeing. Plot it where the data says. Two outcomes, both useful: it was real
+  (the creatures are placed off the path — confirmed because the *placement* objects,
+  same grid, calibrated dead-on the course), or it would have flagged a misread (e.g.
+  the `+$20` spawner takes its position from a definition table, not the record cell I
+  was plotting). Snapping erases both signals. A second-channel **calibration overlay**
+  — plot a layer you *know* the ground truth for (course features must sit on the course)
+  — turns "is my coordinate mapping right?" into a yes/no you can see.
+- **The user's hands-on knowledge outranks a plausible code reading — so when the data
+  looks wrong, show it and ask them to look.** "Dizzy" was asserted as a death/respawn
+  animation straight from the code; the user, from *playing the game*, knew it is a
+  recoverable stun. They also catch placement errors a disassembly can't: someone who
+  knows the course can connect "that marker is in the wrong spot" to "oh, that's the
+  bird's entry point," pinpointing the misread. State game behaviour as fact only once
+  it is traced; otherwise flag it as inference and put the honest (even visibly-wrong)
+  artefact in front of the domain expert in the loop.
 - **Keep generated tools deterministic, and verify the artefact, not the run.**
   Map-iteration order made PNG output change run-to-run; a `head` on a regenerate
   SIGPIPE-killed it mid-way and left stale files. `git diff`/`status` on the *committed

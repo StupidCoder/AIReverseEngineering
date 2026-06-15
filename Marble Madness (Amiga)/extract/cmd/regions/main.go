@@ -540,21 +540,22 @@ func renderWire(field map[[2]int]cell, lo, hi int, objects [][2]int, spawnsA, sp
 	// of the animPtr position list (the creature's group/path), and a solid pin at pos[0]
 	// (the verified spawn position the spawner uses).
 	pins := func(spawns []spawn, col color.RGBA) {
-		dim := color.RGBA{col.R / 3, col.G / 3, col.B / 3, 255}
 		for _, s := range spawns {
 			hx, hy := sp(s.home[0], s.home[1], cellAt(s.home[0], s.home[1]))
 			if len(s.pos) == 0 {
 				continue
 			}
 			px0, py0 := sp(s.pos[0][0], s.pos[0][1], cellAt(s.pos[0][0], s.pos[0][1]))
-			// home cell: hollow diamond outline
+			// home cell: hollow diamond outline (drawn 2px wide so it reads at full brightness)
 			for k := 0; k < 4; k++ {
 				dx, dy := []int{0, spawnR, 0, -spawnR}[k], []int{-spawnR, 0, spawnR, 0}[k]
 				nx, ny := []int{spawnR, 0, -spawnR, 0}[k], []int{0, spawnR, 0, -spawnR}[k]
-				line(big, hx+dx*ssaa, hy+dy*ssaa, hx+nx*ssaa, hy+ny*ssaa, dim)
+				line(big, hx+dx*ssaa, hy+dy*ssaa, hx+nx*ssaa, hy+ny*ssaa, col)
+				line(big, hx+dx*ssaa+1, hy+dy*ssaa, hx+nx*ssaa+1, hy+ny*ssaa, col)
 			}
 			// connector home -> spawn position
-			line(big, hx, hy, px0, py0, dim)
+			line(big, hx, hy, px0, py0, col)
+			line(big, hx+1, hy, px0+1, py0, col)
 			// the rest of the position list: small dots
 			for _, p := range s.pos[1:] {
 				bx, by := sp(p[0], p[1], cellAt(p[0], p[1]))

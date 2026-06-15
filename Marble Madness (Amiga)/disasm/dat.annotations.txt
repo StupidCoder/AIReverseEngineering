@@ -302,12 +302,18 @@
 0173DA  funnel_out_top   the code-21 handler = the TOP funnel EXIT: a bounds-boxed wall ($180AC)
 #   that contains the marble where funnel_in_top drops it (region plotted at cell (67,78)).
 017424  funnel_out_low   the code-22 handler = the LOWER funnel EXIT wall ($180AC) at (84,94).
-016C0C  proximity_trigger  the code-5/26-31 handler (= the GOAL at the 2 flag regions). Inputs
-#   d5=refX-marbleX, d4=refY-marbleY (region ref minus marble). Computes the OCTAGONAL distance
-#   octd = max(|d5|,|d4|)*16 + 3/8*min(...)*... ; if octd < $38 -> set $6A1=$6A2=1 + sound
-#   $21ADC(7), else no-op ($18024). So the goal is a RADIAL proximity test around EACH flag
-#   region's ref point (threshold $38), NOT a line between the two flags; either flag firing
-#   triggers it. The 2 goal regions are independent code-5 triggers placed at the flag points.
+016C0C  proximity_trigger  the code-5/26-31 handler. Inputs d5=$C(a4)-$6C4, d4=$10(a4)-$6C6,
+#   where $C(a4)=ref word=refX*8 and $6C4=marble seed (8 per cell) -> d5/d4 are in EIGHTH-cell
+#   units. octd = max(|d5|,|d4|)*16 + min*6; if octd < $38 -> set $6A1=$6A2=1 (WALL BOUNCE) +
+#   sound $21ADC(7). NB the $38 threshold over 1/8-cell units = only ~0.44 cell radius (TINY).
+#   THE 2 BEGINNER "GOAL FLAG" regions (9,10, terr5) use this = they are SOLID BUMP OBSTACLES
+#   (animated flags, link $1D62), NOT the goal-area win trigger. (Earlier wrong note said this
+#   was the goal via radial proximity - corrected; the goal AREA is coarse-zone type 12, below.)
+# THE GOAL is a ZONE, not the flags: terrain_lookup $12B9E (coarse zones $9D4) partitions the
+#   course into 13 progress regions types 0..12 (same as respawn-anchor types) by diagonal
+#   boundaries; type 12 = the final on-course region (the "GOAL" rectangle), type $FF past it =
+#   off-course. Entering type 12 = the goal (matches in-game: triggers on crossing into the
+#   rectangle, not on nearing a flag). Exact win instruction on entering type 12 = OPEN.
 # THE $CCA SURFACE-REGION STRUCTS: 25 structs, $56 (86) bytes each ($CCA..$CCA+$866;
 #   activator loop $12B02 and producer $F8FC/$F96A both stride $56). Fields: +$C/+$10 =
 #   downhill reference point (refX,refY); +$18 valid; +$1A contact/anim state; +$1E

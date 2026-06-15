@@ -1164,14 +1164,20 @@ a clean cross-check. (The link being hardcoded per terrain code, rather than dat
 why these specific codes 18–22 appear only on Beginner: each course's bespoke features get
 their own codes and handlers.)
 
-**The goal is a radial proximity test, not a finish line.** Each of the two goal-flag regions
-is an independent `terr 5` proximity trigger (`proximity_trigger $16C0C`): it takes the vector
-from the marble to the region's ref point, forms the game's octagonal distance, and fires
-(sound + flags) when that distance is below `$38`. So the marble is "in the goal" when it
-comes within `$38` of **either** flag's trigger point — *not* when it crosses the line between
-them. (Whether that radius reaches slightly in front of the visible flags or only past them
-comes down to the exact `$38` unit scale, which isn't fully pinned — a good thing to measure
-against live play next.)
+**The goal flags are bump obstacles; the goal *area* is a coarse zone.** (Corrects an earlier
+claim here that the goal was radial proximity to the flags — wrong on two counts, as live play
+showed.) The two flag regions are `terr 5` triggers (`$16C0C`), but (1) the radius is **tiny**:
+the handler's vector `d5/d4 = (ref − marble)·8` is in *eighth-of-a-cell* units, so its `$38`
+octagonal threshold is only **~0.44 cells** — a small zone right at each flag, not a 3.5-cell
+area; and (2) the handler sets the **wall-bounce flags** (`$6A1/$6A2`) + a sound, i.e. it makes
+the marble *bounce off* the flag. So the flags are **solid, animated bump obstacles** at the
+two front corners of the goal — not the win detector. Reaching the goal is a **zone** test:
+the coarse-zone partition (`$9D4`, `terrain_lookup $12B9E`) divides the course into 13 progress
+regions (types 0–12, the same types as the respawn anchors); **type 12 is the final region —
+the "GOAL" rectangle** — past which is off-course (`$FF`). Entering that zone is what registers
+the goal, which matches the in-game behaviour (it triggers on crossing into the rectangle, not
+on nearing a flag). The exact win instruction that fires on entering type 12 is not yet pinned
+(a good candidate for a dynamic capture).
 
 **Per-course counts** ([`extract/cmd/tracks`](extract/cmd/tracks) decodes them all):
 

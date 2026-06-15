@@ -172,7 +172,12 @@
 #   entry (filtered by tile-range args) allocs a struct via $F6B2, sets +$52/+$54 = (x,y)
 #   grid key, and calls region_update $F96A which stores the record's long as the region's
 #   SCRIPT POINTER +$3A and sets +$18/+$1A. region_activate $F8FC matches +$52/+$54 vs the
-#   marble tile each frame to set +$18 valid.
+#   marble tile each frame to set +$18 valid. NB the record [x][y] (+$52/+$54) is only a
+#   TRIGGER/grid-activation CELL (a single-cell equality/bracket match in $F8FC, NOT a w*h
+#   rect) — like a creature's home cell. A dynamic region has a POSITION, no SIZE: its actual
+#   world position is the script's first op0 KEYFRAME refX,refY (-> +$C/+$10 = refX<<19), and
+#   spatial extent (e.g. the whole drawbridge) is built by TILING several point-regions.
+#   (Contrast the STATIC $9A6 slope records, which DO carry [xSize][ySize].)
 00FD68  region_script    PER-REGION BYTECODE INTERPRETER (a5=region) — THIS writes the
 #   downhill reference +$C/+$10. +$3A=script base, +$36=script PC (advances 2B/word read),
 #   +$1E=current keyframe DURATION in frames (counted down; at 1 fetch next opcode). Word

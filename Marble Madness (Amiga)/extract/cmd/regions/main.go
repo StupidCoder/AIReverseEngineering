@@ -434,20 +434,37 @@ func parseActors(im []byte) []spawn {
 	return out
 }
 
-// parseDynRegions reads the Track +$14 dynamic-region source list ([x][y][scriptPtr:4]
-// 6-byte records, $FF-terminated) and returns each region's grid cell. These are the
-// scripted animated-terrain regions (seesaws, sliding walls, the opening/closing drawbridge).
-func parseDynRegions(im []byte) [][2]int {
+// dynRegion is one Track +$14 dynamic (scripted, animated) terrain region. cell is the
+// record's [x][y] = the grid-activation/trigger cell (region_activate $F8FC matches it
+// against the marble cell — a single-cell key, NOT a w×h rectangle: dynamic regions have a
+// position, no size). pos is the region's ACTUAL world position, read from the first
+// keyframe of its script (op0 KEYFRAME refX,refY words; the engine uses refX<<19,refY<<19 as
+// the +$C/+$10 reference point the marble rolls toward) — the analogue of a creature's
+// spawn position vs. its home cell.
+type dynRegion struct {
+	cell   [2]int
+	pos    [2]int
+	hasPos bool
+}
+
+// parseDynRegions reads the +$14 source list ([x][y][scriptPtr:4] 6-byte records, $FF-term)
+// = the scripted animated-terrain regions (seesaws, sliding walls, the opening/closing
+// drawbridge). For each it pulls the first keyframe's (refX,refY) as the real position.
+func parseDynRegions(im []byte) []dynRegion {
 	block := u32(im, 0x14)
 	if block == 0 || int(block)+4 > len(im) {
 		return nil
 	}
-	var out [][2]int
+	var out []dynRegion
 	for o := u32(im, block); int(o)+6 <= len(im) && len(out) < 200; o += 6 {
 		if im[o] == 0xFF {
 			break
 		}
-		out = append(out, [2]int{int(im[o]), int(im[o+1])})
+		d := dynRegion{cell: [2]int{int(im[o]), int(im[o+1])}}
+		if sp := u32(im, o+2); sp != 0 && int(sp)+10 <= len(im) && u16(im, sp) == 0 {
+			d.pos, d.hasPos = [2]int{u16(im, sp+2), u16(im, sp+4)}, true
+		}
+		out = append(out, d)
 	}
 	return out
 }
@@ -481,7 +498,13 @@ func dot(img *image.RGBA, cx, cy, r int, c color.RGBA) {
 	}
 }
 
-func renderWire(field map[[2]int]cell, lo, hi int, objects [][2]int, spawnsA, spawnsB, actors []spawn, dynRegions [][2]int) *image.RGBA {
+func renderWire(field map[[2]int]cell, lo, hi int, objects [][2]int, spawnsA, spawnsB, actors []spawn, dynRegions []dynRegion) *image.RGBA {
+	regAt := func(d dynRegion) [2]int {
+		if d.hasPos {
+			return d.pos
+		}
+		return d.cell
+	}
 	base := float64(lo)
 	dz := func(c cell) float64 {
 		if c.h < 8000 {
@@ -520,7 +543,8 @@ func renderWire(field map[[2]int]cell, lo, hi int, objects [][2]int, spawnsA, sp
 			}
 		}
 	}
-	for _, r := range dynRegions {
+	for _, d := range dynRegions {
+		r := regAt(d)
 		upd(r[0], r[1], cellAt(r[0], r[1]))
 	}
 	const M = 30
@@ -637,7 +661,8 @@ func renderWire(field map[[2]int]cell, lo, hi int, objects [][2]int, spawnsA, sp
 	// Dynamic regions (animated terrain — the drawbridge etc.): a hollow yellow box at the
 	// region's grid cell. No path.
 	regCol := color.RGBA{240, 225, 80, 255}
-	for _, r := range dynRegions {
+	for _, d := range dynRegions {
+		r := regAt(d)
 		bx, by := sp(r[0], r[1], cellAt(r[0], r[1]))
 		const rr = 4 * ssaa
 		for d := 0; d <= 1; d++ { // 2px wide so the box survives downsampling

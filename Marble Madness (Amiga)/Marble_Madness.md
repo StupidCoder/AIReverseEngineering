@@ -1048,14 +1048,20 @@ black marbles, `+$20` ooze, and `+$1C` slinkies.
 
 **The opening/closing drawbridge: a dynamic region (`+$14`).** The drawbridge is *animated
 terrain* the marble rolls over, so it lives in the scripted dynamic regions, not in any
-creature list. Beginner has 11 dynamic regions, and six of them (`region cells (23,44)`,
-`(34,61)×3`, `(44,61)`) form a **staggered keyframe chain**: each region replays the same
-sequence of surface keyframes (cycling terrain codes 18→19→20→21→22→16, the fall/edge codes)
-offset by a phase, alternating each surface state with a low "gap" keyframe and ending on a
-long `dur=260` hold. That staggered surface-then-gap animation marching across the course is
-the bridge opening and closing. Pinning exactly which region indices correspond to the
-visible bridge span is best done by overlaying the dynamic regions on the wireframe and
-eyeballing it (as we did to confirm the marbles and ooze) — next step.
+creature list. A dynamic-region record is `[x][y][scriptPtr]` (6 bytes) — and, like a
+creature record, its `[x][y]` is **only a trigger cell**, not the region's position: it is
+the grid key `region_activate $F8FC` matches against the marble's cell to switch the region
+on (a single-cell equality/bracket test, not a rectangle). The region's **actual position is
+the script's first keyframe** (`op0`'s `refX,refY` words → `+$C/+$10 = refX<<19,refY<<19`,
+the reference point the marble rolls toward). So a dynamic region has a **position, not a
+size** — contrast the *static* `$9A6` slope regions, which carry an explicit `[xSize][ySize]`
+rectangle. A region's spatial extent is built by **tiling several point-regions**: Beginner
+has 11, and six of them (record cells `(23,44)`, `(34,61)×3`, `(44,61)`; keyframe positions
+marching `(64,78)→(81,86)→(87,86)→(84,94)→(105,107)`) form a **staggered keyframe chain** —
+each region replays the same surface-keyframe sequence (cycling terrain codes 18→19→20→21→22
+→16, the fall/edge codes), phase-offset, alternating each surface state with a low "gap"
+keyframe and ending on a long `dur=260` hold. That marching surface-then-gap animation is the
+bridge opening and closing.
 
 **Per-course counts** ([`extract/cmd/tracks`](extract/cmd/tracks) decodes them all):
 
@@ -1094,8 +1100,8 @@ the 79 placement dots land squarely **on** the course, which doubles as a *calib
 features must sit on the course, so their fit confirms the `(X,Y)` grid matches the slope
 mesh. The 2 magenta paths are Beginner's two **black enemy marbles** (their polylines match
 the marbles' idle paths in live play to the pixel); the 3 green paths clustered mid-course
-are the **three slinkies**; the yellow boxes are the **dynamic regions**, among which the
-opening/closing drawbridge lives.
+are the **three slinkies**; the yellow boxes are the **dynamic regions** (drawn at their
+keyframe position, not their trigger cell), among which the opening/closing drawbridge lives.
 
 ![Beginner course Track layers — slope wireframe + placement objects (cyan) + black-marble/slinky patrols + dynamic regions](rendered/beginr.wire.png)
 

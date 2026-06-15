@@ -964,22 +964,26 @@ actor-system globals — each one a different structure:
 +2  byte  type  (the region/feature kind; Beginner uses 0..12)
 ```
 
-Each record marks a point of kind `type` at iso grid cell `(X,Y)`. The engine's proximity
-query (`$012600`) finds the record nearest the marble and writes its `type` to the marble's
-`+$1B` — so `type` is the **region the marble is currently in**.
+Each record marks a respawn point of kind `type` at iso grid cell `(X,Y)`. That `type` is the
+**coarse-zone progress region** the point belongs to: the course is partitioned into regions
+0–12 by the coarse-zone partition (`$9D4`, `terrain_lookup $12B9E`; the same partition whose
+last region is the goal — see *The goal flags are bump obstacles* below). Each frame the
+classifier records **which region the marble is currently in** in `marble+$1B`, and
+`save_prev_state` keeps the previous value in `+$1D`.
 
 **These are the respawn anchors** (confirmed by tracing the fall path — and visible in the
 overlay: the cyan dots line the fall-off edges). When the marble rolls off an edge it goes
 airborne and enters state 4 (FALLING/SETTLING); that transition calls the reposition routine
 `$1448E → $1279C → $1288C`, which **scans the placement table for the record nearest the
-marble's *pre-fall* tile (`obj+$32/$34`) whose `type` matches the region it fell from
-(`obj+$1D`)**, and drops the marble back at that record's `(X,Y)` (`$690/$694 → obj+$C/$10`,
-with the surface Z re-sampled there). Distance is the game's octagonal metric, capped at a
-threshold; a wider fallback pass (`$15FC8`, radius `$180`) catches the rest. So the `type`
-byte partitions the course into regions, and each region carries its own ring of edge
-respawn points — you reappear on the **correct ledge nearest where you fell**, not across a
-gap. (This is *also* the coarse feature/interaction map; it is distinct from the slope/wall
-geometry `$9A6` and the moving objects.) What every `type` value denotes is still partly open.
+marble's *pre-fall* tile (`obj+$32/$34`) whose `type` equals the zone it fell from
+(`obj+$1D`)** — i.e. **only respawn points in the *same* progress region are eligible** — and
+drops the marble back at that record's `(X,Y)` (`$690/$694 → obj+$C/$10`, with the surface Z
+re-sampled there). Distance is the game's octagonal metric, capped at a threshold; a wider
+fallback pass (`$15FC8`, radius `$180`) catches the rest. So you reappear on the **correct
+ledge nearest where you fell, never in a different zone across a gap** — the zone tag is what
+prevents the respawn from jumping the marble to an unrelated ledge that merely happens to be
+near. So one course partition does triple duty: it tracks progress, it gates the respawn, and
+its final region (12) is the goal.
 
 **Creature spawns** (`+$18` and `+$20`). Two near-identical systems place the course's
 moving creatures as the marble approaches. Each is a list of **8-byte records**:

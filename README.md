@@ -99,9 +99,13 @@ AIReverseEngineering/
 │   ├── extracted/               # generated .prg files (regenerable; git-ignored)
 │   └── rendered/                # generated PNGs (charsets, maps, sprites)
 │
-└── Marble Madness (Amiga)/
-    ├── Marble_Madness.adf       # raw disk image (not committed; see Image files)
-    └── Marble_Madness.md        # disk-format writeup (Part I done; rest stubbed)
+├── Marble Madness (Amiga)/
+│   ├── Marble_Madness.adf       # raw disk image (not committed; see Image files)
+│   └── Marble_Madness.md        # disk-format writeup (Part I done; rest stubbed)
+│
+└── Sonic (GG)/
+    ├── Sonic The Hedgehog (Japan, USA).gg   # raw Game Gear cartridge ROM
+    └── Sonic.md                 # cartridge + game writeup (Part I done; rest stubbed)
 ```
 
 Per-game folder contract: `<Game>.<ext>` raw image, a markdown writeup of the
@@ -123,6 +127,7 @@ below pin the precise copy, so the work stays reproducible.
 | `Elite (C64)/Elite.tap` | 801,592 | `d51b7f84fd1bec6eb24f4bf210c8cc74` |
 | `Fort Apocalypse (C64)/Fort_Apocalypse.tap` | 225,817 | `bec7409816865f3ad160af9984f127cd` |
 | `Marble Madness (Amiga)/Marble_Madness.adf` | 901,120 | `735dc697d64b3eeaa000778eb0b1153a` |
+| `Sonic (GG)/Sonic The Hedgehog (Japan, USA).gg` | 262,144 | `8a95b36139206a5ba13a38bb626aee25` |
 
 Verify a copy before reusing it, e.g. `md5 "Elite (C64)/Elite.tap"`
 (`md5sum` on Linux).

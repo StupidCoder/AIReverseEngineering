@@ -189,25 +189,44 @@
 #   op2 ($1007A): set +$1C(sprite/state word)/+$23/+$22, restore +$3E=+$46; if +$1F==$A sound.
 #   So a scripted region's +$C/+$10 = a KEYFRAME STREAM (from the Track anim-script table
 #   $FD2C). Fixed-point <<19 matches the marble position scale so sub_016900 subtracts directly.
-# THE 19-OPCODE JUMP TABLE $FD96 (op*4; target=$FD96+2+off). Decoded (a5=region, PC=+$36):
-#   op0 $FDE2 KEYFRAME (5 words: refX,refY,refZ,dur,terr) - plant ref pt + hold dur frames.
-#   op1 $FFF0; op2 $1007A state/sprite keyframe (above); op3 $100D2.
-#   op8 $100EC CONDITIONAL on the MARBLE: reads marble obj $236, $5D8 (player), marble state
-#     +$18 - branches on marble presence/state (the DRAWBRIDGE regions 0,1,2 use op8 after op0
-#     = react to the marble: raise/lower when it is/ isn't on the bridge). Full predicate OPEN.
-#   *** CONTROL FLOW (this is how regions LINK to each other): ***
-#   op9  $10238 JUMP  : PC = *(PC)            (absolute goto within the script).
-#   op10 $10244 CALL  : PC = *(PC), save PC+4 -> +$32 (gosub).
-#   op11 $1025C RETURN: PC = +$32.
-#   op12 $10266 LINK  : +$46/+$3E = *(PC), advance PC+4 (switch active script base to a linked
-#     script = chain one region's script to another's).  op13 $10286 similar (loads a ptr).
-#   op16 $1002E MOVE  : when +$1E(dur)==1, drift the ref at +$4E/+$50 by region vX(a5+0)/vY(+4)
-#     each frame = a moving slope/seesaw/sliding wall.
-#   ops 4-7,14,15,17,18 = $101A0/$101C2/$101EC/$1020E/$102A6/$102E6/$10300/$10326 (OPEN).
-# FUNNELS (beginr regions 3/4 terr18->21, 5/6/7 terr19/20->22): the ENTRANCE script is just a
-#   FALL keyframe (terr 18/19/20 = the $16A00 fall codes), no in-script jump to the exit; the
-#   entrance->exit hand-off most likely routes through the marble FALL/reposition path (state
-#   4, reposition_marble $1448E) rather than a script pointer. CONFIRM = OPEN.
+# THE 19-OPCODE JUMP TABLE $FD96 (op*4; target=$FD96+2+off). ALL decoded (a5=region, PC=+$36);
+# the interpreter runs ops in a loop (flag -$D) until a STOP op clears it. Reproduced by the
+# tool extract/cmd/rgnscript (disassembles any course's region scripts). Operand bytes shown:
+#   op0  $FDE2  KEYFRAME  5w: refX,refY,refZ,dur,terr -> +$C=refX<<19/+$10/+$14, +$1E dur,
+#     +$1F terr.  IF dur==1 also reads +$26,+$28 (2w) and a LINK long -> +$46/+$3E (a sprite-
+#     anim ptr). Plus terrain self-REGISTRATION: terr3->$FD38 (THE drawbridge), terr12->$FD58
+#     funnel list, terr11/13->$FD3C slope list, terr10->$FD54, terr6/25 special. (not a STOP)
+#   op1  $FFF0  STATE-STOP   2w(+$1C,+$21): state +$1A=1; STOP.
+#   op2  $1007A SPRITE       2w(+$1C,+$23): set sprite/state, base=+$46. (not a stop)
+#   op3  $100D2 STATE0-STOP  1w(+$1C): state 0; STOP.
+#   op4  $101A0 LOOP-A       1w(count->+$24); mark loop top +$2A.
+#   op5  $101C2 NEXT-A       0w: dec +$24, branch to +$2A while !=0 (count 0 = infinite loop).
+#   op6  $101EC LOOP-B       1w(count->+$25); top +$2E.    op7 $1020E NEXT-B (2nd dbra).
+#   op8  $100EC IF-MARBLE-ON-REGION 1w arg + LONG target: if a marble (obj $236+i*$F4) has
+#     state +$18==1 and is within 3 tiles of the region ref, JUMP target (else skip). NB this
+#     is NOT what the drawbridge uses (earlier mis-parse); practy region 0 uses it.
+#   *** CONTROL FLOW (how scripts chain): ***
+#   op9  $10238 JUMP  LONG : PC = target.
+#   op10 $10244 CALL  LONG : PC = target, save return -> +$32 (gosub).   op11 $1025C RETURN.
+#   op12 $10266 LINK-46 LONG: +$46/+$3E = ptr (load a sprite-anim/sub-script, continue inline).
+#   op13 $10286 LINK-4A LONG: +$4A/+$3E = ptr.
+#   op14 $102A6 SET-VEL 2w  : region vX(a5+0)/vY(+4) (feeds op16; <<8 when dur==1).
+#   op15 $102E6 ACTIVATE-STOP 0w: JSR region_update $F96A(region,1,0); STOP.
+#   op16 $1002E MOVE 0w     : when +$1E==1, drift +$4E/+$50 by vX/vY = a moving slope/wall.
+#   op17 $10300 FALL-STOP 1w(+$1B): marble-capture state +$1A=4 + code +$1B, save PC; STOP.
+#   op18 $10326 IF-MARBLE-TERRAIN LONG: if marble terrain +$1B matches region +$1B(range>=$1E)
+#     JUMP target + JSR $21CD0(table $20A4[code-$1E]).
+# THE DRAWBRIDGE (beginr region 0, script $1C1E) decompiled by rgnscript: op0 KEYFRAME(61,56)
+#   terr3 (registers as $FD38) -> op4 LOOP-A 0 (forever) { op2 SPRITE; op12 LINK $1A8A; op3
+#   STOP +$1C=15 ; op2 SPRITE; op12 LINK $1A4E; op3 STOP +$1C=30 } op5 NEXT-A. = an AUTONOMOUS
+#   timed open/close cycle alternating two linked bridge animations ($1A8A/$1A4E), holding 15
+#   then 30 ticks. NOT marble-triggered. (Marble_Madness.md Part IV.5 has the annotated listing.)
+# FUNNELS (beginr regions 3-7, terr 18/19/20=fall entrances, 21/22=wall exits): each script is
+#   just op0 KEYFRAME(terr) + op3 STOP, all linking the SHARED $1946 sub-script. No per-pair
+#   entrance->exit jump in the script; the hand-off most likely routes through the marble FALL/
+#   reposition path (state 4, reposition_marble $1448E). CONFIRM = OPEN.
+# NB op14 SET-VEL / op16 MOVE (moving slopes/seesaws) are DEFINED but UNUSED by these 6 courses'
+#   top-level region scripts (only keyframe/loop/link/stop/conditional ops appear in the data).
 # DATA CHECK (PrcTrack decoded): the practice course has TWO terrain structures:
 #   (1) $9A6 descriptor (Track header+0) = 66 STATIC slope records (8B each: 7x7 blocks,
 #       dir 0/4 = the checkerboard diagonals, descending baseHeight) -> build_region mesh.

@@ -1090,18 +1090,59 @@ claimed regions 3–8 were one "staggered keyframe chain" forming the drawbridge
 mis-parse — the short per-region scripts are stored contiguously and I had read past each
 region's end into the next. They are eight *separate* features, as the table shows.)
 
-**The region-script opcode vocabulary** (`region_script $FD68`, a 19-entry jump table at
-`$FD96`) is now mostly decoded. Besides `op0` KEYFRAME (plant ref point + hold), `op2`
-state/sprite keyframe and `op16` MOVE (drift the ref each frame = a sliding wall/seesaw),
-there is a **control-flow set** — `op9` JUMP (`PC = *PC`), `op10` CALL (+ save return to
-`+$32`), `op11` RETURN, `op12/op13` LINK (switch the active script base to another script).
-*This is the mechanism by which regions reference each other.* The **drawbridge** (regions
-0,1,2) uses `op8`, a **conditional on the marble** (it reads the marble object `$236` and its
-state) — i.e. the bridge raises/lowers in response to where the marble is; the exact
-predicate and the `op4-7/14-18` handlers are still open. The **funnels** are subtler: each
-entrance's script is just a *fall* keyframe (terr 18/19/20) with **no in-script jump to the
-exit**, so the entrance→exit hand-off most likely routes through the marble's fall/reposition
-path (state 4, `reposition_marble $1448E`) rather than a script pointer — still to be confirmed.
+#### The region-script bytecode
+
+The dynamic regions are driven by a tiny **bytecode interpreter**, `region_script $FD68`: a
+stream of word opcodes (0..18, indexing a 19-entry jump table at `$FD96`), each followed by
+its operands. The interpreter runs opcodes in a loop until a **STOP** op ends the region's
+turn for this tick; `op0` KEYFRAME plants the reference point the marble rolls toward, and a
+small **control-flow** set chains scripts together. All 19 are decoded (the disassembler
+[`extract/cmd/rgnscript`](extract/cmd/rgnscript) replays this grammar on any course):
+
+| op | name | operands | effect |
+|---:|---|---|---|
+| 0 | KEYFRAME | `refX,refY,refZ,dur,terr` (+`,_,_,link` if `dur==1`) | plant ref point + duration + terrain code; `dur==1` keyframes also carry a linked-animation ptr; the terrain code self-**registers** the region (terr 3 → the drawbridge `$FD38`, terr 12 → funnel list, terr 11/13 → slope list) |
+| 1 | STATE-STOP | `+$1C,+$21` | set state, **stop** |
+| 2 | SPRITE | `+$1C,+$23` | set sprite/visual frame |
+| 3 | STATE0-STOP | `+$1C` | set state 0, **stop** |
+| 4 / 5 | LOOP-A / NEXT-A | `count` / — | `dbra`-style loop (count 0 = infinite) |
+| 6 / 7 | LOOP-B / NEXT-B | `count` / — | a second, independent loop |
+| 8 | IF-MARBLE-ON | `arg`,`target` | if a marble is within 3 tiles of the region (state 1), JUMP `target` |
+| 9 | JUMP | `target` | `PC = target` |
+| 10 / 11 | CALL / RETURN | `target` / — | gosub (saves return in `+$32`) / return |
+| 12 / 13 | LINK | `ptr` | load a linked sprite-animation / sub-script into `+$46`/`+$4A` |
+| 14 | SET-VEL | `vX,vY` | region drift velocity (feeds `op16`) |
+| 15 | ACTIVATE-STOP | — | run the activate/transition handler, **stop** |
+| 16 | MOVE | — | drift the ref point by `vX/vY` each frame = a moving slope/sliding wall |
+| 17 | FALL-STOP | `code` | put the marble in capture-state 4 with `code`, **stop** |
+| 18 | IF-MARBLE-TERRAIN | `target` | if the marble's terrain code matches the region's, JUMP `target` |
+
+`op14`/`op16` (moving slopes/seesaws) are *defined* but unused by these six courses' top-level
+scripts — only keyframe/loop/link/stop/conditional ops actually appear in the data.
+
+**Worked example — the drawbridge** (Beginner region 0, `rgnscript beginr -region 0`):
+
+```
+op0   KEYFRAME pos=(61,56) z=16264 dur=1 terr=3  link=$1A4E   ; plant the bridge; terr 3 = "I am the drawbridge"
+op4   LOOP-A count=0                                          ; forever:
+op2     SPRITE +$1C=1 +$23=2                                  ;   show a bridge frame
+op12    LINK-46 $1A8A                                         ;   select bridge animation A
+op3     STATE0-STOP +$1C=15                                   ;   hold ~15 ticks, then resume
+op2     SPRITE +$1C=1 +$23=2                                  ;   show a bridge frame
+op12    LINK-46 $1A4E                                         ;   select bridge animation B
+op3     STATE0-STOP +$1C=30                                   ;   hold ~30 ticks, then resume
+op5   NEXT-A                                                  ; loop back
+```
+
+So the drawbridge is an **autonomous, timed open/close cycle**: it plants a fixed terrain
+keyframe, registers itself as *the* drawbridge, then loops forever between two linked bridge
+animations (`$1A8A` and `$1A4E`) holding 15 and 30 ticks respectively. It is **not**
+marble-triggered (the earlier guess that it used the marble-conditional `op8` was a mis-parse;
+`op8` is actually used by a Practice trigger region). The **funnels** by contrast are trivial
+scripts — each is one `op0` KEYFRAME carrying the fall/wall terrain code plus an `op3` stop,
+all linking a shared `$1946` sub-script; there is **no in-script jump from a funnel entrance to
+its exit**, so that hand-off must route through the marble's fall/reposition path (state 4,
+`reposition_marble $1448E`) — still to be confirmed.
 
 **The goal is a radial proximity test, not a finish line.** Each of the two goal-flag regions
 is an independent `terr 5` proximity trigger (`proximity_trigger $16C0C`): it takes the vector

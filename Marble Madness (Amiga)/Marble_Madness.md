@@ -987,15 +987,19 @@ cell**. The spawner (`$197D2`) stores it in `obj+$80/$82` and takes the actual w
 position from the `animPtr` data instead: its first two bytes give `obj+$C = animPtr[0]<<19`,
 `obj+$10 = animPtr[1]<<19` (the same `<<19` fixed-point as the marble position). The most
 likely role of the home cell is a **scroll trigger** — "the course has scrolled far enough
-that `(trigX,trigY)` is on screen, so spawn this group" — which fits one record yielding a
-*group* of creatures (Beginner's lower `+$18` record spawns **three slinkies** that then
-walk independently). Confirming the trigger semantics is left for the enemy-AI pass.
+that `(trigX,trigY)` is on screen, so spawn the enemy." Confirming the trigger semantics is
+left for the enemy-AI pass.
 
-The `animPtr` data is an `$FF`-terminated list of 6-byte `[X][Y][·4]` entries. Entry 0 is
-the verified spawn position; the remainder is **most likely the patrol route(s)** the group
-walks (the slinky is a small upright-tube creature that bends in the four cardinal
-directions to move — not a multi-segment body). How the list partitions into the three
-slinkies' independent routes is deferred to the enemy-AI analysis.
+**What these spawn: the black "enemy" marbles** (verified in-game). Each record spawns a
+black marble that **patrols a fixed route until the player gets close, then switches to
+hunting the player**. The `animPtr` data is exactly that patrol route: an `$FF`-terminated
+list of 6-byte `[X][Y][·4]` entries whose `[X][Y]` waypoints **trace the marble's idle path
+to the pixel** (confirmed by overlaying the markers on live play — a perfect match). Entry 0
+is the verified spawn position (`obj+$C/$10`); entries 1..n are the looping patrol waypoints;
+the four trailing bytes per entry sit in the `0..8` range and look like per-waypoint
+direction/facing codes (the `+$20` records cycle them cleanly `1..8`), to be pinned in the
+enemy-AI pass. So both `+$18` and `+$20` are the **black-marble enemy** system — not the
+slinkies (see "Where are the slinkies?" below).
 
 The two lists differ only in how the animation/definition is chosen:
 
@@ -1009,19 +1013,25 @@ Both are sparse — Beginner 2 (`+$18`), Intermediate 7 (`+$20`), Aerial 1, Ulti
 Practice and Silly use neither. They are distinct from the `+$1C` actor list (the
 collision-scanned enemies, Part V §4).
 
-Both `+$18` and `+$20` appear to be **moving creature/enemy** systems rather than a
-creature-vs-obstacle split: the spawned objects are **collision-checked against the
-marble** every frame (the marble update runs scans against the `$19xxx`/`$1Bxxx`
-clusters that own them) — so they are hazards, not passive scenery — and the `+$18`
-objects run their own behaviour state machine (states 32→37). The *animated terrain*
-obstacles (seesaws, sliding walls, moving ramps, drawbridges) are a different,
-already-documented system: the **dynamic regions** (`+$14`, the scripted `$CCA` regions,
-Part V §4). What separates `+$18` from `+$20` is structural — a `+$18` object spawns in
-state 32 with a 5-slot sub-object array (the members of the spawned **group**, e.g. the
-three slinkies that walk independently), a `+$20` object in state 0 picking a random visual
-variant from a shared table — but *which* specific creature each represents (the muncher,
-the bird, the slinky), and how the `animPtr` route list partitions across the group, needs
-following the animation pointers into the `.vlb` banks and the enemy-AI pass, which is open.
+Both `+$18` and `+$20` are the **black-marble enemy** system: the spawned objects are
+**collision-checked against the marble** every frame (the marble update runs scans against
+the `$19xxx`/`$1Bxxx` clusters that own them) — so they are hazards, not passive scenery —
+and the `+$18` objects run their own behaviour state machine (states 32→37) that switches
+between patrol and hunt. The *animated terrain* obstacles (seesaws, sliding walls, moving
+ramps, drawbridges) are a different, already-documented system: the **dynamic regions**
+(`+$14`, the scripted `$CCA` regions, Part V §4). What separates `+$18` from `+$20` is
+structural — a `+$18` object spawns in state 32 with a 5-slot sub-object array (the marble's
+own trail/secondary passes, *not* a group of distinct creatures: one record = one black
+marble), a `+$20` object in state 0 picking a random visual variant from a shared table.
+
+**Where are the slinkies?** Open. The slinky (the small upright-tube creature that bends in
+the four cardinal directions to move) is **not** in these spawn lists — both lists are black
+marbles, and Silly, which has slinkies, uses **neither** list (0/0) yet ships a dedicated
+`slink.vlb` sprite bank. So the slinkies are placed/animated by a *different* subsystem we
+have not yet pinned. The leading candidate is the `+$1C` **actor list** (`$1ABE0`, the
+collision-scanned enemies of Part V §4); the `+$C` per-type pointer array (`$1ED44`) and the
+placement `type`s are the other unexplored hooks. Identifying the slinky placement system is
+the next enemy-AI item.
 
 **Per-course counts** ([`extract/cmd/tracks`](extract/cmd/tracks) decodes them all):
 
@@ -1049,9 +1059,10 @@ cell, a **connector line** to the verified spawn position, and a solid **pin** a
 position, with the rest of the `animPtr` list (the likely patrol route) as small dots. For
 Beginner (below) the 79 placement dots land squarely **on** the course — which doubles as a
 *calibration*: features must sit on the course, so their fit confirms the `(X,Y)` grid
-matches the slope mesh. The 2 magenta `+$18` spawns are Beginner's creatures (a black "evil
-marble" and a group of slinkies); its animated drawbridge and funnel are dynamic regions
-(`+$14`).
+matches the slope mesh. The 2 magenta `+$18` spawns are Beginner's two **black enemy
+marbles**, and the small dots trailing each pin are that marble's patrol route — which
+matches the marble's idle path in live play to the pixel. Its animated drawbridge and funnel
+are dynamic regions (`+$14`).
 
 ![Beginner course Track layers — slope wireframe + placement objects (cyan) + +$18 spawns (magenta)](rendered/beginr.wire.png)
 
@@ -1061,8 +1072,8 @@ What the markers expose rather than hide:
   **home diamonds** (the record `(trigX,trigY)`) often sit **off** to the side, connected by
   the line. That offset is real data, not a coordinate error — the placement dots calibrate
   the grid, so an off-course home cell means the trigger genuinely lives beside the path
-  (consistent with the scroll-trigger reading: the marble reaches that cell, the group
-  spawns onto the course). Earlier we mistook the home cell for the spawn position; the
+  (consistent with the scroll-trigger reading: the player reaches that cell, the enemy
+  marble spawns onto the course). Earlier we mistook the home cell for the spawn position; the
   pixel-consistent ~32×8-tile offset the eye caught is exactly this record→`animPtr` split.
 
 **Still open.** What each placement `type` 0–7 *means*, the per-type object/animation

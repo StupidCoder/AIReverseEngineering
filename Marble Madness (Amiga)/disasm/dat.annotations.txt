@@ -274,23 +274,27 @@
 003176  load_track_data  load the per-course Track file: index t_track_names $353C by g_course, LoadSeg it via $8CF0, store the seglist at $3554, then distribute the loaded segment's header pointers (10 longs at seg+0..+$24) to the actor-system globals: +0->$9A6, +4->$129FC, +8->$12F74, +$C->$1ED44, +$10->$89C2, +$14->$FD2C (animation scripts), +$18->$19CD0, +$1C->$1ABE0, +$20->$1BE48, +$24->$1D334.
 003204  free_track_data  free the Track seglist ($3554) and null all the actor-system globals it populated.
 0197D2  creature_spawn_A  walk the Track +$18 spawn list (*($19CD0)) near the marble cell
-#   and spawn its creatures. 8-byte records [trigX][trigY][animPtr:4 @+2][type @+6][pad].
-#   The record (trigX,trigY) is NOT the spawn position: it is a TRIGGER/HOME cell stored in
-#   obj+$80/$82. The world position comes from the animPtr DATA: obj+$C = animPtr[0]<<19,
-#   obj+$10 = animPtr[1]<<19 (first 2 bytes), same <<19 scale as the marble pos. obj+$78/$7C
-#   = the animPtr; obj+$1B = type. animPtr -> $FF-terminated 6-byte [X][Y][pad4] list: entry
-#   0 = verified spawn pos, rest = LIKELY the patrol route(s) of the spawned group (one rec
-#   yields a group, e.g. beginr's 3 slinkies). Home cell likely a scroll trigger (spawn when
-#   that cell scrolls on screen) - to confirm in the enemy-AI pass. Per-course recs (8B):
-#   practy 0, beginr 2, interm 0, aerial 1, silly 0, ultima 1. VERIFIED: animPtr[0],[1]
-#   positions land ON the course every course; record cells sit off to the side.
+#   and spawn the BLACK ENEMY MARBLE (verified in-game). 8-byte records [trigX][trigY]
+#   [animPtr:4 @+2][type @+6][pad]. The record (trigX,trigY) is NOT the spawn position: it is
+#   a TRIGGER/HOME cell stored in obj+$80/$82. The world position comes from the animPtr DATA:
+#   obj+$C = animPtr[0]<<19, obj+$10 = animPtr[1]<<19 (first 2 bytes), same <<19 scale as the
+#   marble pos. obj+$78/$7C = the animPtr; obj+$1B = type. animPtr -> $FF-terminated 6-byte
+#   [X][Y][pad4] list: entry 0 = verified spawn pos, entries 1..n = the black marble's PATROL
+#   ROUTE (CONFIRMED in-game: the waypoints trace the marble's idle path to the pixel; it
+#   patrols until the player nears, then hunts). ONE record = ONE marble (the obj+$38 5-slot
+#   sub-array is the marble's own trail/passes, NOT a group). The 4 trailing bytes/entry look
+#   like per-waypoint direction codes (0..8). Home cell likely a scroll trigger - confirm in
+#   the enemy-AI pass. Per-course recs (8B): practy 0, beginr 2, interm 0, aerial 1, silly 0,
+#   ultima 1. VERIFIED: animPtr[0],[1] positions land ON the course every course; record cells
+#   sit off to the side. NB: the SLINKIES are a DIFFERENT system (silly has slinkies + a
+#   slink.vlb bank but 0 spawn recs in BOTH lists) - likely the +$1C actor list $1ABE0. OPEN.
 01B7B0  creature_spawn_B  walk the Track +$20 spawn list (*($1BE48)) near the marble; same
 #   8-byte record but the animPtr (+$2) is usually null -> the spawner picks BOTH position and
 #   animation from a definition table inside the $1BE48 block (+$14/+$18/+$1C/+$34) by record
 #   type +$6 and an RNG variant ($8F96); each def's first 2 bytes = position (<<19). The record
 #   (trigX,trigY) is again the trigger/home cell, not the spawn pos. Per-course recs: interm 7,
-#   ultima 4; others 0. Both +$18 and +$20 are per-course CREATURE/ENEMY SPAWN tables
-#   (distinct from the +$1C actor list).
+#   ultima 4; others 0. Both +$18 and +$20 spawn BLACK ENEMY MARBLES (patrol-then-hunt), NOT
+#   the slinkies (distinct from the +$1C actor list $1ABE0).
 0353C   t_track_names    table of 6 pointers (indexed by g_course) to the Track filenames at $3506 ("PrcTrack","BegTrack","IntTrack","AerTrack","SilTrack","UltTrack"). NB: *Track is the per-course LEVEL/OBJECT LAYOUT data (actor placements + animation scripts), NOT music — music/SFX is the separate *Snd files.
 03554   g_trackseg       (global) seglist BPTR of the currently loaded course Track file (the per-course object/actor data blob).
 00FD2C  g_animscripts    (global) pointer into the loaded Track segment to its animation-script table (= Track seg header field +$14); the actor loop reads cell-animation scripts from here.

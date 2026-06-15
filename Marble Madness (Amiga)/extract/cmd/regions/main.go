@@ -359,8 +359,10 @@ var wZScale = 1.566
 // reaches it). pos is the creature's position list: the spawner reads the WORLD position
 // from the first two bytes of the record's animPtr data (record +$2), which is a
 // $FF-terminated list of 6-byte [X][Y][...] entries. pos[0] is the verified spawn position;
-// the rest is most likely the patrol route(s) of the spawned group (e.g. 3 slinkies walking
-// independently) — to be decoded with the enemy AI, not yet traced.
+// pos[1:] are the BLACK ENEMY MARBLE's patrol waypoints — confirmed in-game to trace the
+// marble's idle path to the pixel (it patrols this loop until the player nears, then hunts).
+// One record = one black marble (not a group). The 4 trailing bytes look like per-waypoint
+// direction codes (0..8) — to be pinned with the enemy AI.
 type spawn struct {
 	home [2]int
 	pos  [][2]int

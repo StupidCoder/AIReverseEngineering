@@ -85,3 +85,24 @@
 #   holds+fades; frame 335 the TITLE name table loads in one shot (767 cells, all 24
 #   rows); ->650 title palette fades in + "PRESS START BUTTON" appears.
 190F  screen_decompress  one of many screen loaders (NOT the title - that is $0C20): decompress tiles from the compressed bank (CALL $0406 with A=9, HL=$B354 -> norm bank 11 $3354 = file $2F354) to VRAM $3000; the routine at ~$18F0 also copies an 8-byte descriptor to $D26D and sets $D232/$D234.
+
+# --- the attract/scene state machine (Part III, traced statically) ---
+1356  main_entry  AFTER init: set banks (slot1=1/$D22F, slot2=2/$D230); CALL $0645 (sprite buf); CALL $1CD7 (SEGA logo); CALL $0AA3 (fade in); init scene state ($D240=3, $D238=0 scene counter, $D239=$1C, $D2F8=5); clear RAM blocks; then the ATTRACT LOOP $13C5-$140C.
+13C5  attract_loop  the attract loop: A=($D238); CP $13; JP NC,$135B (past last scene -> restart from logo); CALL $0BDD (scene dispatcher = load this scene's screen); CALL $0AA3 (fade in); BIT 4,(IY+6) (Start pressed?) -> if set skip the idle wait and go to $1402; else wait ~60 frames; $1402 CALL $1414 (run the scene); result 0/1/2 = restart/next-scene/stay.
+1414  scene_run  run scene $D238 (or $D2D4 if (IY+6).4 = Start was pressed, $141F-$1425): page bank5; index the scene table $5600 by scene*2 -> descriptor pointer; CALL $185D to load+run it.
+5600  scene_table  bank5 (z80 $5600 = file $15600): 18 word-pointers (offset+$5600) to ~40-byte SCENE DESCRIPTORS. $185D copies the descriptor to RAM $D355 ($28 bytes) and runs the scene. Scene = the unit of the attract sequence (logo/title-poses/world-map/...).
+185D  scene_load  copy the 40-byte scene descriptor to $D355; init scene RAM; branch on $D238 ($09/$0B ranges) to pick behaviour. The per-scene script lives in the descriptor (bank 5 data) - this is the data-driven heart of the attract sequence.
+0BDD  scene_dispatch  scene -> SCREEN TYPE loader: scenes 0-8 = type 1 (title bg, loader ~$0C1C/$0C20); scenes 9-$11 = type 2 (world map, $0C7A); scene>=$12 RET. Only RELOADS the bg when the type changes ($0C0E: CP prev-type $D217, skip if equal) - so the title bg persists across scenes 0-8 (only sprites/text animate) and the map persists across 9-11.
+0602  read_input  (also Part IV §3) controller -> (IY+3): Start = GG port $00 bit7, D-pad = port $DC. Pressing Start: a handler ($53C4 bank1 / $017FE) sets the LAUNCH flag (IY+6).4 and a TARGET scene in $D2D4; the attract loop then jumps to $D2D4 (out of the demo) instead of free-running. (IY+3).7 also checked at $1D47 to skip the logo.
+
+# --- the world map screen (Part III §3; decoded statically, rendered/worldmap.gg.png) ---
+0C7A  worldmap_load  load the type-2 WORLD MAP (the island): decompress bg tiles (A=$0C HL=$171A -> file $3171A) to VRAM $0000 + two bank-9 blocks to $2000/$3000; load the name table from a STORED RLE map in bank5 via $0502 ($6C6D count $156 hi=$10, then $6DC3 count $198 hi=$00) -> $3800; palette via $0AAB. Tail $0CD9+: draw the per-scene route/zone overlay with $0612 from the $1163 table; map marker positions from $0EA8 -> $D211. Each map scene 9-11 lights a different zone; the blink is the overlay repainted on a timer (same $0612 path as PRESS START).
+0AAB  palette_fade_to  load a black START palette (bank8 index $16, all zero) then FADE the working palette ($D3BD) toward the real targets - bg index $0C, sprite index $0D - via $0B3F. (So a screen's true palette is the fade target, not the index loaded first.)
+0B1E  palette_copy  copy 32 bytes of a palette from the bank8 table $7400 (ptr=*($7400+A*2), data=ptr+$7400) to (DE). $0B3F = the same lookup but fade one step toward it.
+0502  nt_load_rle  (see Part IV §3) RLE name-table loader; reimplemented as extract/decomp.LoadRLE. Used by both the title ($0C20, bank5 map) and the world map ($0C7A, bank5 map).
+
+# --- the level-load frontier (Part III §4) ---
+# $0130 gp_vdp_update (gameplay per-frame: CALL $31BC tile-stream + $3282 scroll-draw)
+# has NO call site in bank 0 - gameplay is entered via the bank-3 RST dispatcher and a
+# higher-bank state machine. Reaching the first level needs those banks paged in, then
+# a static decode of a level's compressed map (banks 10-15) like the world map above.

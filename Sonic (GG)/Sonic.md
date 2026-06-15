@@ -21,7 +21,7 @@ Methods: purely static analysis of the ROM image, plus the Z80 toolchain built f
 it in the shared `tools/` module — the disassemblers (`tools/cmd/disz80`,
 `tools/cmd/codetracez80`) over the `tools/z80` decoder. All addresses are Z80
 addresses (16-bit, `$0000`–`$FFFF`) unless a *file offset* is called out; bytes are
-8-bit. Parts I–II are complete and Part IV is under way; Parts III and V are stubbed.
+8-bit. Parts I–III are complete and Part IV is under way; Part V is stubbed.
 
 ---
 
@@ -40,6 +40,10 @@ addresses (16-bit, `$0000`–`$FFFF`) unless a *file offset* is called out; byte
   - [3. The frame-interrupt handler (`$0073`)](#3-the-frame-interrupt-handler-0073)
   - [4. The main entry (`$1356`)](#4-the-main-entry-1356)
 - [Part III — Engine architecture](#part-iii--engine-architecture)
+  - [1. The attract loop and the scene state machine](#1-the-attract-loop-and-the-scene-state-machine)
+  - [2. The title, and waiting for Start](#2-the-title-and-waiting-for-start)
+  - [3. The world map (decoded by tracing, not the oracle)](#3-the-world-map-decoded-by-tracing-not-the-oracle)
+  - [4. How far pure tracing reaches — and the level-load frontier](#4-how-far-pure-tracing-reaches--and-the-level-load-frontier)
 - [Part IV — Graphics and data formats](#part-iv--graphics-and-data-formats)
   - [1. The VDP formats](#1-the-vdp-formats)
   - [2. The graphics decompressor](#2-the-graphics-decompressor)
@@ -406,8 +410,99 @@ level, … — the subject of Part III). From here control is in the main loop.
 
 # Part III — Engine architecture
 
-*Stub.* The main loop, the interrupt-driven frame timing, the work-RAM layout, and
-how banked level/graphics resources are addressed.
+This part follows the engine *forward* from the opening, **by tracing the code**, to
+see how far the title → world map → level chain can be reconstructed without running
+the game. The answer turns out to be: the whole control skeleton, and every screen up
+to and including the world map, comes out of static disassembly; the level load
+itself sits behind a cross-bank dispatcher and is the marked frontier (§4).
+
+## 1. The attract loop and the scene state machine
+
+After init (Part II), `main_entry` (`$1356`) loads the SEGA logo and then enters an
+**attract loop**. The loop is driven by a one-byte **scene counter** `$D238`: each
+pass loads a screen, fades it in, runs it, and advances; when `$D238` reaches `$13`
+the loop jumps back to `$135B` and replays from the logo. The skeleton is:
+
+```
+$13C5  LD A,($D238) / CP $13 / JP NC,$135B   ; past the last scene -> restart attract
+$13D8  CALL $0BDD                            ; scene dispatcher: load this scene's screen
+$13E4  CALL $0AA3                            ; fade the screen in
+$13F0  BIT 4,(IY+6) / JR NZ,$1402            ; Start pressed? skip the idle wait
+$13F6  (wait ~60 frames via $0327)
+$1402  CALL $1414                            ; run the scene; returns 0/1/2 = restart/next/stay
+```
+
+Each scene is described by a **~40-byte descriptor** in a table in bank 5 at `$5600`
+(18 entries; `$1414` indexes it by `$D238`, and `$185D` copies the descriptor into RAM
+at `$D355` to run it). The dispatcher `$0BDD` maps the scene to a **screen type**:
+scenes 0–8 are type 1 (the title background, loaded near `$0C1C`), scenes 9–17 are
+type 2 (the world map, `$0C7A`). It only *reloads* the background when the type changes
+(`$0C0E`: compare the new type with the previous one in `$D217`, skip if equal) — so
+the title background stays up across scenes 0–8 while only the foreground animates, and
+the map likewise persists across its scenes.
+
+## 2. The title, and waiting for Start
+
+Scenes 0–8 keep the title background (Part IV §3) up while their scripts animate Sonic
+(the finger-tapping pose is sprite animation, driven by the per-scene script and the
+sprite engine of Part IV §3) and blink `PRESS START BUTTON` via the string blitter
+`$0612`. The wait for Start is not a poll loop; it is folded into the attract loop
+through two flags:
+
+- `$0602` reads the controller every frame into `(IY+3)` — **Start** is GG port `$00`
+  bit 7, the D-pad/buttons are port `$DC`.
+- When Start is pressed, a handler raises the **launch flag** `(IY+6) bit 4` and writes
+  a **target scene** into `$D2D4` (e.g. `$53C4` in bank 1, or `$017FE`). On the next
+  pass the attract loop sees the flag: `$13F0` skips the idle wait, and `$141F` uses
+  `$D2D4` instead of the counter — so Start *jumps the sequence* out of the demo and
+  into the post-title flow rather than letting it free-run.
+
+This is also why the logo and title are skippable: `$1D47` (`BIT 7,(IY+3)`) checks the
+very same Start bit during the logo.
+
+## 3. The world map (decoded by tracing, not the oracle)
+
+The type-2 screen the dispatcher loads at `$0C7A` is the **island world map**. It is
+reconstructed here entirely from reading that loader — no emulator:
+
+- background tiles: `$0406`-decompressed from `(bank $0C, $171A)`;
+- name table: a **stored RLE map** in bank 5, loaded by `$0502` (`$6C6D`, the codec of
+  Part IV §3) — `extract/decomp.LoadRLE` reimplements it;
+- palette: `$0AAB` loads a black start (index `$16`) and **fades toward** the real
+  targets — background index `$0C`, sprite index `$0D` — from the bank-8 table.
+
+[`extract/cmd/scenemap`](extract/cmd/scenemap) replays exactly those steps and composes
+the screen:
+
+![Sonic world map — decoded statically from the $0C7A loader (tiles, the $0502 RLE name table, palette $0C/$0D)](rendered/worldmap.gg.png)
+
+The island, the ruined city on the peak, the lake and cliffs are the shared background;
+the **route and the zone name** are *not* in that map — they are a per-scene overlay.
+`$0C7A`'s tail calls the string blitter `$0612` with per-scene data from the table at
+`$1163`, and reads map marker positions from `$0EA8` into `$D211`; each map scene
+(9–11) lights a different zone. The blink is a periodic redraw of that overlay (the
+prompt and the route share the `$0612` path of Part IV §3). So the "blinking route" is
+the same mechanism as the blinking `PRESS START` — a name-table run repainted on a
+timer — just driven by per-scene position data.
+
+## 4. How far pure tracing reaches — and the level-load frontier
+
+Up to here, **everything was traceable statically**: the attract state machine, the
+Start hand-off, and the world map (rendered above from located data, the same way the
+opening screens were). The level load is where pure bank-0 tracing stops being enough.
+The gameplay per-frame update `$0130` (`gp_vdp_update`, which calls the level tile
+streamer `$31BC` and the scroll drawer `$3282`) has **no `CALL` site anywhere in
+bank 0** — gameplay is entered through the **bank-3 `RST` dispatcher** (Part II §2) and
+a state machine living in the higher banks, so the path from "map confirmed" to "level
+running" runs through code that isn't mapped in the home configuration this disassembly
+uses.
+
+So the honest verdict on doing it "without cheating": the opening — logo, title, the
+Start wait, and the world map — is fully recoverable by tracing, data and all. Reaching
+the first level needs the next step in kind: trace the bank-3 dispatcher and the
+gameplay banks with those banks paged in, then statically decode a level's compressed
+map (banks 10–15, drawn by `scroll_draw` from RAM) and render it just as the world map
+was. That is Part V's starting point.
 
 # Part IV — Graphics and data formats
 
@@ -591,10 +686,14 @@ Static analysis only, with the Z80 toolchain in the shared `tools/` module:
 - [`extract/cmd/screentrace`](extract/cmd/screentrace) — fingerprints VRAM each frame
   to time the discrete screen loads and reports, via the watchpoint, which routines
   drew the name table (Part IV §3).
-- [`extract/decomp`](extract/decomp) + [`extract/cmd/titlegfx`](extract/cmd/titlegfx) —
-  a standalone Go reimplementation of the `$0406` decompressor (Part IV §2) and a
-  harness that runs it on the logo tile block, cross-checking the algorithm against
-  the game's own decompressor as exercised by the oracle.
+- [`extract/decomp`](extract/decomp) — standalone Go reimplementations of the two
+  located codecs: the `$0406` tile decompressor (Part IV §2) and the `$0502` RLE
+  name-table loader (`LoadRLE`, Part III §3).
+- [`extract/cmd/titlegfx`](extract/cmd/titlegfx) — runs the `$0406` reimplementation on
+  the logo tile block, cross-checking it against the game's own decompressor.
+- [`extract/cmd/scenemap`](extract/cmd/scenemap) — statically decodes and renders the
+  world map from the traced `$0C7A` loader (tiles + the `$0502` RLE map + palette
+  `$0C`/`$0D`), with no emulation (Part III §3).
 
 Reproduce the boot listing in Part I §5:
 

@@ -1281,11 +1281,14 @@ tiles for the checkerboard, plus flat rectangles of every aspect ratio — `41×
 
 This is verified visually by `extract/cmd/regions`, which replays the `$E158` height
 generation (`baseHeight ± profile`, the profile consumed in `$E158`'s exact diagonal
-fill order) and plots each course in iso tile space — `rendered/<course>.regions.png`
-(tiles coloured by slope direction) and `rendered/<course>.height.png` (relief-shaded
-height field). The practice render reproduces the course feature-for-feature from
-nothing but the 66 records: the top checkerboard with its **two holes**, the descending
-**zigzag canyon**, and the flat run-out areas.
+fill order) and plots each course three ways: `rendered/<course>.regions.png` (iso tiles
+coloured by slope direction), `rendered/<course>.height.png` (relief-shaded height
+field), and `rendered/<course>.wire.png` (a 3-D wireframe of the height mesh — a
+dimetric projection that lifts height up-screen, with hidden-line removal, drawn with the
+Go standard library and 3× supersampling). The practice render reproduces the course
+feature-for-feature from nothing but the 66 records: the top checkerboard with its **two
+holes**, the descending **zigzag canyon**, and the flat run-out areas; the wireframe
+shows the individual `7×7` slope facets bending up and down.
 
 ### How regions become contact structs
 

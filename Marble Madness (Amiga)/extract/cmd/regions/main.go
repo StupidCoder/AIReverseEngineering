@@ -31,8 +31,10 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"stupidcoder.com/tools/amiga/adf"
@@ -259,7 +261,18 @@ func render(field map[[2]int]cell, lo, hi int, height bool) *image.RGBA {
 		}
 		return -1
 	}
-	for t, c := range field {
+	keys := make([][2]int, 0, len(field)) // deterministic draw order (reproducible output)
+	for t := range field {
+		keys = append(keys, t)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i][0]+keys[i][1] != keys[j][0]+keys[j][1] {
+			return keys[i][0]+keys[i][1] < keys[j][0]+keys[j][1]
+		}
+		return keys[i][0] < keys[j][0]
+	})
+	for _, t := range keys {
+		c := field[t]
 		x, y := iso(t[0], t[1])
 		cx, cy := x-minX+M+tileS, y-minY+M+tileS
 		var col color.RGBA
@@ -333,8 +346,184 @@ func main() {
 		field, lo, hi := buildField(prog.Image)
 		writePNG(filepath.Join(outdir, c.key+".regions.png"), render(field, lo, hi, false))
 		writePNG(filepath.Join(outdir, c.key+".height.png"), render(field, lo, hi, true))
-		fmt.Printf("%s: %d tiles, height %d..%d -> %s.{regions,height}.png\n", c.key, len(field), lo, hi, c.key)
+		writePNG(filepath.Join(outdir, c.key+".wire.png"), renderWire(field, lo, hi))
+		fmt.Printf("%s: %d tiles, height %d..%d -> %s.{regions,height,wire}.png\n", c.key, len(field), lo, hi, c.key)
 	}
+}
+
+// --- 3-D wireframe of the height field ---------------------------------------
+//
+// Each tile is a vertex at (tx, ty, height); the grid edges to the (+1,0) and
+// (0,+1) neighbours form the mesh. A dimetric projection lifts height up-screen
+// (screenY -= z·zscale) so slopes read as the mesh bending. Quads are drawn
+// far-to-near with a background-coloured fill first (hidden-line removal) then
+// their bright, height-coloured edges. Rendered at 3× and box-downsampled for
+// anti-aliasing — no external dependencies.
+
+const (
+	ssaa    = 3    // supersample factor
+	wSX     = 13.0 // iso half-width
+	wSY     = 6.5  // iso half-height
+	wZScale = 2.6  // height exaggeration
+	wPitDrop = 30.0
+)
+
+func renderWire(field map[[2]int]cell, lo, hi int) *image.RGBA {
+	base := float64(lo)
+	dz := func(c cell) float64 {
+		if c.h < 8000 {
+			return -wPitDrop // holes drop below the floor
+		}
+		return float64(c.h) - base
+	}
+	proj := func(tx, ty int, z float64) (float64, float64) {
+		return float64(tx-ty) * wSX, float64(tx+ty)*wSY - z*wZScale
+	}
+	// bounds over all projected vertices
+	minX, minY, maxX, maxY := 1e18, 1e18, -1e18, -1e18
+	for t, c := range field {
+		x, y := proj(t[0], t[1], dz(c))
+		minX, maxX = math.Min(minX, x), math.Max(maxX, x)
+		minY, maxY = math.Min(minY, y), math.Max(maxY, y)
+	}
+	const M = 30
+	W := int(maxX-minX) + 2*M
+	H := int(maxY-minY) + 2*M
+	big := image.NewRGBA(image.Rect(0, 0, W*ssaa, H*ssaa))
+	bg := color.RGBA{8, 10, 18, 255}
+	for i := 0; i < len(big.Pix); i += 4 {
+		big.Pix[i], big.Pix[i+1], big.Pix[i+2], big.Pix[i+3] = bg.R, bg.G, bg.B, 255
+	}
+	sp := func(tx, ty int, c cell) (int, int) {
+		x, y := proj(tx, ty, dz(c))
+		return int((x - minX + M) * ssaa), int((y - minY + M) * ssaa)
+	}
+	get := func(tx, ty int) (cell, bool) { c, ok := field[[2]int{tx, ty}]; return c, ok }
+	lineCol := func(a, b cell) color.RGBA {
+		h := (a.h + b.h) / 2
+		if h < 8000 {
+			return color.RGBA{90, 120, 210, 255}
+		}
+		c := heightRamp(float64(h-lo) / (float64(hi-lo) + 1e-9))
+		// boost so even the low (dark-blue) end is clearly visible on the dark bg
+		return color.RGBA{clamp8(int(c.R)*7/10 + 80), clamp8(int(c.G)*7/10 + 80), clamp8(int(c.B)*7/10 + 80), 255}
+	}
+	// quads sorted far (small tx+ty) -> near
+	type quad struct{ tx, ty, depth int }
+	var quads []quad
+	for t := range field {
+		if _, ok := get(t[0]+1, t[1]); !ok {
+			continue
+		}
+		if _, ok := get(t[0], t[1]+1); !ok {
+			continue
+		}
+		if _, ok := get(t[0]+1, t[1]+1); !ok {
+			continue
+		}
+		quads = append(quads, quad{t[0], t[1], t[0] + t[1]})
+	}
+	sort.Slice(quads, func(i, j int) bool {
+		if quads[i].depth != quads[j].depth {
+			return quads[i].depth < quads[j].depth
+		}
+		return quads[i].tx < quads[j].tx
+	})
+	for _, q := range quads {
+		c00, _ := get(q.tx, q.ty)
+		c10, _ := get(q.tx+1, q.ty)
+		c11, _ := get(q.tx+1, q.ty+1)
+		c01, _ := get(q.tx, q.ty+1)
+		x00, y00 := sp(q.tx, q.ty, c00)
+		x10, y10 := sp(q.tx+1, q.ty, c10)
+		x11, y11 := sp(q.tx+1, q.ty+1, c11)
+		x01, y01 := sp(q.tx, q.ty+1, c01)
+		// hidden-line fill (background colour) covering this quad
+		fillTri(big, x00, y00, x10, y10, x11, y11, bg)
+		fillTri(big, x00, y00, x11, y11, x01, y01, bg)
+		// edges
+		line(big, x00, y00, x10, y10, lineCol(c00, c10))
+		line(big, x00, y00, x01, y01, lineCol(c00, c01))
+		line(big, x00, y00, x11, y11, color.RGBA{30, 36, 54, 255}) // faint triangulation diagonal
+	}
+	return downsample(big, ssaa)
+}
+
+func line(img *image.RGBA, x0, y0, x1, y1 int, c color.RGBA) {
+	dx, dy := abs(x1-x0), -abs(y1-y0)
+	sx, sy := 1, 1
+	if x0 > x1 {
+		sx = -1
+	}
+	if y0 > y1 {
+		sy = -1
+	}
+	err := dx + dy
+	for {
+		if x0 >= 0 && y0 >= 0 && x0 < img.Rect.Dx() && y0 < img.Rect.Dy() {
+			img.SetRGBA(x0, y0, c)
+		}
+		if x0 == x1 && y0 == y1 {
+			return
+		}
+		e2 := 2 * err
+		if e2 >= dy {
+			err += dy
+			x0 += sx
+		}
+		if e2 <= dx {
+			err += dx
+			y0 += sy
+		}
+	}
+}
+
+func fillTri(img *image.RGBA, x0, y0, x1, y1, x2, y2 int, c color.RGBA) {
+	minY := min(y0, min(y1, y2))
+	maxY := max(y0, max(y1, y2))
+	a := area(x0, y0, x1, y1, x2, y2)
+	if a == 0 {
+		return
+	}
+	minX := min(x0, min(x1, x2))
+	maxX := max(x0, max(x1, x2))
+	W := img.Rect.Dx()
+	Hh := img.Rect.Dy()
+	for y := max(0, minY); y <= maxY && y < Hh; y++ {
+		for x := max(0, minX); x <= maxX && x < W; x++ {
+			w0 := area(x1, y1, x2, y2, x, y)
+			w1 := area(x2, y2, x0, y0, x, y)
+			w2 := area(x0, y0, x1, y1, x, y)
+			if (w0 >= 0 && w1 >= 0 && w2 >= 0) || (w0 <= 0 && w1 <= 0 && w2 <= 0) {
+				img.SetRGBA(x, y, c)
+			}
+		}
+	}
+}
+
+func area(ax, ay, bx, by, cx, cy int) int {
+	return (bx-ax)*(cy-ay) - (by-ay)*(cx-ax)
+}
+
+func downsample(src *image.RGBA, n int) *image.RGBA {
+	W, H := src.Rect.Dx()/n, src.Rect.Dy()/n
+	dst := image.NewRGBA(image.Rect(0, 0, W, H))
+	for y := 0; y < H; y++ {
+		for x := 0; x < W; x++ {
+			var r, g, b int
+			for dy := 0; dy < n; dy++ {
+				for dx := 0; dx < n; dx++ {
+					o := src.PixOffset(x*n+dx, y*n+dy)
+					r += int(src.Pix[o])
+					g += int(src.Pix[o+1])
+					b += int(src.Pix[o+2])
+				}
+			}
+			k := n * n
+			dst.SetRGBA(x, y, color.RGBA{uint8(r / k), uint8(g / k), uint8(b / k), 255})
+		}
+	}
+	return dst
 }
 
 func writePNG(path string, img *image.RGBA) {

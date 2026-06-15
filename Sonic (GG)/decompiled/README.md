@@ -30,16 +30,26 @@ reliably than signature-hunting for assets, and that a translation is **falsifia
 
 ## Status
 
-Runs from the entry point down to the title-screen loader:
+Runs from the entry point through the screen loaders to the scene interpreter:
 
 ```
 $ python3 boot.py
-... reset -> init -> main_entry -> attract_loop -> scene_dispatch -> load_title  (frontier)
+... reset -> init -> main_entry -> attract_loop -> scene_dispatch
+    -> load_title (decompress + nt_load_rle run) -> ... -> scene_run $1414  (frontier)
 ```
 
 Translated: `reset $0000`, `init $0296`, `main_entry $1356`, `attract_loop $13C5`,
-`scene_dispatch $0BDD`. The traceback on a frontier call is, in effect, a readable
-boot call-path.
+`scene_dispatch $0BDD`, `load_title $0C20`, `load_worldmap $0C7A`, `finish_screen`/
+`draw_scene_overlay`. The two graphics codecs (`decompress` = `$0406`, `nt_load_rle` =
+`$0502`) are real Python in `machine.py`, so the loaders actually fill VRAM.
+
+**Validated by execution** (`render.py`): running the *translated* `load_worldmap`
+on the real ROM and rendering `vdp.vram` reproduces the zoomed world map pixel-for-
+pixel against the Go `scenemap` output — proof the translation is correct, not just
+plausible. That is the payoff of translating over annotating.
+
+The bank-aware disassembler (`tools/cmd/disz80 -slots`) backs further translation into
+the banked routines (the `b3_*` dispatcher, the level loaders).
 
 ## What the experiment has already shown
 

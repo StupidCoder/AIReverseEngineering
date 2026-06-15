@@ -181,3 +181,53 @@ def vdp_fill(addr, count, val):     # $05F0
     vdp.set_addr(addr, WRITE_VRAM)
     for _ in range(count):
         vdp.write_data(val)
+
+def display(on):
+    """Toggle the display-enable bit (VDP reg 1 bit 6) via its RAM shadow $D21A."""
+    s = mem.vdp_reg1_shadow
+    mem.vdp_reg1_shadow = (s | 0x40) if on else (s & ~0x40)
+    vdp.write_reg(1, mem.vdp_reg1_shadow)
+
+def decompress(bank, addr, dest):   # $0406 — the 4-byte-unit LZ tile codec
+    """Inflate the block at (bank, addr) and stream it to VRAM from `dest`."""
+    while addr >= 0x4000:           # normalise so addr can span banks
+        addr -= 0x4000; bank += 1
+    src = bank * 0x4000 + addr
+    word1, word2, count = u16(src + 2), u16(src + 4), u16(src + 6)
+    ctrl, match, lit, litp = src + 8, src + word1, src + word2, src + word2
+    vdp.set_addr(dest, WRITE_VRAM)
+    for i in range(count):          # one 4-byte tile row per unit
+        if rom[ctrl + i // 8] & (1 << (i & 7)):     # match: back-reference
+            b = rom[match]; match += 1
+            if b >= 0xF0:
+                off = (((b - 0xF0) << 8) | rom[match]) * 4; match += 1
+            else:
+                off = b * 4
+            for k in range(4):
+                vdp.write_data(rom[lit + off + k])
+        else:                                       # literal
+            for k in range(4):
+                vdp.write_data(rom[litp + k])
+            litp += 4
+
+def nt_load_rle(bank, addr, count, dest, hi):   # $0502 — RLE name-table codec
+    """Stream a stored name-table map (bank-5 region) to VRAM; each entry is (tile, hi)."""
+    src = bank * 0x4000 + (addr - 0x4000)         # addr is in the slot-1 window
+    vdp.set_addr(dest, WRITE_VRAM)
+    i, end = src, src + count
+    prev = (~rom[i]) & 0xFF                        # sentinel: first byte is a literal
+    while i < end:
+        b = rom[i]
+        if b == prev:                              # run: duplicate + a count byte
+            i += 1
+            if i >= end:
+                break
+            for _ in range(rom[i]):
+                vdp.write_data(b); vdp.write_data(hi)
+            i += 1
+            prev = (~rom[i]) & 0xFF if i < len(rom) else 0
+        elif b == 0xFF:                            # end of stream
+            break
+        else:                                      # literal
+            vdp.write_data(b); vdp.write_data(hi)
+            prev = b; i += 1

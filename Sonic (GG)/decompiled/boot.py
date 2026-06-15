@@ -8,9 +8,9 @@ Run:  python3 -c "import boot; boot.reset()"   (will stop at the first stub)
 """
 
 from machine import (
-    mem, vdp, flags, load_rom,
+    mem, vdp, flags, load_rom, u16,
     di, ei, im, set_sp, page, mapper_control, vcounter,
-    mem_fill, vdp_load_regs, vdp_fill,
+    mem_fill, vdp_load_regs, vdp_fill, display, decompress, nt_load_rle,
 )
 
 # ---------------------------------------------------------------------------
@@ -128,6 +128,48 @@ def dispatch_screen():                          # $0C00
 
 
 # ---------------------------------------------------------------------------
+# Screen loaders (Part IV §3 / Part III §3)
+# ---------------------------------------------------------------------------
+
+def load_title():                               # $0C1C / $0C20 — the title screen
+    display(False)
+    decompress(0x0C, 0x0000, dest=0x0000)        # title tiles  (bank 12)
+    decompress(0x09, 0x4AD0, dest=0x2000)        # sprite tiles (bank 9)
+    decompress(0x09, 0xB354, dest=0x3000)
+    nt_load_rle(5, 0x6962, 0x019B, dest=0x3800, hi=0x10)   # stored map, priority layer
+    nt_load_rle(5, 0x6AFD, 0x0170, dest=0x3800, hi=0x00)   # overlay layer
+    palette_fade_to(0x0B0A)
+    finish_screen()                              # $0CD6 — shared with the world map
+
+
+def load_worldmap():                            # $0C7A — the (zoomed) world map screen
+    display(False)
+    decompress(0x0C, 0x171A, dest=0x0000)        # map tiles  (bank 12)
+    decompress(0x09, 0x51A7, dest=0x2000)
+    decompress(0x09, 0xB354, dest=0x3000)
+    nt_load_rle(5, 0x6C6D, 0x0156, dest=0x3800, hi=0x10)   # stored map, priority layer
+    nt_load_rle(5, 0x6DC3, 0x0198, dest=0x3800, hi=0x00)   # overlay layer
+    palette_fade_to(0x0D0C)                      # bg $0C / spr $0D, faded up from black
+    finish_screen()                              # $0CD6
+
+
+def finish_screen():                            # $0CD6 — common title/map tail
+    b3_rst18(0x07)                               # banked setup
+    draw_scene_overlay()                         # $0CD9
+
+
+def draw_scene_overlay():                       # $0CD9 — per-scene route/zone overlay
+    sub_0E23()
+    mem.nt_hi = 0x10
+    nt_string(scene_overlay_ptr())               # $0612 — draw this scene's text/route
+    place_scene_markers()                        # $0CF3+ (per-scene marker positions)
+
+
+def scene_overlay_ptr():                         # $0CDC — table $1163 indexed by scene
+    return u16(0x1163 + mem.scene * 2)
+
+
+# ---------------------------------------------------------------------------
 # helpers that wrap a couple of two-step idioms for readability
 # ---------------------------------------------------------------------------
 
@@ -151,12 +193,12 @@ def set_slot(slot, bank):
 # ===========================================================================
 # WORKLIST — discovered callees, not yet translated.
 #   FRONTIER (raise on call — the edge of the translated region):
-#     load_worldmap     $0C7A  — world map; the $D279<6 wide/zoom branch lives here  << next
-#     load_title        $0C1C  — title background loader (Part IV §3, in Go)
-#     scene_run         $1414  — index the bank-5 scene table, run the descriptor
-#     draw_scene_overlay $0CD9 — per-scene route/text overlay via $0612
-#   MODELLED AS NO-OP (translate when needed; don't block the spine):
-#     b3_call_4006, sub_0645, sega_logo, palette_fade, wait_frames, b1_sub_42DA
+#     scene_run          $1414  — index the bank-5 scene table, run the descriptor  << next
+#     place_scene_markers $0CF3 — per-scene route-marker math (the blinking route)
+#     b3_rst18(7)        bank3  — banked setup via the RST $18 dispatcher
+#   MODELLED (structural placeholder; refine when needed; don't block the spine):
+#     palette_fade_to, nt_string, sub_0E23, sub_0645, sega_logo, palette_fade,
+#     wait_frames, b3_call_4006, b1_sub_42DA
 # ===========================================================================
 
 def _todo(addr, note=""):
@@ -166,18 +208,20 @@ def _noop(*_):  # an effect we haven't translated yet but that doesn't block the
     pass
 
 # frontier — translating outward stops here
-def load_worldmap():       _todo("$0C7A", "world map; holds the $D279 wide/zoom branch")
-def load_title():          _todo("$0C1C", "title background loader")
-def scene_run():           _todo("$1414", "run the bank-5 scene descriptor")
-def draw_scene_overlay():  _todo("$0CD9", "per-scene route/text overlay")
+def scene_run():            _todo("$1414", "run the bank-5 scene descriptor")
 
-# modelled as no-ops for now (so the spine runs end to end)
-def sub_0645():        _noop()
-def sega_logo():       _noop()
-def palette_fade():    _noop()
-def wait_frames(n):    _noop()
-def b3_call_4006():    _noop()
-def b1_sub_42DA():     flags.carry = False   # placeholder; real routine decides demo/replay
+# modelled structurally for now (so the spine runs end to end)
+def place_scene_markers():  _noop()   # $0CF3: per-scene route-marker math (blinking route)
+def b3_rst18(fn):           _noop()   # bank3 RST$18 dispatch: banked setup
+def palette_fade_to(src):   _noop()   # $0AAB: load + fade the palette toward its target
+def nt_string(src):         _noop()   # $0612: name-table string/run blitter
+def sub_0E23():             _noop()
+def sub_0645():             _noop()
+def sega_logo():            _noop()
+def palette_fade():         _noop()
+def wait_frames(n):         _noop()
+def b3_call_4006():         _noop()
+def b1_sub_42DA():          setattr(flags, "carry", False)  # placeholder demo/replay flag
 
 
 if __name__ == "__main__":

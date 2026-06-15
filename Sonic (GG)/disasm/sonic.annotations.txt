@@ -1,0 +1,46 @@
+# Sonic the Hedgehog (Game Gear) — code annotations (Sonic.md).
+# Sega Game Gear cartridge ROM, Zilog Z80. 256 KB / 16 banks of 16 KB, paged into
+# the Z80's 48 KB ROM window through the Sega mapper ($FFFC-$FFFF). See Sonic.md
+# Part I (the cartridge image) and Part II (boot and initialization).
+#
+# Format: "ADDR name description" (hex address; rest of the line is the description),
+# fed to codetracez80 -annotate. Lines starting with # are notes, ignored by the tool.
+#
+# This trace is the HOME configuration: banks 0/1/2 in their default slots
+# (the first 64 KB of the ROM loaded at $0000). Code in other banks — notably the
+# bank-3 dispatcher reached through the RST gateways below — needs its own trace with
+# that bank paged in; cross-bank CALLs (e.g. CALL $4006) decode the wrong bank here.
+#
+# Regenerate (from the repo root; the .gg is committed):
+#   go run stupidcoder.com/tools/cmd/codetracez80 -load 0 -entry 0000,0038,0066 \
+#       -annotate "Sonic (GG)/disasm/sonic.annotations.txt" \
+#       -o "Sonic (GG)/disasm/sonic.asm" \
+#       "Sonic (GG)/Sonic The Hedgehog (Japan, USA).gg"
+
+# --- CPU vectors (bottom of bank 0, always mapped; Part I §5) ---
+0000  reset_boot   reset: DI / IM 1 / poll VDP V-counter (IN A,($7E)) until line $B0 / JP init $0296.
+0018  rst18        RST $18 gateway -> bankcall_4012 (a 1-byte call into bank 3 at $4012).
+0020  rst20        RST $20 gateway -> bankcall_4006 (a 1-byte call into bank 3 at $4006).
+0028  rst28        RST $28 gateway -> bankcall_4015 (a 1-byte call into bank 3 at $4015).
+0038  int_vec      maskable-interrupt vector (IM 1 / RST $38): JP frame_int $0073.
+0066  nmi_pause     NMI vector = the Start/Pause button (pause handler).
+0073  frame_int    per-frame vblank handler: IN A,($BF) acks the VDP int; gated on (IY+6) bit7; sets the VDP line counter (reg10/$8A) for the mid-frame HUD line-interrupt split; preserves IX/IY + the bank shadows ($D22F/$D230).
+
+# --- cold-start initialization (Part II) ---
+0296  init         cold start: program the mapper (control $FFFC=$80; slots $FFFD/E/F <- banks 0/1/2); clear work RAM via overlapping LDIR and set SP=$DFEF; write VDP regs 0-10 from vdp_reg_table with a shadow at $D219; hide all sprites; CALL bankcall_4006; LD IY,$D200; JP main_entry.
+031C  vdp_reg_table  11-byte VDP register table (regs 0..10) = 26 A2 FF FF FF FF FF 00 00 00 FF. R0=Mode4+hide-left-col, R1=display OFF+frame-int+8x16 sprites, R2=name table $3800, R5=SAT $3F00, R6=sprite patterns $2000, R7=backdrop col 0, R8/9=scroll 0, R10=line counter.
+05F0  vdp_fill     VDP fill primitive: fill(HL=VRAM address, BC=count, A=byte). Writes HL low then HL high|$40 (the write-VRAM command) to control port $BF, then OUTs the byte BC times to data port $BE. (VRAM cmd bits: $00 read, $40 write VRAM, $80 register, $C0 write CRAM.)
+
+# --- cross-bank call thunks = the RST $18/$20/$28 targets (Part II §2) ---
+02E2  bankcall_4012  banked call: DI; slot1 <- bank3 ($FFFE=3); save A->$D2D3; CALL $4012; restore slot1 from shadow $D22F; EI; RET. (RST $18 target.)
+02F8  bankcall_4006  banked call: DI; slot1 <- bank3; CALL $4006; restore slot1 from shadow $D22F; EI; RET. (RST $20 target.)
+0309  bankcall_4015  banked call: DI; slot1 <- bank3; save A; CALL $4015; restore slot1 from shadow $D22F; EI; RET. (RST $28 target.)
+
+# --- main entry (Part II §4) ---
+1356  main_entry   post-init entry: SET (IY+0).0; EI; set the running bank shadows (slot1=bank1/$D22F, slot2=bank2/$D230); RES (IY+2).0/1; CALL subsystem inits $0645/$1CD7/$0AA3; set top-level game mode $D240=3.
+
+# --- RAM landmarks (work RAM $C000-$DFFF; Part II) ---
+# $D200 = game-state block (IY base; IY+0/+2/+6 are flag bytes)
+# $D219 = shadow copy of VDP registers 0-10
+# $D22F = current slot-1 bank number ; $D230 = current slot-2 bank number
+# $D240 = top-level game mode (state-machine selector)

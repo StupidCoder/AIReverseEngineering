@@ -105,7 +105,9 @@ AIReverseEngineering/
 │
 └── Sonic (GG)/
     ├── Sonic The Hedgehog (Japan, USA).gg   # raw Game Gear cartridge ROM
-    └── Sonic.md                 # cartridge + game writeup (Part I done; rest stubbed)
+    ├── Sonic.md                 # cartridge + game writeup (Parts I-II done; rest stubbed)
+    ├── disasm/                  # annotated recursive-descent disassembly + annotations.txt
+    └── rendered/                # generated PNGs (graphics — once located)
 ```
 
 Per-game folder contract: `<Game>.<ext>` raw image, a markdown writeup of the

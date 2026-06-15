@@ -51,6 +51,18 @@ plausible. That is the payoff of translating over annotating.
 The bank-aware disassembler (`tools/cmd/disz80 -slots`) backs further translation into
 the banked routines (the `b3_*` dispatcher, the level loaders).
 
+## Pushing past the data-driven wall
+
+`scene_run` reaches `run_scene_behaviour`, where behaviour is encoded as a 40-byte
+descriptor (the bank-5 `$5600` table) plus a per-scene script — data, not code. Rather
+than stall, the descriptor format was decoded (`scene.py`): the table is the per-act
+**level resource table** — byte +0 is the zone, +23 the graphics bank, +24/+25 the
+compressed tile-set pointer. Verified by decompressing a zone's tile set from the
+decoded pointer (coherent level tiles). So the wall is permeable: at a data node you
+decode the data format (here, a `SceneDescriptor` dataclass) and carry on. The
+remaining frontier is the per-scene script and the descriptor's not-yet-named fields
+(the map-pointer encoding, per-act data).
+
 ## What the experiment has already shown
 
 - **It runs**, and the spine reaches the scene dispatcher, correctly routing scene 0

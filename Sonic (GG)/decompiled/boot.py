@@ -13,9 +13,11 @@ from machine import (
     mem_fill, copy_rom, vdp_load_regs, vdp_fill, display, decompress, nt_load_rle,
 )
 
+from scene import SceneDescriptor
+
 # The scene table lives in bank 5 at Z80 $5600; with bank 5 paged into slot 1 that is
 # flat file offset $15600.  Each entry is a word: the offset (from $5600) of a 40-byte
-# scene descriptor.
+# scene descriptor (the per-act level resource record; see scene.py).
 SCENE_TABLE = 5 * 0x4000 + (0x5600 - 0x4000)   # = $15600
 
 # ---------------------------------------------------------------------------
@@ -190,24 +192,21 @@ def scene_run():                                # $1414 -> 0 restart / 1 next / 
 def run_scene_descriptor(desc):                 # $185D
     display(False)
     copy_rom(desc, 0xD355, 0x28)                 # the 40-byte descriptor -> work RAM $D355
+    s = SceneDescriptor.decode(desc)             # ...decoded (scene.py): zone, tiles, map
     mem.set_iy(11, mem.iy(5)); mem.set_iy(12, mem.iy(6))  # snapshot the flag bytes
     init_scene_state()                           # $1884.. clear a swathe of scene RAM
-    # The scene's actual behaviour — what it draws and how long it runs — is driven by
-    # the 40 descriptor bytes now at $D355 and a per-scene script, branching on $D238.
-    # That is DATA, not code: see the note in the worklist. << the wall
-    return run_scene_behaviour(desc)
+    return run_scene_behaviour(s)
 
 
 # ===========================================================================
-# WORKLIST / FRONTIER NOTE — the data-driven wall (Part III §1)
+# FRONTIER NOTE — the data-driven boundary (Part III §1), now partly decoded
 # ---------------------------------------------------------------------------
-# scene_run reaches a clean, readable shell, but the scene's *behaviour* is encoded
-# as a 40-byte descriptor (now copied to $D355) plus a per-scene script, interpreted
-# by the rest of $185D and the per-frame handlers. The 40 fields are not yet decoded
-# (that needs tracing how $D355+n is consumed across the scene handlers). So the
-# descriptor stays raw bytes for now and run_scene_behaviour is the frontier — this is
-# exactly the predicted "logic lives in data" boundary, not a control-flow dead end.
-#   Next, to push past it: decode the $D355 descriptor fields into a Scene dataclass.
+# The $5600 table turns out to be the per-act LEVEL RESOURCE table: SceneDescriptor
+# (scene.py) decodes the zone (+0), the graphics bank (+23) and the compressed tile-set
+# pointer (+24/+25, verified by decompressing a zone's 128-tile set). What remains is
+# the per-scene SCRIPT that consumes the descriptor and runs the scene — still data, so
+# run_scene_behaviour is the frontier. Pushing further means decoding that script and
+# the rest of the descriptor's raw fields (the map pointer encoding, per-act data).
 # ===========================================================================
 
 

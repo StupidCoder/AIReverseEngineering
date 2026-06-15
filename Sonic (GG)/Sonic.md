@@ -21,7 +21,7 @@ Methods: purely static analysis of the ROM image, plus the Z80 toolchain built f
 it in the shared `tools/` module — the disassemblers (`tools/cmd/disz80`,
 `tools/cmd/codetracez80`) over the `tools/z80` decoder. All addresses are Z80
 addresses (16-bit, `$0000`–`$FFFF`) unless a *file offset* is called out; bytes are
-8-bit. Parts I–II are complete; the rest is stubbed.
+8-bit. Parts I–II are complete and Part IV is under way; Parts III and V are stubbed.
 
 ---
 
@@ -41,6 +41,9 @@ addresses (16-bit, `$0000`–`$FFFF`) unless a *file offset* is called out; byte
   - [4. The main entry (`$1356`)](#4-the-main-entry-1356)
 - [Part III — Engine architecture](#part-iii--engine-architecture)
 - [Part IV — Graphics and data formats](#part-iv--graphics-and-data-formats)
+  - [1. The VDP formats](#1-the-vdp-formats)
+  - [2. The graphics decompressor](#2-the-graphics-decompressor)
+  - [3. First decompressed screen — the SEGA logo](#3-first-decompressed-screen--the-sega-logo)
 - [Part V — Game mechanics](#part-v--game-mechanics)
 - [Appendix A — Toolchain and reproduction](#appendix-a--toolchain-and-reproduction)
 
@@ -408,9 +411,85 @@ how banked level/graphics resources are addressed.
 
 # Part IV — Graphics and data formats
 
-*Stub.* The VDP Mode 4 encodings — 8×8 4-bitplane tiles, the 32×28 name table, the
-12-bit CRAM palettes, the sprite attribute table — and Sonic's level, object and
-(if any) compressed asset formats.
+Graphics on the Game Gear are two layers of problem: the fixed **VDP hardware
+formats** the data ends up in (§1), and the game-specific **compression** it is
+stored under in the ROM (§2). With both decoded we can take a routine that loads a
+screen and reproduce its pixels exactly — §3 does this for the first screen the
+console shows, as an end-to-end check.
+
+## 1. The VDP formats
+
+These are standard Mode-4 hardware formats, decoded by the reusable
+[`tools/gamegear`](tools/gamegear) package (so they are shared, not Sonic-specific):
+
+- **Tiles** — 8×8 pixels, **4 bitplanes** (16 colours), **32 bytes** each, stored
+  *row-interleaved*: each pixel row is 4 bytes (one per bitplane), and pixel *x*'s
+  colour index is bit `7-x` of each plane (low plane = bit 0). `DecodeTile`.
+- **Palette (CRAM)** — 32 entries of **2 bytes**, **12-bit** colour, 4 bits per
+  channel in **BGR** order (`0000 BBBB GGGG RRRR`); a 4-bit channel scales to 8-bit
+  by ×17. Indices 0–15 are the **background** palette, 16–31 the **sprite** palette.
+  `Palette`.
+- **Name table** — the 32×28 background map at VRAM `$3800`; each cell is a 2-byte
+  word: the 9-bit tile number plus per-cell horizontal/vertical **flip**, **palette
+  select** and **priority** bits. `DecodeNameEntry` / `RenderNameTable`.
+
+## 2. The graphics decompressor
+
+Almost all of Sonic's art is compressed (Part I §6: the upper banks run at ~7
+bits/byte). The decompressor is the routine at **`$0406`**; it is a **4-byte-unit
+LZ** — a literal/back-reference scheme whose unit is one *tile row* (4 bitplane
+bytes), so a repeated row (a blank row, a flat fill) costs a single bit. It is a
+game-specific *software* codec, so it lives in the game's
+[`extract/decomp`](extract/decomp) module, not in `tools/gamegear`.
+
+A compressed block is addressed as a `(bank, address)` pair; the routine's prologue
+**normalises** it (`while addr ≥ $4000: addr -= $4000; bank++`) and maps two
+consecutive banks into the slots, so a block may span banks. The block then is:
+
+```
++0  word   (skipped)
++2  word1  offset to the match-info stream
++4  word2  offset to the literal stream (also the back-reference base)
++6  word3  count — number of 4-byte output units
++8  …      control bitmap: one bit per output unit
++word1     match-info stream: variable-length back-reference offsets
++word2     literal stream: 4-byte units
+```
+
+Decoding walks `count` units; for unit *i*, control bit *i* (`bitmap[i>>3] &
+(1<<(i&7))`) selects:
+
+- **0 — literal:** emit the next 4 bytes of the literal stream and advance it.
+- **1 — match:** read an offset from the match-info stream — one byte `b`, but if
+  `b ≥ $F0` it is a two-byte big value `((b-$F0)<<8) | next` — and emit the 4 bytes
+  at `literal_base + offset×4` (a back-reference to an earlier unit).
+
+So the literal stream is the set of distinct 4-byte tile rows in first-appearance
+order, and the bitmap + match offsets reconstruct the full tile data from them.
+
+## 3. First decompressed screen — the SEGA logo
+
+The first thing the console shows is the **SEGA logo** screen, loaded by `$1CD7`
+(`sega_logo`): it decompresses its background tiles from `(bank $0C, $FA74)` —
+normalised to **bank 15**, file `$3FA74` — into VRAM, and uses background palette
+index `$12`. Running the decompressor on that block yields a clean, self-consistent
+result: `count = 1024` four-byte units = `4096` bytes = exactly **128 tiles**; the
+palette resolves through the bank-8 table to a blue-on-white set. Decoding those
+tiles with that palette ([`extract/cmd/titlegfx`](extract/cmd/titlegfx)) reproduces
+the logo exactly:
+
+![SEGA logo, decompressed from bank 15 and decoded with palette $12](rendered/sega.tiles.png)
+
+This is the end-to-end proof that the `$0406` decompressor, the 4-bitplane tile
+decode and the 12-bit palette are all correct against real data. (The logo's tiles
+happen to sit in screen order, so the raw tile sheet already reads as the logo;
+screens whose name table is non-trivial will be composed with `RenderNameTable`.)
+The game's **title screen** proper is a later screen loaded by the same mechanism,
+and the **level** tiles/maps use the same decompressor — so the path from here to
+rendering any screen is now just *finding* each screen's block and palette.
+
+*Still open.* The sprite (object) tile format, the name-table layout per screen, the
+level map format (decompressed to RAM, drawn by `scroll_draw`), and the object data.
 
 # Part V — Game mechanics
 

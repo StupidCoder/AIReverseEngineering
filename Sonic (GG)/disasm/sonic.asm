@@ -3077,7 +3077,7 @@
 1CC5  .byte 45 F1 2F 34 EA 43 47 F9 2A 3A E3 41 49 00 24 3F ; E./4.CG.*:.AI.$?
 1CD5  .byte DC 3F                                           ; .?
 
-; ==== screen_load_title  $1CD7  (1 caller) — load the first (title/logo) screen: RST $20 (bank-3 setup); display OFF; decompress BG tiles (A=$0C,HL=$FA74 -> normalised bank 15 $7A74 = file $3FA74) to VRAM $0000; decompress sprite tiles (A=$04,HL=$F600 -> bank 7 = file $1F600) to VRAM $2000; set palette indices $12/$12; clear the name table $3800 to tile $70; display ON; draw text/objects ($1E7C/$1E8A/$1F03/$1EC1). NB the title's name table is BUILT BY CODE (text), not loaded as a tilemap — loaded compressed tilemaps are a LEVEL feature (decompressed to RAM, drawn by scroll_draw). ====
+; ==== sega_logo  $1CD7  (1 caller) — load the SEGA-logo boot screen (verified by rendering it): RST $20 (bank-3 setup); display OFF; decompress the BG tiles (A=$0C,HL=$FA74 -> normalised bank 15 $7A74 = file $3FA74; header match+$88/lit+$461/count=1024 -> 128 tiles) to VRAM $0000; decompress sprite tiles (A=$04,HL=$F600 -> bank 7 = file $1F600) to VRAM $2000; BG/sprite palette index $12 (the blue logo palette, bank-8 table -> file $23B10); clear the name table $3800 to tile $70; display ON; lay out the logo via the name table ($1E7C/$1E8A/$1F03/$1EC1). The actual game title screen is a LATER screen loaded the same way; loaded compressed tilemaps are a LEVEL feature (decompressed to RAM, drawn by scroll_draw). ====
 1CD7  E7          RST $20
 1CD8  3A 1A D2    LD A,($D21A)
 1CDB  E6 BF       AND $BF

@@ -36,6 +36,9 @@ def load_rom(path=None):
 def u16(off):  # little-endian word from the ROM
     return rom[off] | rom[off + 1] << 8
 
+def memw(a):   # little-endian word from work RAM
+    return mem[a] | mem[a + 1] << 8
+
 # --- named work-RAM locations (the symbol table; extend as labels are found) -
 
 NAMES = {

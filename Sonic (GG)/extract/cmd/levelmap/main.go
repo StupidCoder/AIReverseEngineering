@@ -89,16 +89,17 @@ func parseActs(rom []byte) []Act {
 // into them each cycle. Loading one frame statically makes them visible (rings, water, ...).
 type animFrame struct{ vramTile, fileOff, nTiles int }
 
-// ringAnim is the rings/flowers animation (tiles 252-255), shared by every zone (the
-// animation update copies its frame from a fixed bank-11 source for all of them).
+// ringAnim is the rings animation (tiles 252-255), shared by every zone (the animation
+// update copies its frame from a fixed bank-11 source for all of them). Each frame is 4
+// tiles = 16x16 px; the ring spins through ~6 frames.
 var ringAnim = animFrame{252, 0x2F73D, 4}
 
 // zoneAnims is the per-zone animation data, traced from the $15FF update (sources in bank
-// 11). The update is hardcoded per zone. Green Hills (0) additionally animates water; the
-// other zones' extra animations (only the rings run during the idle intro probed so far)
-// are not yet captured.
+// 11), hardcoded per zone. Green Hills' zone-specific animation (tiles 12-15) is the
+// spinning yellow FLOWERS (2 frames) -- not water; the level has none. Other zones'
+// extra animations (only the rings ran during the idle probe so far) are not yet captured.
 var zoneAnims = map[int][]animFrame{
-	0: {{12, 0x2FA3D, 4}}, // Green Hills water (tiles 12-15)
+	0: {{12, 0x2FA3D, 4}}, // Green Hills flowers (tiles 12-15)
 }
 
 // applyAnimFrame copies one frame of each animated tile group into the tile set, replacing

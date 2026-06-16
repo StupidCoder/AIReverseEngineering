@@ -899,22 +899,27 @@ Each object **type** indexes an 8-byte sprite descriptor at `$2560` (the per-fra
 `$2BFB` reads it; valid types are `< $57`). That gives the sprite *class* — `$50` shares
 the beetle's descriptor and `$51` the bonus-item descriptor — but not yet the behaviour.
 
-### Animated tiles (rings, flowers, water)
+### Animated tiles (rings and flowers)
 
-The rings (and the spinning yellow flowers, and the water surface) are **baked into the
-block map** — the rings/flowers are blocks 121–123 referencing tiles **252–255**, the
-water is tiles 12–15 — but those tile slots are *empty in the base tile set*. The game
-**animates them at runtime**: the per-frame update at `$15FF` copies a fresh frame of tile
-data into the slots, cycling them (every ~10 frames, which is why the validation flags
-those tiles plus a 3-colour palette cycle). There is no generic "animation table" — each
-animation is hardcoded: the **rings** (tiles 252–255) are copied from a fixed bank-11
-source (`$2F73D`) for *every* zone, while Green Hills' **water** (tiles 12–15) is a
-2-frame toggle from bank 11 `$7A3D`/`$7ABD`, gated on the zone being Green Hills.
+The rings and the spinning yellow flowers are **baked into the block map**, but they are
+**two separate animations on two separate sets of four tiles** — a Game Gear tile is 8×8,
+so each 16×16 graphic is **4 tiles**:
 
-So a single still frame can't capture the animation — but it *can* show the rings: render
-loads one frame of each animated group into the empty tile slots (`applyAnimFrame`), which
-is why the rings, flowers and water now appear. (Other zones likely animate more than the
-rings; only the rings were observed in the idle probe so far.)
+- the **rings** are tiles **252–255** (blocks 121–123), spinning through ~6 frames;
+- the Green Hills **flowers** are tiles **12–15**, a 2-frame animation.
+
+Both tile sets are *empty in the base tile set*; the per-frame update at `$15FF` copies a
+fresh frame into them each cycle (~every 10 frames — which is why the validation flags
+those eight tiles plus a 3-colour palette cycle). There is no generic "animation table" —
+each animation is hardcoded: the **rings** are copied from a fixed bank-11 source
+(`$2F73D`) for *every* zone, while the **flowers** are a 2-frame toggle from bank 11
+`$7A3D`/`$7ABD` gated on the zone being Green Hills. (Green Hills has no water; the
+zone-specific animation there is the flowers — earlier mislabelled "water".)
+
+So a still frame can't capture the spin, but it *can* show them: the render loads one
+frame of each group into the empty slots (`applyAnimFrame`), which is why the rings and
+flowers now appear. Other zones likely animate more than the rings (e.g. real water);
+only the rings were observed in the idle probe so far.
 
 *Still open.* Mapping each **type** to its behaviour (the object handlers). The machine
 model can place the objects but isn't cycle-accurate enough to *run* them — Sonic falls
@@ -949,11 +954,30 @@ separately and still being traced.
 | `$10` | **beetle** | enemy | play testing |
 | `$12` | ? | one instance, far right (end of level — goal?) | placement |
 | `$17` | ? | one instance at block (1, 22), off the playfield (control object?) | placement |
-| `$50` | ? | eight instances, evenly spaced; not visible in play (checkpoint / trigger / sound?); shares the beetle's bounding box | placement |
+| `$50` | **checkpoint?** | eight instances, evenly spaced; invisible in play; the respawn code points to this (see below) | placement + spawn trace |
 | `$51` | ? | one instance; shares the bonus-item bounding box | placement |
 
-Still to do: the behaviour dispatch (to fill in the `?` rows and confirm the rest),
-Sonic's movement and physics, ring collection and collision, scoring and progression.
+### Sonic's spawn and respawn
+
+Sonic is object 0; the loader places him at the position the spawn pointer `($D217)`
+points to (block coordinate × 32). Across all 18 acts the placed position is `blockX×32`
+horizontally but `blockY×32 + 9` vertically — a constant **+9 px Y offset** (Sonic's
+sprite origin). He is *not* dropped to the ground: the original spawn can be in mid-air
+(e.g. Green Hills Act 1 spawns up in the clouds and Sonic falls in; Labyrinth Act 1 spawns
+*above* the level), and a vertical act spawns at the **bottom** (Jungle Act 2 at block
+~248 of 256 — the start of the climb). The camera starts 3 blocks left of him
+(`$D251 = blockX − 3`, `$1959`).
+
+There is also a **respawn table at RAM `$D32F`** (`$D32F + act×2`). Bank 1 `$6034`
+*writes* it from Sonic's current position (`blockX`, `blockY − 1`) — i.e. it records a
+checkpoint — which is almost certainly the behaviour of the evenly-spaced `$50` objects.
+So `$D32F` is the death-respawn point, updated as Sonic passes the `$50` checkpoints.
+
+`cmd/objprobe` reads each act's spawn and `cmd/levelmap`'s overlays mark it (a 2×4-tile
+box at the original position) — see `rendered/level_<zone>_act<N>_objects.png`.
+
+Still to do: the behaviour dispatch (to confirm `$50` = checkpoint and fill the other `?`
+rows), Sonic's movement and physics, ring collection and collision, scoring and progression.
 
 ---
 

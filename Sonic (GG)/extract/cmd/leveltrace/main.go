@@ -63,12 +63,12 @@ func main() {
 		fmt.Printf("%-12s in=$%02X(D203) cam=$%04X/$%04X slot1=b%-2d D2AF=$%04X bytes:",
 			tag, m.Read(0xD203), word(0xD2AB), word(0xD2AD), bank, ptr)
 		for i := uint16(0); i < 16; i++ {
-			fmt.Printf(" %02X", m.Read(ptr + i))
+			fmt.Printf(" %02X", m.Read(ptr+i))
 		}
 		fmt.Println()
 	}
 
-	run(700) // reach the title
+	run(700)             // reach the title
 	m.CapturePC = 0x0A73 // grab HL (source ptr) + BC (length) at the map decompressor
 	// Snapshot the decompressor's OUTPUT ($C000, 4 KB) the instant it returns to its
 	// caller (PC leaves [$0A73,$0AA2]), before any other code can mutate the RAM map.

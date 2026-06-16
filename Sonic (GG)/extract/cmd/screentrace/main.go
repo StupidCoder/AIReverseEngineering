@@ -13,8 +13,8 @@ package main
 import (
 	"fmt"
 	"hash/crc32"
-	"sort"
 	"os"
+	"sort"
 
 	"stupidcoder.com/tools/gamegear"
 )

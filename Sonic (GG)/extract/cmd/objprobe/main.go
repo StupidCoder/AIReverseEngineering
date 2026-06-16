@@ -82,13 +82,16 @@ func main() {
 			m.RunFrame()
 		}
 	}
-	for i := 0; i < 60; i++ {
+	// Capture the spawn the INSTANT the object array is populated (slot 0 = Sonic's
+	// placed position), before any physics -- in some levels (Labyrinth) Sonic falls
+	// immediately, and the model has no collision, so a later read is garbage.
+	spawnX, spawnY := 0, 0
+	for i := 0; i < 400 && spawnX == 0 && spawnY == 0; i++ {
 		m.RunFrame()
+		spawnX, spawnY = u16(objBase+2), u16(objBase+5)
 	}
-
-	fmt.Printf("\nlive (oracle) confirmation:\n")
-	fmt.Printf("  Sonic spawn (slot 0): block (%d,%d) = world (%d,%d)\n",
-		u16(objBase+2)/32, u16(objBase+5)/32, u16(objBase+2), u16(objBase+5))
+	fmt.Printf("\nSonic slot-0 spawn (pristine): block (%d,%d) = world (%d,%d)\n",
+		spawnX/32, spawnY/32, spawnX, spawnY)
 	match := 0
 	for i := 0; i < objMax; i++ {
 		b := uint16(objBase + i*objSize)

@@ -143,3 +143,20 @@
 # (column/row order, stride, any block indirection) is the next decode -- now
 # localised to bank 4. (The simplified oracle renders the level but can't drive live
 # scrolling: input registers at $D203 but the player physics don't advance.)
+
+# --- the level map FORMAT (decoded from bank 4; rendered/level_blocks.png) ---
+# Correlating the live VRAM (the Green Hills screen) with bank 4 cracked the format:
+# the level is built from 2x2 (16x16 px) MACRO-BLOCKS.
+#   BLOCK TABLE: bank 4 $10000 (z80 $4000), 4 bytes per block = (TL TR BL BR) tile
+#     indices, row-major; a 16-wide tile sheet (the tile below = +$10). e.g. block 4 =
+#     02 03 02 03 (the checkered ground); ~128+ blocks. rendered/level_blocks.png shows
+#     the decoded palette (slopes, cliffs, palm segments, flowers, clouds, water).
+#     Verified: 49 distinct on-screen 2x2 groups resolve to entries in this table, and
+#     expanding indices->blocks->tiles renders recognisable Green Hills terrain.
+#   BLOCK-INDEX MAP (the layout): column-major (one column = the screen height in
+#     blocks); $D2AF points at the current column and scroll_draw copies it. The map is
+#     SPARSE (sky = block $00 dominates) and NOT a flat fixed-stride grid (no stride
+#     reproduces the terrain), so the columns are pointer-indexed / RLE'd -- that layer
+#     is not yet cracked (needs a ground-heavy capture).
+#   OBJECTS (trees, flowers, etc.) are drawn SEPARATELY, not in the block map (many
+#     on-screen cells match no block) -- the block map is the base terrain only.

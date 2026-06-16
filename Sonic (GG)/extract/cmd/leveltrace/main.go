@@ -77,6 +77,8 @@ func main() {
 	}
 	snap(fmt.Sprintf("%04d_inlevel", frame))
 	dump("inlevel")
+	chk(os.WriteFile(filepath.Join(outdir, "vram.bin"), m.VDP.VRAM[:], 0o644))
+	chk(os.WriteFile(filepath.Join(outdir, "cram.bin"), m.VDP.CRAM[:], 0o644))
 
 	// Now hold Right (D-pad only, no Start) and watch the camera and map pointer.
 	m.PadDC = 0xF7 // Right pressed (bit 3 low)

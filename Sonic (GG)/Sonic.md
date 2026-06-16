@@ -972,11 +972,11 @@ slot:
 | `$0E` | bird | b1 `$6BD9` | enemy |
 | `$0F` | horizontal platform | b1 `$6DCA` | back-and-forth: 1 px/frame, 160 px out-and-back; carries Sonic |
 | `$10` | **beetle** | b1 `$6E65` | enemy: marches back and forth at 1 px/frame (same script engine as the crab, no attack) |
-| `$12` | **world 1 boss** | b1 `$7065` | |
+| `$12` | **world 1 boss** | b1 `$7065` | Robotnik's pod; bytecode-scripted sweeps; 8 hits to defeat (`$D2ED`) |
 | `$25` | capsule | b1 `$736B` | jumped on to free the animals — ends each world |
 | `$26` | fish | b1 `$7D25` | enemy: jumps 128 px (4 blocks) straight up, ~2.6 s/cycle |
 | `$2C` | **world 3 boss** | b2 `$806B` | |
-| `$2D` | porcupine | b2 `$82FB` | enemy |
+| `$2D` | porcupine | b2 `$82FB` | spiky walker, 0.25 px/frame, ~160 px patrol each way; no attack |
 | `$48` | **world 2 boss** | b2 `$84AB` | |
 | `$49` | **world 4 boss** | b2 `$9271` | |
 | `$4E` | seesaw | b2 `$8681` | tilt-arm catapult; launch height scales with Sonic's landing impact (momentum transfer) |
@@ -1084,6 +1084,37 @@ is roughly **~158 frames ≈ 2.6 s**. There is no horizontal motion (only a one-
 nudge); the X velocity is never touched. On the way up it triggers a sub-action
 (`RST $28`, index `$12` — the splash) and, via the contact test (`($D215) = $0204`,
 `$3328`), calls the hurt routine `$2FC1` if Sonic touches it.
+
+### Porcupine (`$2D`)
+
+The porcupine (bank 2 `$82FB`, boxes up to 20×32) is a plain spiky ground-walker with no
+attack — the spikes *are* the threat. A phase counter `IX+17` is incremented by 1 **every
+8 frames** (gated on `($D224) & 7`) and wraps at `$A0` (160); its value picks the
+direction — walk left while `IX+17 < $50`, walk right otherwise — at a slow **±0.25
+px/frame** (`±$40/256`). So it spends 80 ticks (≈ 640 frames) crawling each way, covering
+~160 px (5 blocks) before it reverses — roughly a 21 s round trip. Gravity (`+$0020`/frame
+on the Y velocity) keeps it on the ground. It runs **two contact tests** — a tight `$0608`
+box and a larger `$1006` box — both of which hurt Sonic on touch (`$2FD9` / `$2FC1`, the
+two hurt-Sonic variants).
+
+### World 1 boss (`$12`)
+
+The world-1 boss (bank 1 `$7065` — Robotnik in his pod) is the most elaborate object here,
+and it sets *itself* up as a self-contained set-piece. On spawn it decompresses its own
+sprite graphics from bank 9 (`$A8B7` → VRAM `$2000`) and loads its palette (index `$11`),
+then arms a small **bytecode script**: a program counter (`IX+18`) walks a script whose
+base is `(IX+20/21)`, and each opcode is dispatched through a jump table at `$729A` (a `0`
+byte is a jump — the following byte is the new PC). That script flies the pod **back and
+forth across the arena** — bounded by `($D26D) + $22` on the left and `+ $BA` on the right
+(~152 px) — with vertical swoops, overlaid on a gentle bob read from a 64-entry waveform
+table at `$72B0`, while it trails exhaust particles (`$7A36`). The fight is decided in
+`$77FD`: it runs a contact test, and if Sonic touches the pod while **not** in his
+attacking (rolling/jumping) state — checked via `($D415)` — Sonic is hurt and knocked back
+(`$2FD9`). If he *is* attacking, the pod takes a hit: a **hit counter at `($D2ED)`**
+increments, Sonic rebounds, and the boss flashes invulnerable for `$18` = 24 frames
+(`($D2B1)`). It takes **8 hits** (`($D2ED)` reaching `$08`) to win — at which point the
+defeat sequence (`$787D`) runs and the captured animals are freed. (Read statically; the
+8-hit count and the attacking-state gate are the parts worth confirming against play.)
 
 ### Sonic's spawn
 

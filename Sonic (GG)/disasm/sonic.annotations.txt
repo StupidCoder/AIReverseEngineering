@@ -178,7 +178,7 @@
 # --- LEVEL MAP: fully decoded (oracle scrolled; rendered/level_map.png) ---
 # Made the oracle scroll (hold Right+Jump -> the player runs, $D3FF advances). The
 # real terrain draw is bank0 $0760/$0860 (NOT scroll_draw $3282 = objects only).
-0760  map_expand  read one column of the RAM block-index map, expand each block's 4 tiles, write name-table cells into the column buffer at RAM $D180. Map column address via $0938.
+0760  map_expand  read one column of the RAM block-index map and expand each block to a 4x4 grid of 8x8 tiles (32x32 px/block), writing name-table cells to the column buffer at RAM $D180. Map column addr via $0938. Block TILE TABLE = bank4 file $10000 (z80 $4000; prologue $0726 pages bank4->slot1; loader points $D249 there): tile(r,c) = $10000 + index*16 + r*4 + c (16 bytes/block, row-major 4 wide). The index math (RLCA*4 then XOR high nibble, $079F-$07A9) computes exactly index*16. Per-block attr table = $D211 = ($343D + zone*2) in bank4; only its bit7 is used -> a PRIORITY bit (no flip/palette-select), so terrain is all BG palette. FULL LEVEL rendered from ROM via cmd/levelmap -> rendered/level_greenhills_full.png.
 0860  map_upload  upload the $D180 column buffer to the VDP name table via OUTI during vblank.
 0938  map_addr  compute a block-index map cell address: HL = $C000 + (row=$D252+B)*stride + (col=$D251+C). Stride chosen from $D232's top bits (16/32/64/128) or default 256.
 0A73  map_decompress  THE level-map RLE decompressor. DE=$C000 (dest); HL=source, BC=length (set by caller $19D8, which normalises the source bank). Codec (same family as $0502): prev=~(HL); compare each src byte to prev — if EQUAL it's a run (the duplicate + a COUNT byte repeat the byte COUNT more times, DJNZ so count $00 = 256), else a literal; after a run prev is re-armed (CPL) so the next byte starts fresh. NO $FF terminator — bounded purely by BC. Reimplemented BYTE-PERFECT as extract/decomp.LoadMapRLE; verified vs the live $C000 output (cmd/levelmap). Zone 0: source bank 5 z80 $7430 = file $17430, len $0786 (1926B) -> 4096B = 16 rows x 256 cols (2.13x).
@@ -187,8 +187,9 @@
 #  the COMPRESSED MAP lives in BANK 5.)
 # THE MAP = a RAM WINDOW at $C000, ROW-MAJOR stride 256: block = mem[$C000 + row*256 + col];
 # row vertical (0 top sky .. ~15 ground), col horizontal. Decompressed from BANK 5 at load
-# and streamed as you scroll. The terrain block-table is dynamic ($D211 base + nibble-swap/
-# XOR index transform in $0760) — DISTINCT from the object table bank1 $7B99.
+# and streamed as you scroll. Each block expands to a 4x4 tile grid via the terrain TILE
+# TABLE at bank4 file $10000 (tile = $10000 + index*16 + r*4 + c; see $0760) — DISTINCT
+# from the object table bank1 $7B99. The WHOLE level renders from ROM (cmd/levelmap).
 # Verified by decoding straight from ROM and rendering: sky / surface line / solid ground
 # (rendered/level_map_codec.png). So the ROM map is the COMPRESSED source (bank 5 $17430);
 # the live decoded map is this $C000 window, reproduced byte-perfect by decomp.LoadMapRLE.

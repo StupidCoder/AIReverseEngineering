@@ -134,13 +134,22 @@ def block_addr(index):
 #      decompressor's $C000 output exactly (cmd/levelmap; rendered/level_map_codec.png).
 #      (Earlier notes said "bank 4 / $09C9" — wrong: $09C9 is the full-screen draw, and
 #      bank 4 $10000 holds a 4-byte-per-block table, not the map. The map is in bank 5.)
-#   2. The expander $0760 reads the RAM map column, looks up each block's 4 tiles, and
-#      writes the name-table cells into a column buffer at RAM $D180. (It uses a dynamic
-#      block-table base at $D211 with a nibble-swap/XOR index transform — NOT the static
-#      object table $7B99 below — so the actual tile reconstruction is a separate effort.)
+#   2. The expander $0760 turns each block index into a 4x4 grid of 8x8 TILES (= 32x32 px
+#      per block). The block tile table is at bank 4 file $10000 (z80 $4000 read with
+#      bank 4 in slot 1; the loader points $D249 at it, $0760's prologue $0726 pages it):
+#         tile(r,c) = rom[$10000 + index*16 + r*4 + c]   (16 bytes/block, row-major 4 wide)
+#      The index->table-offset math in $0760 looks scrambled (RLCA*4 / XOR) but works out
+#      to exactly index*16. Per-block attr ($D211 table, $343D[zone]) yields only a
+#      priority bit — no flip, no palette select — so all terrain uses the BG palette and
+#      the pixels come purely from the tile index + the loaded tile set. The expanded
+#      cells go to the column buffer at RAM $D180.
 #   3. $0860 uploads the $D180 buffer to the VDP name table (OUTI) during vblank.
 #   4. block_addr/$7B99 is the OBJECT block-def table (8-byte name-table-ready 2x2 blocks),
-#      used by scroll_draw $3282 — distinct from the terrain block table at $D211.
+#      used by scroll_draw $3282 — distinct from the terrain tile table at $10000.
+#
+# FULL LEVEL RENDERED from ROM (rendered/level_greenhills_full.png + _overview.png) via
+# cmd/levelmap: ROM map ($0A73) -> 4x4 tiles ($10000) -> real tile set + palette = the
+# whole Green Hills Act 1 (sky/clouds, palms, flowers, rings, checkered ground, pits).
 #
 # So the ROM map is the COMPRESSED source in bank 5; the live, decoded map is the
 # row-major $C000 window streamed as you scroll — confirming the sparse design (sky is

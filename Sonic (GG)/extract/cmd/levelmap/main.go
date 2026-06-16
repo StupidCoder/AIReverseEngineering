@@ -1,13 +1,19 @@
-// levelmap proves the level-map pipeline end-to-end from ROM. It decodes the Zone 0
-// block-index map directly out of the cartridge with decomp.LoadMapRLE (the $0A73
-// codec), then renders it into a real picture using the block-definition table and the
-// level tiles — without ever reading the decoded map back out of the running machine.
+// levelmap renders the FULL Zone 0 level (Green Hills Act 1) as it appears in the game,
+// reconstructed entirely from the cartridge:
 //
-// To keep itself honest it ALSO boots the oracle into the level, snapshots the live
-// decompressor's output the instant $0A73 returns, and asserts the from-ROM decode is
-// byte-identical. That capture is only used to (a) verify the codec and (b) borrow the
-// loaded VRAM tiles + CRAM palette the block-defs reference; the map pixels come from
-// the ROM decode.
+//   - the block-index map is decoded straight from ROM with decomp.LoadMapRLE (the $0A73
+//     codec): 16 rows x 256 columns of block indices;
+//   - each block index is expanded to a 4x4 grid of 8x8 tiles via the block tile table
+//     at file $10000 (the table $0760 reads through $D249: tile(r,c) = $10000 + idx*16 +
+//     r*4 + c, row-major 4 wide), exactly as the $0760 terrain expander does;
+//   - the tile graphics and palette are the real ones the level loaded into VRAM/CRAM.
+//
+// To stay honest it boots the oracle into the level, snapshots the live decompressor's
+// $C000 output the instant $0A73 returns, and asserts the from-ROM map decode is byte-
+// identical; then it lets the level fully come up to borrow the loaded tile set + palette
+// (the block tile table and map both come from ROM, only the pixels/palette are borrowed
+// — the tile streamer is hard to reproduce statically). Output: level_map_tiles.png
+// (8192x512, the whole level) + level_map.bin (the raw block-index map).
 //
 // Usage: levelmap <rom.gg> <outdir>
 package main
@@ -15,7 +21,6 @@ package main
 import (
 	"fmt"
 	"image"
-	"image/color"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -33,21 +38,6 @@ const (
 	mapCols    = 256
 	mapRows    = 16
 )
-
-// blockColour maps a block index to a stable false colour: sky (0) and ground fill (1)
-// get fixed, readable colours; every other block gets a deterministic hue so distinct
-// terrain features are distinguishable.
-func blockColour(idx byte) color.Color {
-	switch idx {
-	case 0:
-		return color.RGBA{0x60, 0xA0, 0xF0, 0xFF} // sky
-	case 1:
-		return color.RGBA{0x70, 0x48, 0x20, 0xFF} // solid ground
-	}
-	// spread the remaining indices around the hue wheel via a cheap hash.
-	h := uint32(idx) * 2654435761
-	return color.RGBA{uint8(h >> 16), uint8(h >> 8), uint8(h), 0xFF}
-}
 
 func main() {
 	if len(os.Args) != 3 {
@@ -104,27 +94,51 @@ func main() {
 		}
 	}
 
-	// 3. Render the from-ROM map as a false-colour cross-section: each block index gets
-	//    a distinct colour so the level's vertical structure reads at a glance — a band
-	//    of sky (block 0) on top, a varied surface line, then solid ground fill (block
-	//    1). Reconstructing the actual terrain tiles needs the $0760 expander's dynamic
-	//    block table + tile-row indirection ($D211), which is a separate effort; the
-	//    point here is that the ROM-decoded map IS a real, structured level.
-	const px = 8 // pixels per block
-	img := image.NewRGBA(image.Rect(0, 0, mapCols*px, mapRows*px))
+	// Let the level fully come up so the tile set is streamed in and the palette is
+	// uploaded (a handful of frames after the map loads is too early — CRAM is still
+	// blank). The ROM map decode above is already captured, so these frames don't affect
+	// it. Hold Right+Jump so the tile streamer ($31BC) runs and fills the BG tile set.
+	m.PadDC = 0xE7
+	for i := 0; i < 150; i++ {
+		m.RunFrame()
+	}
+
+	// The decompressed BG tile graphics (VRAM $0000) and the BG palette (CRAM 0..15) the
+	// level loaded — the pixels the block tiles index into.
+	pal := gamegear.Palette(m.VDP.CRAM[:])
+	tiles := m.VDP.VRAM[:]
+
+	// 3. Render the FULL map with the real in-game tiles. The $0760 terrain expander
+	//    turns each block index into a 4x4 grid of 8x8 tiles: tile(r,c) is the byte at
+	//    blockTiles + index*16 + r*4 + c (row-major, 4 wide). blockTiles is the table the
+	//    loader points $D249 at: z80 $4000 read with BANK 4 in slot 1 ($0760's prologue
+	//    $0726 pages it) = file $10000. Attr contributes only a priority bit (no flip /
+	//    no palette select), so every terrain tile uses the BG palette — the pixels come
+	//    entirely from the tile index + the loaded tile set.
+	const blockTiles = 0x10000 // file offset of the 16-byte-per-block tile table (bank 4)
+	const bw = mapCols * 4      // tiles wide  (4 tiles per block)
+	const bh = mapRows * 4      // tiles tall
+	img := image.NewPaletted(image.Rect(0, 0, bw*8, bh*8), pal)
 	for row := 0; row < mapRows; row++ {
 		for col := 0; col < mapCols; col++ {
-			idx := romMap[row*mapCols+col]
-			c := blockColour(idx)
-			for dy := 0; dy < px; dy++ {
-				for dx := 0; dx < px; dx++ {
-					img.Set(col*px+dx, row*px+dy, c)
+			idx := int(romMap[row*mapCols+col])
+			def := blockTiles + idx*16
+			for r := 0; r < 4; r++ {
+				for c := 0; c < 4; c++ {
+					tn := int(rom[def+r*4+c])
+					t := gamegear.DecodeTile(tiles[tn*32:])
+					ox, oy := (col*4+c)*8, (row*4+r)*8
+					for y := 0; y < 8; y++ {
+						for x := 0; x < 8; x++ {
+							img.SetColorIndex(ox+x, oy+y, t[y][x])
+						}
+					}
 				}
 			}
 		}
 	}
-	writePNG(filepath.Join(outdir, "level_map_fromrom.png"), img)
-	fmt.Printf("wrote level_map_fromrom.png (%dx%d px, false colour)\n", mapCols*px, mapRows*px)
+	writePNG(filepath.Join(outdir, "level_map_tiles.png"), img)
+	fmt.Printf("wrote level_map_tiles.png (%dx%d px, real tiles)\n", bw*8, bh*8)
 
 	// Also save the raw decoded block-index map for inspection.
 	chk(os.WriteFile(filepath.Join(outdir, "level_map.bin"), romMap, 0o644))

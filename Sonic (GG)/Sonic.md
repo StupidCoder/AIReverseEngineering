@@ -1299,36 +1299,59 @@ springs/spikes/conveyor layer:
 
 Each spring/hazard is gated on which 16-px sub-cell of the 32-px block Sonic is in (e.g.
 `(IX+2)+8 AND $1F, CP …`), so only the active part of the block triggers. The `RST $28`
-values are the sound effects. This is a genuinely useful subsystem on its own — and it's the
-real terrain probe — but note it is keyed to *special* blocks: in Green Hills almost every
-block is type `$00`, which does **not** snap Y.
+values are the sound effects. This is the *interaction* layer for special blocks (in Green
+Hills almost every block is type `$00`, an ordinary block); the plain **solid floor** is a
+separate routine, decoded next.
 
-### The plain solid-ground floor — a position snap (mechanism confirmed, routine still open)
+### The solid-ground floor — height profiles and slope angles
 
-Driving the oracle settles the *mechanism*, even though the exact routine isn't pinned yet.
-Watching Sonic's Y (`$D402`) and Y-velocity (`$D407`) as he spawns over Green Hills and
-drops onto the ground shows a clear signature: his Y-**velocity** keeps accelerating under
-gravity all the way to terminal (`$0818`) and is **never zeroed**, yet his Y-**position**
-barely moves once he reaches the surface — it sits at ≈ `$0110`, jittering ±1, frame after
-frame. In other words the floor does **not** stop him by killing his downward velocity (the
-classic "set vy = 0"); it **clamps his Y position to the surface height every frame**. That
-is exactly the per-column height-array model — the floor code looks up the ground surface
-for the block under his feet and writes his Y to it — which also explains how slopes read as
-smooth: the surface height varies per pixel-column within the block, not in 32-px steps, and
-some blocks simply report "no surface" (non-solid — e.g. the blocks near the start of Green
-Hills Act 2 that drop you into the cave).
+The plain floor is now fully decoded — and finding it first required fixing a **bug in our
+own Z80 emulator** (see the box below), because that bug was corrupting the very Y value I
+was trying to read. With a correct CPU the oracle behaves like hardware: Sonic falls, then
+**lands** — his Y snaps to the surface and his Y-velocity is **zeroed** — and he then **runs
+along the ground** without sinking. (So the earlier "velocity is never zeroed / clamped every
+frame" reading was the emulator bug, not the game.)
 
-What's still open is the *routine* that performs the lookup-and-snap and the **per-block
-height/solidity table** it reads. It is not the `$30D5` sample sites (rings, the special
-dispatch, the `$5B0D` plank gimmick) nor the `$5BE1` type-`$00` handler, and the on-ground
-state is an `IX+24` bit set via read-modify-write masks. The oracle can confirm the *effect*
-but can't trace it cleanly while *moving* — once Sonic runs past the spawn column he sinks
-(the simplified machine doesn't stream new ground columns as the camera would), so slopes
-can't be exercised in it. Pinning the snap routine + the height table — with Green Hills
-Act 2's fall-through blocks as a ready test case — is the next step.
+The floor routine lives in **bank 0** (always mapped — which is why it never appeared in the
+bank-1 player code), entered at **`$2DF4`/`$2E02`** and reached every frame through the common
+object-update. It is generic over `IX`, so it serves every object, Sonic included. Per frame:
 
-Still to do: the floor snap routine + per-block height/solidity table and slopes (mechanism
-above); the remaining unidentified handler slots in `$24B2`; scoring and the timer.
+1. **Clear** the on-ground flag (`IX+24` bit 7) and **sample the block at the feet**
+   (`$30D5`, `$2E16`) — yes, the same shared sampler, just called from bank 0.
+2. **Solidity / shape.** The block index selects an attribute byte from a per-zone table at
+   **`$343D`**; `AND $3F` is the **collision shape** (`0`–`$3F`). **Shape `0` ⇒ no
+   collision** — Sonic passes straight through. *These are the non-solid blocks* — e.g. the
+   ones at the start of Green Hills Act 2 that drop you into the cave. (Bit 7 of that same
+   attribute byte is the render-priority bit from Part IV §4 — one byte, both jobs.)
+3. **Per-column height.** The shape selects a **height profile** (pointer tables at `$3BDA`
+   / `$3E7A`); Sonic's X-column within the 32-px block (`(IX+2)+… AND $1F`) indexes the
+   profile to give the **surface height at that column** (`$80` = no surface there). Because
+   the height varies per column, **slopes are smooth**, not 32-px steps — exactly as you'd
+   expect from the way he glides up and down hills.
+4. **Snap and stop.** On contact it writes Y to the block-aligned position plus that surface
+   height (`$2EA6`), **zeroes the Y-velocity** (`$2EBA`, `IX+10..12 = 0`), **sets on-ground**
+   (`$2E81`, `IX+24` bit 7), and stores the **surface angle** for the column — from a signed
+   table at **`$3978`** (`$1C` = +28°, `$E4` = −28°, `$12` = +18°, …) — into `IX+25`, which
+   the running code uses to move Sonic *along* the slope.
+
+So the model is precisely the one predicted: a per-block solidity/shape, a per-column height
+array for smooth slopes, and a per-shape angle for ground movement.
+
+> **Toolchain fix — `LD (IX+d),n` operand swap.** Chasing this floor snap, a value-capturing
+> write trace showed an instruction at `$4C75` (`LD (IX+20),$05`) writing the *wrong* address
+> and value. The cause was in `tools/z80`: `case 6 /*LD r,n*/ { c.setR(y, c.fetch()) }` — Go
+> evaluates the `c.fetch()` argument first, so for `LD (IX+d),n` it read the **immediate
+> before the displacement** and swapped them, corrupting every IX/IY-relative immediate store.
+> Fixed (resolve the `(idx+disp)` address before fetching `n`) with a regression test; this
+> also makes Sonic *run on the ground* in the oracle instead of sinking. A reminder that the
+> oracle is only as trustworthy as the CPU under it — and that a falsifiable, value-level
+> trace is what exposes such bugs.
+
+**On tunneling** (a fair worry): the engine *does* zero the Y-velocity on contact, and the
+fall speed is capped (terminal ≈ 8 px/frame, well under the 32-px block), and the foot sensor
+is re-evaluated every frame, so Sonic can't out-run the floor check — no tunnelling.
+
+Still to do: the remaining unidentified handler slots in `$24B2`; scoring and the timer.
 
 ---
 

@@ -139,21 +139,26 @@ func main() {
 	for _, a := range acts {
 		mp := decomp.LoadMapRLE(rom, a.mapFile, a.mapLen)
 		out := filepath.Join(outdir, "level_greenhills_"+a.name+".png")
-		renderMap(out, rom, mp, tiles, pal)
+		renderMap(out, rom, mp, tiles, pal, a.widthBlk)
 		chk(os.WriteFile(filepath.Join(outdir, "level_map_"+a.name+".bin"), mp, 0o644))
-		fmt.Printf("%s: wrote %s\n", a.name, filepath.Base(out))
+		fmt.Printf("%s: wrote %s (%d blocks wide)\n", a.name, filepath.Base(out), a.widthBlk)
 	}
 }
 
-// renderMap paints a decoded block-index map into a full-resolution PNG: each block
-// index expands to a 4x4 grid of 8x8 tiles via the block tile table at blockTile, drawn
-// with the given tile set and palette.
-func renderMap(path string, rom, romMap, tiles []byte, pal color.Palette) {
-	const bw = mapCols * 4 // tiles wide  (4 tiles per block)
+// renderMap paints a decoded block-index map into a full-resolution PNG, clipped to the
+// act's PLAYED width (cols blocks = the camera right-scroll bound $D26F / 32). The
+// decompressed map is always a fixed 16x256 grid, but only the first `cols` columns are
+// reachable in-game; the rest is off-level filler. Each block index expands to a 4x4 grid
+// of 8x8 tiles via the block tile table at blockTile, drawn with the tile set and palette.
+func renderMap(path string, rom, romMap, tiles []byte, pal color.Palette, cols int) {
+	if cols > mapCols {
+		cols = mapCols
+	}
+	bw := cols * 4         // tiles wide  (4 tiles per block)
 	const bh = mapRows * 4 // tiles tall
 	img := image.NewPaletted(image.Rect(0, 0, bw*8, bh*8), pal)
 	for row := 0; row < mapRows; row++ {
-		for col := 0; col < mapCols; col++ {
+		for col := 0; col < cols; col++ {
 			idx := int(romMap[row*mapCols+col])
 			def := blockTile + idx*16
 			for r := 0; r < 4; r++ {

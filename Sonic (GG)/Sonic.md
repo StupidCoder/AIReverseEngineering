@@ -813,9 +813,11 @@ greens, the orange/brown ground.
 | BG tile graphics | compressed in a level bank | VRAM `$0000` | 4-byte-unit LZ, `$0406` (§2) |
 | BG palette | a palette bank | CRAM 0–15 | 12-bit BGR (§1) |
 
-A block is 32×32 px (4×4 tiles), so the full **256×16-block** map is **1024×64 tiles =
-8192×512 pixels**. Expanding every block through the table above, with the real tile set
-and palette, reproduces the entire level:
+A block is 32×32 px (4×4 tiles). The decompressed map is always a fixed **16×256-block**
+grid, but only the first columns are reachable in-game — the **played width** is the
+right scroll bound `$D26F`/32 (198 blocks = 6336 px for Act 1); the columns beyond it are
+off-level filler. Clipped to the played width and expanded through the table above, with
+the real tile set and palette, the render reproduces the level exactly:
 
 ![Green Hills Act 1 — the full level, reconstructed from the ROM block-index map, block tile table and tile graphics](rendered/level_greenhills_act1_overview.png)
 

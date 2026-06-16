@@ -230,7 +230,7 @@ there are both in this ROM).
 | 3 | `$0C000` | 5.50 | the **`RST` dispatcher** — opens with a `JP` table (`C3 …`) | traced (Part II §2) |
 | 4 | `$10000` | 5.96 | the **block → tiles table** (16 B/block = 4×4 tile indices) + block attributes | traced (Part IV §4) |
 | 5 | `$14000` | 5.89 | **level data** — the act-descriptor table (`$5600`) + compressed block-index maps | traced (Part IV §4) |
-| 6 | `$18000` | 6.18 | a pointer / resource **table** (4-byte records) + data | inferred |
+| 6 | `$18000` | 6.18 | a pointer / resource **table** (4-byte records) + more compressed **level maps** (e.g. Green Hills Act 3) | partly traced (Part IV §4) |
 | 7 | `$1C000` | 6.23 | data | inferred |
 | 8 | `$20000` | 5.58 | **graphics** — tile patterns + the palette pointer table (`$7400`) | traced (Part IV) |
 | 9 | `$24000` | 7.01 | **compressed** graphics / data | inferred (high entropy) |
@@ -817,10 +817,36 @@ A block is 32×32 px (4×4 tiles), so the full **256×16-block** map is **1024×
 8192×512 pixels**. Expanding every block through the table above, with the real tile set
 and palette, reproduces the entire level:
 
-![Green Hills Act 1 — the full level, reconstructed from the ROM block-index map, block tile table and tile graphics](rendered/level_greenhills_overview.png)
+![Green Hills Act 1 — the full level, reconstructed from the ROM block-index map, block tile table and tile graphics](rendered/level_greenhills_act1_overview.png)
 
 *(Scaled to fit; the full-resolution 8192×512 render is
-[`rendered/level_greenhills_full.png`](rendered/level_greenhills_full.png).)*
+[`rendered/level_greenhills_act1.png`](rendered/level_greenhills_act1.png).)*
+
+### The other two acts of the zone
+
+Because the act-resource table (`$5600`) is static data, the rest of the zone falls out
+without running anything new. Green Hills is **acts 0–2** of the 18; reading their
+descriptors shows the three share **the same tile table (`$10000`), the same tile-set
+pointer (`$2ED5`) and the same palette/graphics fields byte-for-byte** — they differ
+**only** in the block-index map (and the level width):
+
+| Act | Map source | Length → output | Width | Ratio |
+|---|---|---|---|---|
+| 1 | bank 5 `$17430` (z80 `$3430`) | 1926 B → 4096 | 198 blocks | 2.1× |
+| 2 | bank 5 `$17BB6` (z80 `$3BB6`) | 1716 B → 4096 | 101 blocks | 2.4× |
+| 3 | bank 6 `$1826A` (z80 `$426A`) | 829 B → 4096 | 80 blocks | 4.9× |
+
+So decoding acts 2 and 3 is just `LoadMapRLE` on those two sources, then the same block →
+tile expansion with the shared table and tile set. `cmd/levelmap` renders all three;
+acts 2 (a more cave-and-platform layout) and 3 (the short final act) come out as coherent
+Green Hills levels in the identical art:
+
+![Green Hills Act 2 — same tiles and palette, a different map](rendered/level_greenhills_act2_overview.png)
+
+![Green Hills Act 3 — the short final act, same art](rendered/level_greenhills_act3_overview.png)
+
+This is the payoff of the descriptor format: one decode, and every act of the zone (and,
+by the same table, the other zones) is reachable from the ROM alone.
 
 *Still open.* The **object** layer. The scenery above (trees, flowers, rings) is baked
 into the block map, but the *interactive* world is not: Sonic, the enemies, and whatever

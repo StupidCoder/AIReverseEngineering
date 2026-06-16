@@ -21,6 +21,7 @@ package main
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -30,13 +31,29 @@ import (
 	"stupidcoder.com/tools/gamegear"
 )
 
-// The Zone 0 map source, located by the oracle (CapturePC at $0A73): bank 5, z80 $7430
-// (= file $17430), length $0786, decompressing to 4096 bytes = 16 rows x 256 columns.
+// The Green Hills (Zone 0) acts, read from the level-resource descriptor table at bank 5
+// $5600. Each act's descriptor holds a map record (address, length) at offset +15; the
+// loader $199D normalises the address (high byte >= $40 -> bank 6, else bank 5; +$4000)
+// and decompresses it with $0A73. Crucially the descriptors for all three acts carry the
+// SAME tile-table pointer ($0000 -> $D249 = $4000 = file $10000), the SAME tile-set
+// pointer ($2ED5) and the SAME following palette/graphics fields — so the three acts
+// share tiles, macro-blocks and palette, and differ ONLY in the block-index map. (Found
+// statically; Act 1's map is the one the oracle verified byte-perfect.)
+var acts = []struct {
+	name     string
+	mapFile  int // file offset of the compressed map
+	mapLen   int // compressed length (BC)
+	widthBlk int // played width in blocks (right scroll bound $D26F / 32)
+}{
+	{"act1", 0x17430, 0x0786, 198}, // src z80 $3430 (bank 5)
+	{"act2", 0x17BB6, 0x06B4, 101}, // src z80 $3BB6 (bank 5)
+	{"act3", 0x1826A, 0x033D, 80},  // src z80 $426A -> bank 6
+}
+
 const (
-	mapSrcFile = 0x17430
-	mapSrcLen  = 0x0786
-	mapCols    = 256
-	mapRows    = 16
+	mapCols   = 256
+	mapRows   = 16
+	blockTile = 0x10000 // file offset of the shared 16-byte-per-block tile table (bank 4)
 )
 
 func main() {
@@ -49,12 +66,16 @@ func main() {
 	outdir := os.Args[2]
 	chk(os.MkdirAll(outdir, 0o755))
 
-	// 1. Decode the map straight from the cartridge — no machine involved.
-	romMap := decomp.LoadMapRLE(rom, mapSrcFile, mapSrcLen)
-	fmt.Printf("decoded %d bytes from ROM (bank 5 $%05X, src %d bytes -> %.2fx)\n",
-		len(romMap), mapSrcFile, mapSrcLen, float64(len(romMap))/float64(mapSrcLen))
+	// 1. Decode every act's map straight from the cartridge — no machine involved.
+	for _, a := range acts {
+		mp := decomp.LoadMapRLE(rom, a.mapFile, a.mapLen)
+		fmt.Printf("%s: decoded %d bytes from ROM ($%05X, src %d B -> %.2fx), played width %d blocks\n",
+			a.name, len(mp), a.mapFile, a.mapLen, float64(len(mp))/float64(a.mapLen), a.widthBlk)
+	}
+	romMap := decomp.LoadMapRLE(rom, acts[0].mapFile, acts[0].mapLen) // act 1, for the oracle check
 
-	// 2. Boot the oracle into the level to (a) verify the decode and (b) grab tiles+CRAM.
+	// 2. Boot the oracle into Act 1 to (a) verify that decode and (b) grab the shared
+	//    tile set + palette (identical across the three acts, per the descriptors).
 	m := gamegear.NewMachine(rom)
 	word := func(a uint16) uint16 { return uint16(m.Read(a)) | uint16(m.Read(a+1))<<8 }
 	m.CapturePC = 0x0A73
@@ -108,21 +129,33 @@ func main() {
 	pal := gamegear.Palette(m.VDP.CRAM[:])
 	tiles := m.VDP.VRAM[:]
 
-	// 3. Render the FULL map with the real in-game tiles. The $0760 terrain expander
-	//    turns each block index into a 4x4 grid of 8x8 tiles: tile(r,c) is the byte at
-	//    blockTiles + index*16 + r*4 + c (row-major, 4 wide). blockTiles is the table the
-	//    loader points $D249 at: z80 $4000 read with BANK 4 in slot 1 ($0760's prologue
-	//    $0726 pages it) = file $10000. Attr contributes only a priority bit (no flip /
-	//    no palette select), so every terrain tile uses the BG palette — the pixels come
-	//    entirely from the tile index + the loaded tile set.
-	const blockTiles = 0x10000 // file offset of the 16-byte-per-block tile table (bank 4)
-	const bw = mapCols * 4      // tiles wide  (4 tiles per block)
-	const bh = mapRows * 4      // tiles tall
+	// 3. Render EACH act's full map with the (shared) real in-game tiles. The $0760
+	//    terrain expander turns each block index into a 4x4 grid of 8x8 tiles: tile(r,c)
+	//    is the byte at blockTile + index*16 + r*4 + c (row-major, 4 wide). blockTile is
+	//    the table the loader points $D249 at: z80 $4000 read with BANK 4 in slot 1
+	//    ($0760's prologue $0726 pages it) = file $10000. Attr contributes only a priority
+	//    bit (no flip / no palette select), so every terrain tile uses the BG palette —
+	//    the pixels come entirely from the tile index + the loaded tile set.
+	for _, a := range acts {
+		mp := decomp.LoadMapRLE(rom, a.mapFile, a.mapLen)
+		out := filepath.Join(outdir, "level_greenhills_"+a.name+".png")
+		renderMap(out, rom, mp, tiles, pal)
+		chk(os.WriteFile(filepath.Join(outdir, "level_map_"+a.name+".bin"), mp, 0o644))
+		fmt.Printf("%s: wrote %s\n", a.name, filepath.Base(out))
+	}
+}
+
+// renderMap paints a decoded block-index map into a full-resolution PNG: each block
+// index expands to a 4x4 grid of 8x8 tiles via the block tile table at blockTile, drawn
+// with the given tile set and palette.
+func renderMap(path string, rom, romMap, tiles []byte, pal color.Palette) {
+	const bw = mapCols * 4 // tiles wide  (4 tiles per block)
+	const bh = mapRows * 4 // tiles tall
 	img := image.NewPaletted(image.Rect(0, 0, bw*8, bh*8), pal)
 	for row := 0; row < mapRows; row++ {
 		for col := 0; col < mapCols; col++ {
 			idx := int(romMap[row*mapCols+col])
-			def := blockTiles + idx*16
+			def := blockTile + idx*16
 			for r := 0; r < 4; r++ {
 				for c := 0; c < 4; c++ {
 					tn := int(rom[def+r*4+c])
@@ -137,11 +170,7 @@ func main() {
 			}
 		}
 	}
-	writePNG(filepath.Join(outdir, "level_map_tiles.png"), img)
-	fmt.Printf("wrote level_map_tiles.png (%dx%d px, real tiles)\n", bw*8, bh*8)
-
-	// Also save the raw decoded block-index map for inspection.
-	chk(os.WriteFile(filepath.Join(outdir, "level_map.bin"), romMap, 0o644))
+	writePNG(path, img)
 }
 
 func writePNG(path string, img image.Image) {

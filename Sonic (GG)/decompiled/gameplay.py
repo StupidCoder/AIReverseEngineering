@@ -147,7 +147,7 @@ def block_addr(index):
 #   4. block_addr/$7B99 is the OBJECT block-def table (8-byte name-table-ready 2x2 blocks),
 #      used by scroll_draw $3282 — distinct from the terrain tile table at $10000.
 #
-# FULL LEVEL RENDERED from ROM (rendered/level_greenhills_full.png + _overview.png) via
+# FULL LEVEL RENDERED from ROM (rendered/level_greenhills_act1.png + _overview.png) via
 # cmd/levelmap: ROM map ($0A73) -> 4x4 tiles ($10000) -> real tile set + palette = the
 # whole Green Hills Act 1 (sky/clouds, palms, flowers, rings, checkered ground, pits).
 #

@@ -1303,20 +1303,32 @@ values are the sound effects. This is a genuinely useful subsystem on its own �
 real terrain probe — but note it is keyed to *special* blocks: in Green Hills almost every
 block is type `$00`, which does **not** snap Y.
 
-### The plain solid-ground floor — still open
+### The plain solid-ground floor — a position snap (mechanism confirmed, routine still open)
 
-So the honest bottom line of this pass: the vertical path is gravity/jump only, and the
-*special*-terrain probe (above) handles springs/spikes/conveyors — but the **plain
-solid-ground Y-snap** (stand on any ordinary ground block) is *still* not isolated, and I've
-now ruled out the obvious candidates: it is not the `$30D5` sample sites (rings, the special
-dispatch, a Bridge plank gimmick at `$5B0D`), and not the `$5BE1` type-`$00` handler (a
-no-op for Y). The **on-ground state is a bit in `IX+24`**, set via read-modify-write masks
-(not `SET`/`RES`, so it doesn't grep). The plain floor must therefore resolve through the
-block-definition attributes or a separate per-column mechanism I haven't pinned. I'd rather
-leave it open than name a wrong routine.
+Driving the oracle settles the *mechanism*, even though the exact routine isn't pinned yet.
+Watching Sonic's Y (`$D402`) and Y-velocity (`$D407`) as he spawns over Green Hills and
+drops onto the ground shows a clear signature: his Y-**velocity** keeps accelerating under
+gravity all the way to terminal (`$0818`) and is **never zeroed**, yet his Y-**position**
+barely moves once he reaches the surface — it sits at ≈ `$0110`, jittering ±1, frame after
+frame. In other words the floor does **not** stop him by killing his downward velocity (the
+classic "set vy = 0"); it **clamps his Y position to the surface height every frame**. That
+is exactly the per-column height-array model — the floor code looks up the ground surface
+for the block under his feet and writes his Y to it — which also explains how slopes read as
+smooth: the surface height varies per pixel-column within the block, not in 32-px steps, and
+some blocks simply report "no surface" (non-solid — e.g. the blocks near the start of Green
+Hills Act 2 that drop you into the cave).
 
-Still to do: the plain floor probe / Y-snap and slopes; the remaining unidentified handler
-slots in `$24B2`; scoring and the timer.
+What's still open is the *routine* that performs the lookup-and-snap and the **per-block
+height/solidity table** it reads. It is not the `$30D5` sample sites (rings, the special
+dispatch, the `$5B0D` plank gimmick) nor the `$5BE1` type-`$00` handler, and the on-ground
+state is an `IX+24` bit set via read-modify-write masks. The oracle can confirm the *effect*
+but can't trace it cleanly while *moving* — once Sonic runs past the spawn column he sinks
+(the simplified machine doesn't stream new ground columns as the camera would), so slopes
+can't be exercised in it. Pinning the snap routine + the height table — with Green Hills
+Act 2's fall-through blocks as a ready test case — is the next step.
+
+Still to do: the floor snap routine + per-block height/solidity table and slopes (mechanism
+above); the remaining unidentified handler slots in `$24B2`; scoring and the timer.
 
 ---
 

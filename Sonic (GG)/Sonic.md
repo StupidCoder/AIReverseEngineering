@@ -1177,28 +1177,33 @@ frame and copies it into three words:
 - `($D23E)` — the **top-speed cap**.
 
 Which set is chosen depends on Sonic's state flags (`IX+24`) and whether he is on the
-ground (`IY+7` bit 0). The three seen so far, as raw constants:
+ground. Two groups are loaded per state: a **9-byte horizontal block** copied to `($D20F…)`
+(its first word is the **top-speed cap**, `$D213` an acceleration term), *and* three
+separate words `($D23A/$D23C/$D23E)`. Crucially — and this corrects an earlier draft of
+this section — `$D23C`/`$D23E` are **not** horizontal friction and cap; they feed the
+*vertical* (jump/gravity) path (next sub-section). The raw values:
 
-| State | accel `$D23A` | friction `$D23C` | cap `$D23E` | source block |
-|---|---|---|---|---|
-| running on ground | `$0300` | `$FD00` | `$0038` | `$4FD7` |
-| (high-accel variant) | `$0C00` | `$FD00` | `$0038` | `$4FE0` |
-| rolling / ball form | `$0100` | `$FDC0` | `$0010` | `$4FE9` |
+| State | h. accel `$D23A` | top speed `($D20F)` | jump impulse `$D23C` | gravity `$D23E` | source |
+|---|---|---|---|---|---|
+| running on ground | `$0300` | `$0010` | `$FD00` | `$0038` | `$4FD7` |
+| (variant) | `$0C00` | `$0010` | `$FD00` | `$0038` | `$4FE0` |
+| rolling / ball form | `$0100` | `$0004` | `$FDC0` | `$0010` | `$4FE9` |
 
-Rolling has the **smallest acceleration and the strongest friction** (you can't speed up
-by rolling, and you keep less control), exactly the Mega Drive feel. (The constants are
-raw fixed-point; the exact px/frame scale is pinned together with the position integration,
-still on the frontier — so the table is the *roles and values*, not yet a velocity in
-pixels.)
+Rolling has the **smallest acceleration and the lowest top speed** (`$0004` vs `$0010`) —
+you can't speed up by rolling — exactly the Mega Drive feel. (Constants are raw fixed-point;
+the exact px/frame scale is pinned with the position integration, still on the frontier, so
+this is *roles and values*, not yet pixels per frame; and the precise split between `$D23A`
+and the block's `$D213` accel term, plus why gravity `$D23E` differs when rolling, is still
+being pinned.)
 
-Holding **Right** jumps to `$515E`, **Left** to `$51B9`. Each adds `($D23A)` to Sonic's
-speed in the pressed direction and sets the animation index `IX+20` (`$01` = run). The neat
-detail is the **skid**: if you press the opposite way to your current motion, the routine
-takes a *braking* branch instead — it applies a larger fixed deceleration (`$0100`) and
-sets the skid animation (`IX+20 = $0A`) until the speed crosses zero and Sonic turns
-around. With **no** direction held, the no-input path (around `$4D9D`) instead applies the
-friction constant `($D23C)` toward zero. After accel/skid/friction, the result is clamped
-to the cap `($D23E)`.
+Holding **Right** jumps to `$515E`, **Left** to `$51B9`. Each adds the acceleration to
+Sonic's speed in the pressed direction (clamped to the top speed in `($D20F)`) and sets the
+animation index `IX+20` (`$01` = run). The neat detail is the **skid**: if you press the
+opposite way to your current motion, the routine takes a *braking* branch instead — it
+applies a larger fixed deceleration (`$0100`) and sets the skid animation (`IX+20 = $0A`)
+until the speed crosses zero and Sonic turns around. With **no** direction held, a no-input
+path (around `$4CDE`) instead decays the speed toward zero using the block's deceleration
+term (`$D213`) — the ground friction.
 
 ### From speed to a position on the map
 
@@ -1242,31 +1247,50 @@ already decoded and the live physics, whichever system is asking.
 
 The first decoded use of the sampler turns out to be **ring collection**, not solid
 collision. Rings are baked into the block map (Part IV §4) as **block indices `$79`–`$7B`**
-(blocks 121–123), and the low two bits of the index encode *which 16-px halves of the
-32-px block still hold a ring* — `$79` = left only, `$7A` = right only, `$7B` = both. Each
-frame the handler samples the block at Sonic's centre (`$30D5` with offset `(8, 8)`), masks
-the priority bit (`AND $7F`) and, if the result is `≥ $79`, calls **`$5000`**. That routine
-works out which half Sonic overlaps (from his X bit 4 → mask `1` or `2`), and if that
-ring-bit is set it **clears it from the live map** (`(DE) = block XOR mask`) — so the block
-graphic visibly downgrades from two rings to one to none — then spawns a collect sparkle
-and calls the counter **`$337E`**. `$337E` adds to the **BCD ring count at `($D2A9)`**,
-plays the pickup sound (`RST $28`, action `$02`), and — the nice touch — when the count
-rolls past 100 it grants an extra life (`($D240)++` and the 1-up jingle, action `$09`).
-Because the rings live *in the map*, collecting one is a single byte-write back into the
-`$C000` window; there is no separate ring object array.
+(blocks 121–123). A 32×32 block *could* geometrically hold a 2×2 grid of 16×16 rings, but
+this engine only uses a **left/right pair** — the low **two** bits of the index mark which
+of the two 16-px-wide halves still hold a ring: `$79` = left only, `$7A` = right only,
+`$7B` = both (`$78` = empty). That is a deliberate choice in the *code*, not a guess: the
+collector picks the ring purely from Sonic's **X** position — `$5000` does
+`mask = ((X+8) >> 4) & 1, then +1` → `1` or `2`, and never consults Y for the bit (Y is
+only a coarse on-screen gate). So vertically-stacked rings aren't four quarters of one
+block; they're separate block cells in the rows above/below. Each frame the handler samples
+the block at Sonic's centre (`$30D5` with offset `(8, 8)`), masks the priority bit
+(`AND $7F`), and if the result is `≥ $79` calls **`$5000`**, which — if the overlapped
+half's bit is set — **clears it from the live map** (`(DE) = block XOR mask`, so the
+graphic downgrades two → one → none), spawns a sparkle, and calls the counter **`$337E`**.
+`$337E` adds to the **BCD ring count at `($D2A9)`**, plays the pickup sound (`RST $28`,
+action `$02`), and — the nice touch — when the count rolls past 100 grants an extra life
+(`($D240)++` and the 1-up jingle, action `$09`). Because the rings live *in the map*,
+collecting one is a single byte-write back into the `$C000` window; there is no separate
+ring object array.
 
-### What's solid here vs. the frontier
+### Jumping and gravity (in progress)
 
-Solid and verified: the input decode, the accel/skid/friction model and its per-state
-constant sets, the speed→velocity→position chain, the rolling trigger, the block-map
-sampler `$30D5`, and ring collection (`$5000`/`$337E`). **Not yet decoded:** the *solid*
-terrain consumer of the sampler — the exact *vertical* resolution that snaps Sonic's Y onto
-a ground block, slope angles and the ground-rotation that makes him run on curves, gravity,
-and the jump (Button 1) arc and its variable height. These live in the `IY+6`/`IY+8`-gated
-sub-handlers near the top of `$4AD0`, and pinning them — together with the fixed-point
-scale that turns the raw constants above into pixels per frame — is the next step.
+The vertical motion runs in a parallel path (around `$4D60`) that writes Sonic's Y velocity
+`($D407…)`. Pressing jump on the ground calls **`$5300`**, which seeds a hold-timer
+`($D288) = $10` and plays the jump sound — the **variable jump height** mechanism: while
+the button stays held and `$D288` counts down, the upward impulse `($D23C)` keeps being
+applied; once it's released or the timer expires, the path switches to applying the downward
+constant `($D23E)` — gravity — instead. (This is also why the on-ground vs ball constant
+sets carry different `$D23C`/`$D23E`: a roll-jump pushes off differently.) The exact timer
+decay and the gravity/terminal numbers are still being read.
 
-Still to do: the vertical/slope collision, gravity and the jump (above); the remaining
+### The solid-ground sensor — still the frontier
+
+This was the target of this pass, and the honest result is that it is **not** one of the
+tidy routines the rest of the section enjoys. What's now known: the shared sampler `$30D5`
+is called from only a handful of sites in the player code, and they are *not* the floor —
+they are ring pickup (`$4E45`→`$5000`) and a stateful-block gimmick (`$5B0D`/`$5B4A`, which
+toggles a block between `$89`/`$8A` and spawns a type-`$2E` object — a Bridge-zone plank or
+similar). The **on-ground state is a bit in `IX+24`** (the roll handler requires it), set
+via read-modify-write masks rather than a `SET`/`RES` instruction, which is why it doesn't
+grep out. So the per-frame *floor probe and Y-snap* lives in the flag-gated vertical
+sub-handlers (the `$4D60` path and the routines it calls), and isolating it — plus slopes,
+ground-rotation and the fixed-point scale — is the next focused step. I'd rather flag it
+open than name a wrong routine.
+
+Still to do: the floor probe / Y-snap, slopes and gravity numbers (above); the remaining
 unidentified handler slots in `$24B2`; scoring and the timer.
 
 ---

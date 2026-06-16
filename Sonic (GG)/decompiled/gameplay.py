@@ -95,3 +95,41 @@ def mem_setw(a, v):
 
 def tile_stream():
     pass    # $31BC — stream level tiles (3bpp -> 4bpp); separate from the map draw
+
+
+# ---------------------------------------------------------------------------
+# The block-definition table (decoded; bank 1 $7B99)
+# ---------------------------------------------------------------------------
+# scroll_draw blits a block from $D2AF; the only routine that points $D2AF at one
+# ($7B42, LD HL,$7B99) shows the format:  $D2AF = BLOCK_DEFS + index*8.
+BLOCK_DEFS = 0x7B99     # z80 addr with bank 1 in slot 1 (= file $07B99)
+
+def block_addr(index):
+    """Address of macro-block `index` in the block-definition table.
+
+    A block is 8 bytes = a 2x2 of name-table cells, ROW-MAJOR, each cell two bytes
+    (tile, attr): (TL_t,TL_a, TR_t,TR_a, BL_t,BL_a, BR_t,BR_a). Verified against the
+    live VRAM: block 0 = 00*8 (sky); block 1 = F0 00 F1 00 E2 00 F2 00 (a cloud).
+    """
+    return BLOCK_DEFS + index * 8
+
+
+# ===========================================================================
+# WALL — the terrain block-index MAP encoding (Part III/IV frontier)
+# ---------------------------------------------------------------------------
+# Decoded so far (verified): the 16-wide 4bpp tile sheet; the block-def table above
+# (and a compact 4-byte/block copy at bank 4 $10000); scroll_draw blitting one block;
+# the 8-px catch-up cadence (advance_draw_x); and that the map is SPARSE (block 0 sky
+# dominates) with objects (trees/flowers) drawn separately and a fixed parallax bg
+# pattern ($7BC1).
+#
+# NOT cracked: where the per-position terrain block INDICES are stored in ROM and how a
+# column is addressed. Every $D2AF-setter traced ($7B42 bg pattern, $73BB/$8432 objects)
+# and the level-descriptor pointers (+13..+19) lead to sub-systems or dense tile/def
+# data, not a sparse block-index grid. The two ways to finish are blocked: the one oracle
+# capture is sky-heavy (sky runs match everywhere, defeating correlation), and the
+# simplified machine can't scroll to get a ground-heavy capture (player physics don't
+# advance). So this last layer needs either a higher-fidelity oracle or a deep trace of
+# the level-load full-screen terrain draw — a genuine wall for the static+single-capture
+# method used here.
+# ===========================================================================

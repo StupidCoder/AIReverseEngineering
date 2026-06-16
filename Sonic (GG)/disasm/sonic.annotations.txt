@@ -160,3 +160,17 @@
 #     is not yet cracked (needs a ground-heavy capture).
 #   OBJECTS (trees, flowers, etc.) are drawn SEPARATELY, not in the block map (many
 #     on-screen cells match no block) -- the block map is the base terrain only.
+
+# --- block-definition table (bank 1 $7B99; decoded gameplay.py) ---
+7B42  block_stream  draws macro-blocks via $D2AF = $7B99 + index*8 (the only LD HL,$7B99
+#   site). Reads block indices from a fixed 16-byte 4x4 pattern at $7BC1 = the repeating
+#   PARALLAX BACKGROUND (clouds), NOT the terrain. Cycles (IX+18) 0..3.
+7B99  block_defs  the macro-block DEFINITION table: 8 bytes/block = a 2x2 of name-table
+#   cells, row-major, each (tile,attr): TL TR BL BR. block 0 = 00*8 (sky); block 1 =
+#   F0 00 F1 00 E2 00 F2 00 (a cloud). $D2AF = $7B99 + index*8; scroll_draw blits 8 bytes.
+#   (A compact 4-byte/block copy = tile indices only is at bank 4 $10000.)
+# WALL: the per-position terrain block-INDEX map (where the level's block indices live in
+#   ROM, and how a column is addressed) is NOT cracked. Every $D2AF setter traced ($7B42
+#   bg, $73BB/$8432 objects) + the descriptor +13..+19 pointers lead to sub-systems or
+#   dense data, not a sparse block-index grid. Blocked: the one oracle capture is sky-heavy
+#   (correlation fails) and the simplified machine can't scroll (player physics frozen).

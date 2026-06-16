@@ -138,6 +138,13 @@ type Machine struct {
 	RAMWatchLo, RAMWatchHi uint16
 	RAMWatchPCs            map[uint16]int
 
+	// WriteHook, when non-nil, is called on every work-RAM write with the
+	// instruction-start PC (stepPC, the address of the storing instruction itself,
+	// not the post-fetch PC), the address and the value — a value-capturing debug
+	// trace finer than RAMWatchPCs and correct for attribution.
+	WriteHook func(pc, addr uint16, v byte)
+	stepPC    uint16 // PC at the start of the instruction currently executing
+
 	// Register capture: when CapturePC != 0, the first time execution reaches it the
 	// CPU's HL and BC are saved (CapHL/CapBC) and Captured set — for reading a routine's
 	// arguments (e.g. the source pointer + length at a decompressor entry).
@@ -206,6 +213,9 @@ func (m *Machine) Write(a uint16, v byte) {
 	if m.RAMWatchPCs != nil && a >= m.RAMWatchLo && a < m.RAMWatchHi {
 		m.RAMWatchPCs[m.CPU.PC]++
 	}
+	if m.WriteHook != nil {
+		m.WriteHook(m.stepPC, a, v)
+	}
 	m.ram[a&0x1FFF] = v
 	switch a {
 	case 0xFFFD:
@@ -272,6 +282,7 @@ func (m *Machine) RunFrame() bool {
 		if m.VDP.line >= 192 {
 			m.VDP.status |= 0x80
 		}
+		m.stepPC = m.CPU.PC
 		m.CPU.Step()
 		if m.Sample {
 			m.PCHist[m.CPU.PC]++
@@ -303,6 +314,7 @@ func (m *Machine) RunFrame() bool {
 	}
 	// Give the interrupt handler room to run and ack (it clears the IRQ via IN $BF).
 	for i := 0; i < budget/2; i++ {
+		m.stepPC = m.CPU.PC
 		m.CPU.Step()
 		if m.Sample {
 			m.PCHist[m.CPU.PC]++

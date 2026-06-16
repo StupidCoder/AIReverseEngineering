@@ -537,6 +537,12 @@ func (c *CPU) execX0(y, z, p, q int) {
 	case 5: // DEC r
 		c.setR(y, c.dec8(c.getR(y)))
 	case 6: // LD r,n
+		// For LD (IX+d),n the displacement byte precedes the immediate, so resolve
+		// the (idx+disp) address BEFORE fetching n (Go would otherwise evaluate the
+		// c.fetch() argument first and swap the two operands).
+		if y == 6 && c.idx != 0 {
+			c.memAddr()
+		}
 		c.setR(y, c.fetch())
 	default: // z==7: the accumulator/flag ops
 		c.accOp(y)

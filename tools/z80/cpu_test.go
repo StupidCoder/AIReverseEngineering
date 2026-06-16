@@ -209,3 +209,25 @@ func (c *CPU) mainSetVec(t *testing.T) {
 	b := c.bus.(*bus)
 	b.mem[0x0038] = 0xC9 // RET
 }
+
+// LD (IX+d),n must read the displacement d BEFORE the immediate n (regression:
+// the two were swapped because Go evaluated the c.fetch() argument first).
+func TestLDIndexedImmediateOrder(t *testing.T) {
+	// DD 36 05 14 : LD (IX+5),$14  with IX=$C000 -> $C005 = $14, not $C014 = $05
+	c, b := newCPU(0xDD, 0x36, 0x05, 0x14)
+	c.IX = 0xC000
+	c.Step()
+	if b.mem[0xC005] != 0x14 {
+		t.Fatalf("LD (IX+5),$14: want $C005=$14, got $%02X ($C014=$%02X)", b.mem[0xC005], b.mem[0xC014])
+	}
+	if c.PC != 4 {
+		t.Fatalf("PC after LD (IX+d),n: want 4, got %d", c.PC)
+	}
+	// FD 36 FE 99 : LD (IY-2),$99 with IY=$D010 -> $D00E = $99
+	c2, b2 := newCPU(0xFD, 0x36, 0xFE, 0x99)
+	c2.IY = 0xD010
+	c2.Step()
+	if b2.mem[0xD00E] != 0x99 {
+		t.Fatalf("LD (IY-2),$99: want $D00E=$99, got $%02X", b2.mem[0xD00E])
+	}
+}

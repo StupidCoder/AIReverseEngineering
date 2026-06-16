@@ -899,12 +899,22 @@ Each object **type** indexes an 8-byte sprite descriptor at `$2560` (the per-fra
 `$2BFB` reads it; valid types are `< $57`). That gives the sprite *class* — `$50` shares
 the beetle's descriptor and `$51` the bonus-item descriptor — but not yet the behaviour.
 
-*A note on the rings.* The fully-static render does **not** show rings, because the rings
-are baked into the block map as blocks (121–123) that reference tiles **252–255**, and
-those tile slots are *empty in the base tile set* — the game loads the spinning-ring
-animation frames into them at runtime (the same is true of the water-surface tiles 12–15).
-A static frame uses the base tiles, so the ring/water slots render blank. This is the same
-animation that the validation flags (a handful of cycling tiles + a 3-colour palette cycle).
+### Animated tiles (rings, flowers, water)
+
+The rings (and the spinning yellow flowers, and the water surface) are **baked into the
+block map** — the rings/flowers are blocks 121–123 referencing tiles **252–255**, the
+water is tiles 12–15 — but those tile slots are *empty in the base tile set*. The game
+**animates them at runtime**: the per-frame update at `$15FF` copies a fresh frame of tile
+data into the slots, cycling them (every ~10 frames, which is why the validation flags
+those tiles plus a 3-colour palette cycle). There is no generic "animation table" — each
+animation is hardcoded: the **rings** (tiles 252–255) are copied from a fixed bank-11
+source (`$2F73D`) for *every* zone, while Green Hills' **water** (tiles 12–15) is a
+2-frame toggle from bank 11 `$7A3D`/`$7ABD`, gated on the zone being Green Hills.
+
+So a single still frame can't capture the animation — but it *can* show the rings: render
+loads one frame of each animated group into the empty tile slots (`applyAnimFrame`), which
+is why the rings, flowers and water now appear. (Other zones likely animate more than the
+rings; only the rings were observed in the idle probe so far.)
 
 *Still open.* Mapping each **type** to its behaviour (the object handlers). The machine
 model can place the objects but isn't cycle-accurate enough to *run* them — Sonic falls
@@ -913,9 +923,37 @@ handler decode rather than the oracle. That is the body of Part V.
 
 # Part V — Game mechanics
 
-*In progress (object placement above).* Still to do: the object **behaviours** (the
-type→handler dispatch), Sonic's movement and physics, ring collection and collision,
-scoring and progression.
+*In progress.* Object **placement** is decoded (Part IV §4); the **behaviours** are the
+current frontier. Each object's `type` byte selects its behaviour and sprite. The table
+below collects the types as they are identified — from the object placements, from play
+testing, and (where pinned down) from the behaviour code. The per-frame culling pass at
+`$2BD8` indexes a **bounding-box** table at `$2560` by `type` (8 bytes each, valid types
+`< $57`); that gives each type's *size* but not its behaviour, which is dispatched
+separately and still being traced.
+
+### Object types (Green Hills, work in progress)
+
+| Type | Name | Purpose | Source |
+|---|---|---|---|
+| `$00`→`$13` | Sonic | the player (spawned from `($D217)`, type becomes `$13`) | traced |
+| `$01` | bonus item | — | play testing |
+| `$02` | bonus item | — | play testing |
+| `$03` | bonus item | — | play testing |
+| `$05` | ? | — | |
+| `$07` | ? | — | |
+| `$08` | **crab** | walking enemy (4 in Act 1) | play testing |
+| `$09` | swinging platform | moving platform | play testing |
+| `$0B` | ? | — | |
+| `$0E` | ? | — | |
+| `$0F` | horizontal platform | moving platform | play testing |
+| `$10` | **beetle** | enemy | play testing |
+| `$12` | ? | one instance, far right (end of level — goal?) | placement |
+| `$17` | ? | one instance at block (1, 22), off the playfield (control object?) | placement |
+| `$50` | ? | eight instances, evenly spaced; not visible in play (checkpoint / trigger / sound?); shares the beetle's bounding box | placement |
+| `$51` | ? | one instance; shares the bonus-item bounding box | placement |
+
+Still to do: the behaviour dispatch (to fill in the `?` rows and confirm the rest),
+Sonic's movement and physics, ring collection and collision, scoring and progression.
 
 ---
 

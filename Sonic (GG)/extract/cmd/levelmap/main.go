@@ -83,6 +83,39 @@ func parseActs(rom []byte) []Act {
 	return acts
 }
 
+// animFrame describes a runtime-animated tile group: the first tile slot it occupies, the
+// ROM file offset of a frame's data, and how many 32-byte tiles it covers. These slots are
+// EMPTY in the base tile set ($0406); the game's animation update ($15FF) copies a frame
+// into them each cycle. Loading one frame statically makes them visible (rings, water, ...).
+type animFrame struct{ vramTile, fileOff, nTiles int }
+
+// ringAnim is the rings/flowers animation (tiles 252-255), shared by every zone (the
+// animation update copies its frame from a fixed bank-11 source for all of them).
+var ringAnim = animFrame{252, 0x2F73D, 4}
+
+// zoneAnims is the per-zone animation data, traced from the $15FF update (sources in bank
+// 11). The update is hardcoded per zone. Green Hills (0) additionally animates water; the
+// other zones' extra animations (only the rings run during the idle intro probed so far)
+// are not yet captured.
+var zoneAnims = map[int][]animFrame{
+	0: {{12, 0x2FA3D, 4}}, // Green Hills water (tiles 12-15)
+}
+
+// applyAnimFrame copies one frame of each animated tile group into the tile set, replacing
+// the blank base slots so the rings/flowers/water show up in the still render.
+func applyAnimFrame(rom, tiles []byte, zone int) {
+	apply := func(a animFrame) {
+		n := a.nTiles * 32
+		if a.fileOff+n <= len(rom) && a.vramTile*32+n <= len(tiles) {
+			copy(tiles[a.vramTile*32:], rom[a.fileOff:a.fileOff+n])
+		}
+	}
+	apply(ringAnim)
+	for _, a := range zoneAnims[zone] {
+		apply(a)
+	}
+}
+
 // romPalette resolves a BG palette index to its 16 colours, read straight from ROM the
 // way load_palette ($0586/$05C4) does: a per-index offset table at bank 8 $7400 gives the
 // offset of the 32-byte (16-colour) palette within that same bank.
@@ -118,6 +151,7 @@ func main() {
 		mp := decomp.LoadMapRLE(rom, a.mapFile, a.mapLen) // block-index map
 		tiles := decomp.Decompress(rom, a.tileFile)       // 256 BG tiles ($0406 codec)
 		pal := romPalette(rom, a.bgPal)                   // 16 BG colours
+		applyAnimFrame(rom, tiles, a.num/3)               // fill the runtime-animated tile slots
 
 		// --- validate against the oracle (load each distinct (tile set, palette) once) ---
 		k := key{a.tileFile, a.bgPal}

@@ -936,26 +936,31 @@ testing, and (where pinned down) from the behaviour code. The per-frame culling 
 `< $57`); that gives each type's *size* but not its behaviour, which is dispatched
 separately and still being traced.
 
-### Object types (Green Hills, work in progress)
+### Object types (work in progress)
 
-| Type | Name | Purpose | Source |
+The behaviour dispatch is now found: each object runs the handler at the **`RST $28`
+table `$4740`** (bank 3), indexed by `type×4` = `(addr, bank)`. The table covers types
+`$00`–`$1F` — every object the game's behaviour engine knows. The handler is reached
+cross-bank (banks 1/2), and several types **share** a handler (e.g. `$0E` bird, `$10`
+beetle and `$11` all use bank 2 `$7D6E`), so the code distinguishes them only by their
+data/sprite — the names below come from play-testing, confirmed against the table.
+
+| Type | Name | Handler (`$4740`) | Notes |
 |---|---|---|---|
-| `$00`→`$13` | Sonic | the player (spawned from `($D217)`, type becomes `$13`) | traced |
-| `$01` | bonus item | — | play testing |
-| `$02` | bonus item | — | play testing |
-| `$03` | bonus item | — | play testing |
-| `$05` | ? | — | |
-| `$07` | ? | — | |
-| `$08` | **crab** | walking enemy (4 in Act 1) | play testing |
-| `$09` | swinging platform | moving platform | play testing |
-| `$0B` | ? | — | |
-| `$0E` | ? | — | |
-| `$0F` | horizontal platform | moving platform | play testing |
-| `$10` | **beetle** | enemy | play testing |
-| `$12` | ? | one instance, far right (end of level — goal?) | placement |
-| `$17` | ? | one instance at block (1, 22), off the playfield (control object?) | placement |
-| `$50` | **checkpoint?** | eight instances, evenly spaced; invisible in play; the respawn code points to this (see below) | placement + spawn trace |
-| `$51` | ? | one instance; shares the bonus-item bounding box | placement |
+| `$00`→`$13` | Sonic | — | the player; type becomes `$13` once running |
+| `$01`/`$02`/`$03` | bonus item | b2 `$7B4F`/`$7B80`/`$7BA4` | |
+| `$05` | ? | b2 `$7BF2` | |
+| `$06` | chaos emerald | b2 `$7C24` | |
+| `$07` | goal sign | b2 `$7C4E` | end of level |
+| `$08` | **crab** | b1 `$7C6A` | walking enemy (4 in Green Hills Act 1) |
+| `$09` | swinging platform | b1 `$7C9A` | |
+| `$0B` | ? | b1 `$7CE4` | |
+| `$0E` | bird | b2 `$7D6E` | enemy (shares handler with beetle) |
+| `$0F` | horizontal platform | b1 `$7D6E` | |
+| `$10` | **beetle** | b2 `$7D6E` | enemy |
+| `$12` | ? | b2 `$7D94` | |
+| `$17` | ? | b1 `$7DF2` | |
+| `$50`/`$51` | ? (not active objects) | — *(out of range)* | types ≥ `$20` are **not** in the handler table — a separate, passive class (invisible in play). My earlier "checkpoint" guess is unconfirmed: there *is* a respawn table (below) but it is not linked to `$50` |
 
 ### Sonic's spawn and respawn
 
@@ -969,15 +974,16 @@ sprite origin). He is *not* dropped to the ground: the original spawn can be in 
 (`$D251 = blockX − 3`, `$1959`).
 
 There is also a **respawn table at RAM `$D32F`** (`$D32F + act×2`). Bank 1 `$6034`
-*writes* it from Sonic's current position (`blockX`, `blockY − 1`) — i.e. it records a
-checkpoint — which is almost certainly the behaviour of the evenly-spaced `$50` objects.
-So `$D32F` is the death-respawn point, updated as Sonic passes the `$50` checkpoints.
+*writes* it from Sonic's current position (`blockX`, `blockY − 1`) — i.e. it records where
+Sonic should reappear after a death. (I'd guessed this was the `$50` objects acting as
+checkpoints, but `$50` turned out to be outside the object handler table, so that link is
+*not* established — `$D32F` is the respawn point, but what updates it is still open.)
 
 `cmd/objprobe` reads each act's spawn and `cmd/levelmap`'s overlays mark it (a 2×4-tile
 box at the original position) — see `rendered/level_<zone>_act<N>_objects.png`.
 
-Still to do: the behaviour dispatch (to confirm `$50` = checkpoint and fill the other `?`
-rows), Sonic's movement and physics, ring collection and collision, scoring and progression.
+Still to do: name the remaining `?` types (`$05`/`$0B`/`$12`/`$17`) and the passive
+`$50`/`$51` class; Sonic's movement and physics; ring collection and collision; scoring.
 
 ---
 

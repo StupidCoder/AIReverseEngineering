@@ -51,6 +51,7 @@ addresses (16-bit, `$0000`–`$FFFF`) unless a *file offset* is called out; byte
   - [4. Level maps: how a zone is stored and drawn](#4-level-maps-how-a-zone-is-stored-and-drawn)
 - [Part V — Game mechanics](#part-v--game-mechanics)
   - [1. Objects](#1-objects)
+  - [2. Movement and collision](#2-movement-and-collision)
 - [Appendix A — Toolchain and reproduction](#appendix-a--toolchain-and-reproduction)
 
 ---
@@ -1149,8 +1150,107 @@ This resolves the long-standing guess: the checkpoint *is* a placed object, but 
 `$51`, not `$50` (which turned out to be the camera/scroll-lock — it drives `$D2AB`, the
 camera X).
 
-Still to do: name the remaining unidentified handler slots in `$24B2`; Sonic's movement
-and physics; ring collection and collision; scoring.
+## 2. Movement and collision
+
+Sonic himself is just object type `$00`, dispatched like any other through `$24B2` to the
+handler at bank 1 `$4AD0` — but that handler is the largest in the game, and it is where
+the controller becomes motion. This section traces the spine *input → acceleration →
+friction → speed → world position*, plus rolling and the terrain sampler. The fine
+vertical resolution (slopes, gravity, the jump arc) is located but not yet fully decoded —
+flagged as the frontier at the end.
+
+### Reading the controller
+
+The pad is sampled once per frame by `$0602` into `(IY+3)` — the raw Game Gear input byte,
+**active-low** (a pressed button reads `0`). The player handler decodes it bit by bit:
+bit 1 = **Down**, bit 2 = **Left**, bit 3 = **Right**, bit 4 = **Button 1 / jump**, with
+`$FF` meaning "nothing pressed" (used as an idle test at `$4C52`). So the handler is a
+chain of `BIT n,(IY+3)` tests that route to small per-direction routines.
+
+### Horizontal acceleration, skidding and friction
+
+Before the directional code runs, the handler picks a **physics parameter set** for the
+frame and copies it into three words:
+
+- `($D23A)` — **acceleration** (added to speed while a direction is held),
+- `($D23C)` — **friction / deceleration** (a negative value applied when nothing is held),
+- `($D23E)` — the **top-speed cap**.
+
+Which set is chosen depends on Sonic's state flags (`IX+24`) and whether he is on the
+ground (`IY+7` bit 0). The three seen so far, as raw constants:
+
+| State | accel `$D23A` | friction `$D23C` | cap `$D23E` | source block |
+|---|---|---|---|---|
+| running on ground | `$0300` | `$FD00` | `$0038` | `$4FD7` |
+| (high-accel variant) | `$0C00` | `$FD00` | `$0038` | `$4FE0` |
+| rolling / ball form | `$0100` | `$FDC0` | `$0010` | `$4FE9` |
+
+Rolling has the **smallest acceleration and the strongest friction** (you can't speed up
+by rolling, and you keep less control), exactly the Mega Drive feel. (The constants are
+raw fixed-point; the exact px/frame scale is pinned together with the position integration,
+still on the frontier — so the table is the *roles and values*, not yet a velocity in
+pixels.)
+
+Holding **Right** jumps to `$515E`, **Left** to `$51B9`. Each adds `($D23A)` to Sonic's
+speed in the pressed direction and sets the animation index `IX+20` (`$01` = run). The neat
+detail is the **skid**: if you press the opposite way to your current motion, the routine
+takes a *braking* branch instead — it applies a larger fixed deceleration (`$0100`) and
+sets the skid animation (`IX+20 = $0A`) until the speed crosses zero and Sonic turns
+around. With **no** direction held, the no-input path (around `$4D9D`) instead applies the
+friction constant `($D23C)` toward zero. After accel/skid/friction, the result is clamped
+to the cap `($D23E)`.
+
+### From speed to a position on the map
+
+The computed speed is written back into Sonic's own velocity words in his object record —
+`($D404…)` and `($D407…)` (i.e. `IX+7…` and `IX+10…`, since Sonic is object 0 at `$D3FD`) —
+and a sign-flipped copy is kept at `($D2E7/$D2E9)` (the same "velocity and its negation"
+pair the platforms and the seesaw read when they carry or launch him). The common-move
+step then integrates velocity into his world position, `($D3FF)` X and `($D402)` Y. The
+tail of the handler is mostly animation: `IX+20` indexes a frame table (`$5C5B` → `$5BE1`)
+and builds the VRAM sprite source at `($D289)`, and the on-screen offset is clamped to a
+few pixels (`$D405`/`$D408` capped to ±`$0A`/`$0C`) so the camera lag never tears the
+sprite off-screen.
+
+### Rolling
+
+Pressing **Down** calls `$5335`, which is gated: it does nothing if Sonic is already a ball
+(`IX+24` bit 0) or not on the ground (`IX+24` bit 7), but otherwise **sets `IX+24` bit 0 —
+the rolling/ball flag** — and, *only if he is actually moving* (`($D404) ≠ 0`), fires the
+roll sound (`RST $28`, action `$06`). Standing still and pressing Down is therefore a crouch
+(the flag is set but there's no roll). Once bit 0 is set, the per-frame setup selects the
+ball physics constants above (low accel, high friction) and the update takes a rolling
+branch (`$4C92 → $55C7`), so a roll coasts and decays rather than accelerating — you steer
+a little but mostly carry momentum, just like the original.
+
+### Ground collision — the terrain sampler
+
+Collision reads the **decoded block map in the `$C000` RAM window** (Part IV §4: the
+row-major level map streamed from bank 4/5/6). The key routine is **`$30D5`**: given an
+object (via `IX`) and an `(X, Y)` offset in `BC`/`DE`, it returns `HL` = the address of the
+**block index at that world point**, computing `row·stride + col` and adding `$C000`. It
+even dispatches on the level's stride byte `($D232 = $80/$40/$20/$10/…)` — the *same*
+variable that reshapes the map in the level decoder — so a sampled point lands on the right
+block whatever the level's aspect. The Sonic handler calls `$30D5` at foot/side offsets,
+reads the block index (`LD A,(HL)`), and tests its **solidity by threshold** (e.g.
+`AND $7F` then `CP $79`; indices at/above the cutoff are solid and call the contact handler
+`$5000`). So "ground collision" is: *sample the block under the relevant sensor point →
+look up whether that block is solid → react*. This is the bridge between the static level
+format already decoded and the live physics.
+
+### What's solid here vs. the frontier
+
+Solid and verified: the input decode, the accel/skid/friction model and its per-state
+constant sets, the speed→velocity→position chain, the rolling trigger, and the block-map
+sampler that backs collision. **Not yet decoded:** the exact *vertical* resolution — how a
+solid sample snaps Sonic's Y onto the surface, slope angles and the ground-rotation that
+makes him run on curves, gravity, and the jump (Button 1) arc and its variable height.
+These live in the `IY+6`/`IY+8`-gated sub-handlers near the top of `$4AD0` and the `$5000`
+contact routine, and pinning them — together with the fixed-point scale that turns the raw
+constants above into pixels per frame — is the next step.
+
+Still to do: the vertical/slope collision, gravity and the jump (above); the remaining
+unidentified handler slots in `$24B2`; ring collection; scoring.
 
 ---
 

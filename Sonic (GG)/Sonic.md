@@ -875,18 +875,35 @@ wide (stride 256 → 16×256, or 128 → 32×128), but Jungle Act 2 has **stride
 fixed-grid insight from Green Hills holds (4096 cells), but how those cells are laid out —
 wide platformer vs. vertical climb — is data-driven per act.
 
-*Still open.* The **object** layer. The scenery above (trees, flowers, rings) is baked
-into the block map, but the *interactive* world is not: Sonic, the enemies, and whatever
-the game tracks for ring collection and collision are sprites/objects with their own tile
-format and per-act data (the `$3282` `scroll_draw` path and the descriptor's per-act
-pointers). A ring's graphic is in the blocks; whether a collectible ring is *also* an
-object placed at the same spot is part of decoding that layer. That, and the other zones'
-descriptors, are Part V.
+### The object layer (the start of Part V)
+
+The terrain above is the static block map. The **interactive** world — Sonic, the enemies,
+items — is a separate **object** layer, and its placement is now decoded
+([`extract/cmd/objprobe`](extract/cmd/objprobe)). Each act's descriptor points (word at
+`+30`) to a per-act **object table** in bank 5: a count byte followed by 3-byte entries
+`[type, blockX, blockY]`. At level load `$1A80`/`$1AB3` expands the table into the object
+array at RAM `$D3FD` — 32 records of 26 bytes, type at `+0` and the world position
+`X = blockX×32` (`+2`), `Y = blockY×32` (`+5`). Record 0 is **Sonic**, placed from the
+spawn pointer `($D217)`.
+
+For Green Hills Act 1 this reads out cleanly: **Sonic spawns at block (5, 8)** — the left
+edge, on the surface — and there are 26 placed objects. Eight are type `$50` and one `$51`
+(rings/items, scattered along the ground); the rest are enemies and level features. The
+earliest enemies sit at **block 18** (type `$10`, on a ledge) and **block 29** (type `$01`,
+on the ground) — the latter is the walking **crab**. Overlaying the object positions on the
+render shows exactly where each sits ([`rendered/level_greenhills_act1_objects.png`](rendered/level_greenhills_act1_objects.png)).
+
+*Still open.* Mapping each **type** to its behaviour and sprite (the object handlers), and
+the live engine state. The machine model can place the objects but isn't cycle-accurate
+enough to *run* them — Sonic falls through the floor instead of running the level — so
+watching an enemy walk, and confirming a type by its on-screen sprite, needs the handler
+decode rather than the oracle. That is the body of Part V.
 
 # Part V — Game mechanics
 
-*Stub.* Sonic's movement and physics, the object/enemy system, the zones and act
-structure, rings, scoring and progression.
+*In progress (object placement above).* Still to do: the object **behaviours** (the
+type→handler dispatch), Sonic's movement and physics, ring collection and collision,
+scoring and progression.
 
 ---
 

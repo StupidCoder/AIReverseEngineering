@@ -194,3 +194,14 @@
 # Verified by decoding straight from ROM and rendering: sky / surface line / solid ground
 # (rendered/level_map_codec.png). So the ROM map is the COMPRESSED source (bank 5 $17430);
 # the live decoded map is this $C000 window, reproduced byte-perfect by decomp.LoadMapRLE.
+
+# --- FULLY-STATIC LEVEL RENDER (cmd/levelmap) ---
+# A level's BG palette = romPalette(descriptor+29 index) via the $7400 table (see $0586/$05C4).
+# Its tiles = decomp.Decompress($30000 + descriptor+21 word) = 256 BG tiles ($0406 codec).
+# So map+blocks+tiles+palette ALL come from ROM; the oracle is used only to VALIDATE (the
+# from-ROM tiles/palette match VRAM/CRAM except animated water tiles + a 3-colour palette cycle).
+
+# --- OBJECT LAYER (placement decoded; cmd/objprobe) ---
+1A80  obj_setup  build the OBJECT array at RAM $D3FD from the per-act object table (POP HL on entry). 32 records of $1A=26 bytes. $1AB3 builds each: (IX+0)=type; (IX+2/3)=blockX*32 = world X; (IX+5/6)=blockY*32 = world Y; rest cleared. Record 0 = SONIC (type 0, spawn from ($D217)); records 1.. from the table. Unused slots get type=$FF.
+# Per-act OBJECT TABLE: bank5 $15600 + word(descriptor +30). Format = [count][type, blockX, blockY] x count (3 bytes each). Green Hills Act 1 ($15B34, count $1A=26): Sonic spawn block(5,8); 8x type$50 + 1x $51 = rings/items; earliest enemies type$10 @block18 (ledge) and type$01 @block29 (ground = the walking CRAB). Overlay: rendered/level_greenhills_act1_objects.png.
+# OPEN: type -> behaviour/sprite (object handlers; the $DC26-style active-object arrays at $423A use stride $2D=45). The model places objects but can't RUN them (Sonic falls through floors), so a type's identity needs the handler decode, not the oracle.

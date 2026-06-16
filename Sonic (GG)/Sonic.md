@@ -1231,26 +1231,43 @@ object (via `IX`) and an `(X, Y)` offset in `BC`/`DE`, it returns `HL` = the add
 **block index at that world point**, computing `row·stride + col` and adding `$C000`. It
 even dispatches on the level's stride byte `($D232 = $80/$40/$20/$10/…)` — the *same*
 variable that reshapes the map in the level decoder — so a sampled point lands on the right
-block whatever the level's aspect. The Sonic handler calls `$30D5` at foot/side offsets,
-reads the block index (`LD A,(HL)`), and tests its **solidity by threshold** (e.g.
-`AND $7F` then `CP $79`; indices at/above the cutoff are solid and call the contact handler
-`$5000`). So "ground collision" is: *sample the block under the relevant sensor point →
-look up whether that block is solid → react*. This is the bridge between the static level
-format already decoded and the live physics.
+block whatever the level's aspect. `$30D5` is a *shared* map reader — several systems use
+it — so the Sonic handler calls it at the relevant offset, reads the block index
+(`LD A,(HL)`), and dispatches on the value. One consumer is fully decoded below (ring
+pickup); the **solid-terrain** consumer — the one that resolves Sonic's feet against ground
+blocks — is still on the frontier. `$30D5` is the bridge between the static level format
+already decoded and the live physics, whichever system is asking.
+
+### Rings
+
+The first decoded use of the sampler turns out to be **ring collection**, not solid
+collision. Rings are baked into the block map (Part IV §4) as **block indices `$79`–`$7B`**
+(blocks 121–123), and the low two bits of the index encode *which 16-px halves of the
+32-px block still hold a ring* — `$79` = left only, `$7A` = right only, `$7B` = both. Each
+frame the handler samples the block at Sonic's centre (`$30D5` with offset `(8, 8)`), masks
+the priority bit (`AND $7F`) and, if the result is `≥ $79`, calls **`$5000`**. That routine
+works out which half Sonic overlaps (from his X bit 4 → mask `1` or `2`), and if that
+ring-bit is set it **clears it from the live map** (`(DE) = block XOR mask`) — so the block
+graphic visibly downgrades from two rings to one to none — then spawns a collect sparkle
+and calls the counter **`$337E`**. `$337E` adds to the **BCD ring count at `($D2A9)`**,
+plays the pickup sound (`RST $28`, action `$02`), and — the nice touch — when the count
+rolls past 100 it grants an extra life (`($D240)++` and the 1-up jingle, action `$09`).
+Because the rings live *in the map*, collecting one is a single byte-write back into the
+`$C000` window; there is no separate ring object array.
 
 ### What's solid here vs. the frontier
 
 Solid and verified: the input decode, the accel/skid/friction model and its per-state
-constant sets, the speed→velocity→position chain, the rolling trigger, and the block-map
-sampler that backs collision. **Not yet decoded:** the exact *vertical* resolution — how a
-solid sample snaps Sonic's Y onto the surface, slope angles and the ground-rotation that
-makes him run on curves, gravity, and the jump (Button 1) arc and its variable height.
-These live in the `IY+6`/`IY+8`-gated sub-handlers near the top of `$4AD0` and the `$5000`
-contact routine, and pinning them — together with the fixed-point scale that turns the raw
-constants above into pixels per frame — is the next step.
+constant sets, the speed→velocity→position chain, the rolling trigger, the block-map
+sampler `$30D5`, and ring collection (`$5000`/`$337E`). **Not yet decoded:** the *solid*
+terrain consumer of the sampler — the exact *vertical* resolution that snaps Sonic's Y onto
+a ground block, slope angles and the ground-rotation that makes him run on curves, gravity,
+and the jump (Button 1) arc and its variable height. These live in the `IY+6`/`IY+8`-gated
+sub-handlers near the top of `$4AD0`, and pinning them — together with the fixed-point
+scale that turns the raw constants above into pixels per frame — is the next step.
 
 Still to do: the vertical/slope collision, gravity and the jump (above); the remaining
-unidentified handler slots in `$24B2`; ring collection; scoring.
+unidentified handler slots in `$24B2`; scoring and the timer.
 
 ---
 

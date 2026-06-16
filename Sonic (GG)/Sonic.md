@@ -967,11 +967,11 @@ slot:
 | `$04` | shield power-up | b1 `$5FAF` | |
 | `$06` | chaos emerald | b1 `$6183` | |
 | `$07` | goal sign | b1 `$61F8` | end of act |
-| `$08` | **crab** | b1 `$65F9` | walking enemy (4 in Green Hills Act 1) |
+| `$08` | **crab** | b1 `$65F9` | walker (~0.16 px/frame) that stops to fire a projectile each side; 4 in Green Hills Act 1 |
 | `$09` | swinging platform | b1 `$6747` | pendulum: 180° arc, radius ~51 px, ~3.7 s/cycle; carries Sonic |
 | `$0E` | bird | b1 `$6BD9` | enemy |
 | `$0F` | horizontal platform | b1 `$6DCA` | back-and-forth: 1 px/frame, 160 px out-and-back; carries Sonic |
-| `$10` | **beetle** | b1 `$6E65` | enemy |
+| `$10` | **beetle** | b1 `$6E65` | enemy: marches back and forth at 1 px/frame (same script engine as the crab, no attack) |
 | `$12` | **world 1 boss** | b1 `$7065` | |
 | `$25` | capsule | b1 `$736B` | jumped on to free the animals — ends each world |
 | `$26` | fish | b1 `$7D25` | enemy: jumps 128 px (4 blocks) straight up, ~2.6 s/cycle |
@@ -979,7 +979,7 @@ slot:
 | `$2D` | porcupine | b2 `$82FB` | enemy |
 | `$48` | **world 2 boss** | b2 `$84AB` | |
 | `$49` | **world 4 boss** | b2 `$9271` | |
-| `$4E` | seesaw | b2 `$8681` | bounce obstacle (weight catapult) |
+| `$4E` | seesaw | b2 `$8681` | tilt-arm catapult; launch height scales with Sonic's landing impact (momentum transfer) |
 | `$50` | camera/scroll lock | b1 `$7B29` | writes the camera X (`$D2AB`) from the object position each frame — pins/limits scrolling |
 | `$51` | **checkpoint** | b1 `$6010` | on contact, writes the *checkpoint's own* block position into the respawn table `$D32F + act×2` (the `$6034` respawn-save code) |
 
@@ -1020,6 +1020,52 @@ rides it the same way as the horizontal platform: the handler keeps the frame's 
 displacement in `($D20F)`, runs the standing test (`$3328`), and on contact adds that
 delta to Sonic's X (`($D3FF)`) while `$7CF5` keeps him glued on top — so he follows the
 arc both horizontally and vertically. Artwork by zone: zone 0 → `$6910`, else `$6922`.
+
+### Seesaw (`$4E`)
+
+The catapult (bank 2 `$8681`) is the most involved of these — a tilting arm with a weight,
+simulated rather than scripted. A single byte `IX+17` holds the **tilt angle**, an integer
+`0…$1C` (28 steps); the two standable ends sit at *complementary* heights derived from it
+(one collision box at `IX+17`, the other at `$1C − IX+17`), so as one end drops the other
+rises. The weight is a little physics loop: a 16-bit tilt **velocity** (`IX+18/19`)
+accelerates by **`+$0038` per frame** and integrates into a fine position accumulator
+(`IX+20…22`), i.e. the loaded side falls under gravity. The catapult itself is **momentum
+transfer**: when Sonic lands on an end (one of two `$3328` tests, gated by `($D409)` ≥ 0 =
+grounded), his downward impact speed — read from `($D407)` — is *negated* into the tilt
+velocity (`IX+18/19`) and added to the angle, then a sub-action fires (`RST $28`, index
+`$04`). So a harder landing tilts the arm harder, which throws whatever is on the opposite
+end higher. Because the launch is driven by impact speed, **there is no single fixed launch
+height** — it scales with how fast Sonic comes down, exactly matching the in-game feel
+(jump on the high end, the weight on the low end is flung up, and on its way down it
+catapults Sonic). This one I've only read statically; the two-stage momentum sim would be
+worth confirming against footage if we want exact numbers.
+
+### Crab (`$08`)
+
+The crab (bank 1 `$65F9`, a Crabmeat-style walker, box 16×31) is **script-driven**. A
+16-bit counter (`IX+17/18`) advances `+8` per frame, and its high byte indexes a 26-entry
+**state table at `$66D0`** — so each entry holds for 32 frames, and reading a `0` wraps to
+the start. The entries are state codes: `1` = walk right, `2` = walk left, `3` = stop,
+`4` = **attack**. The sequence is *walk right (9 entries ≈ 288 frames) → stop → attack →
+walk left (10 entries) → stop → attack → repeat*. Walking is slow: the state sets an X
+velocity of only `$28/256` ≈ **0.156 px/frame**, so each leg covers ~45 px. The attack
+state (when the sub-phase byte `IX+17 == $20`) spawns a projectile to each side — it calls
+the spawner `$AC5C` twice with direction `($D213) = −1` then `+1` and fires `RST $28`
+index `$0A` — i.e. the classic crab that stops and shoots both ways. Gravity (`+$0020`/
+frame on the Y velocity) keeps it on the ground; touching it calls the hurt routine
+`$2FC1`.
+
+### Beetle (`$10`)
+
+The beetle (bank 1 `$6E65`, box 10×16) uses the **same script engine** as the crab — a
+`+8`/frame counter into a state table at `$6EEF`, 32 frames per entry — but a simpler
+program and no attack: `1` = walk left, `2` = walk right, `3`/`4` = stop (the two "stop"
+codes differ only in which idle sprite plays). It marches *left (9 entries ≈ 288 frames) →
+stop → right → stop → repeat* at a brisk **1 px/frame** (`±$0100` velocity), ~6× the
+crab's pace. It clears the "solid" flag (`RES 5,(IX+24)`) so Sonic can't stand on it, and a
+constant `+2 px/frame` downward component (`IX+10..12 = $000200`, reset every frame rather
+than accumulating) keeps it pinned to the surface as it crawls. Contact calls the hurt
+routine `$2FC1`.
 
 ### Fish (`$26`)
 

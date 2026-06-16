@@ -968,20 +968,20 @@ slot:
 | `$06` | chaos emerald | b1 `$6183` | |
 | `$07` | goal sign | b1 `$61F8` | end of act |
 | `$08` | **crab** | b1 `$65F9` | walking enemy (4 in Green Hills Act 1) |
-| `$09` | swinging platform | b1 `$6747` | |
+| `$09` | swinging platform | b1 `$6747` | pendulum: 180° arc, radius ~51 px, ~3.7 s/cycle; carries Sonic |
 | `$0E` | bird | b1 `$6BD9` | enemy |
-| `$0F` | horizontal platform | b1 `$6DCA` | |
+| `$0F` | horizontal platform | b1 `$6DCA` | back-and-forth: 1 px/frame, 160 px out-and-back; carries Sonic |
 | `$10` | **beetle** | b1 `$6E65` | enemy |
 | `$12` | **world 1 boss** | b1 `$7065` | |
 | `$25` | capsule | b1 `$736B` | jumped on to free the animals — ends each world |
-| `$26` | fish | b1 `$7D25` | enemy |
+| `$26` | fish | b1 `$7D25` | enemy: jumps 128 px (4 blocks) straight up, ~2.6 s/cycle |
 | `$2C` | **world 3 boss** | b2 `$806B` | |
 | `$2D` | porcupine | b2 `$82FB` | enemy |
 | `$48` | **world 2 boss** | b2 `$84AB` | |
 | `$49` | **world 4 boss** | b2 `$9271` | |
 | `$4E` | seesaw | b2 `$8681` | bounce obstacle (weight catapult) |
 | `$50` | camera/scroll lock | b1 `$7B29` | writes the camera X (`$D2AB`) from the object position each frame — pins/limits scrolling |
-| `$51` | **checkpoint** | b1 `$6010` | on contact, writes Sonic's position into the respawn table `$D32F + act×2` (this *is* the `$6034` respawn-save code) |
+| `$51` | **checkpoint** | b1 `$6010` | on contact, writes the *checkpoint's own* block position into the respawn table `$D32F + act×2` (the `$6034` respawn-save code) |
 
 Unnamed but present (handlers confirmed, behaviour not yet identified): `$05` b1 `$5FD7`,
 `$0A`–`$0D` b1, `$0B` b1 `$69ED`, `$11` b1 `$6F61`, `$13`–`$24` (mostly bank 2),
@@ -1005,7 +1005,41 @@ ride is skipped when `($D409)` is negative (Sonic not in a standable state, e.g.
 mid-jump). The platform's artwork is chosen by zone (`$D2D5`): zone 0 → `$6910`, zone 1 →
 `$6930`, else `$6922` — same motion, different sprite per zone.
 
-### Sonic's spawn and respawn
+### Swinging platform (`$09`)
+
+The pendulum platform (bank 1 `$6747`) records its placed position as an **anchor**
+(`IX+18/19` = pivot X, `IX+20/21` = pivot Y) on the first frame, then each frame reads a
+position from a **113-point arc table at `$682E`** and sets `X = anchorX + table_dx`,
+`Y = anchorY + table_dy`. The table is a signed `(dx, dy)` list tracing a **semicircle of
+radius ~51 px** (≈ 1.6 blocks) *below* the pivot: it runs from `(-51, 0)` on the left,
+down through `(-2, +51)` at the bottom, to `(+51, 0)` on the right — a 180° swing (9
+o'clock → 6 → 3), 102 px wide, dipping 51 px at the lowest point. A phase index (`IX+17`)
+walks the table and **ping-pongs between 0 and `$E0` (224) at ±2 per frame**, so one sweep
+takes 112 frames and a full there-and-back is **224 frames (~3.7 s at 60 Hz)**. Sonic
+rides it the same way as the horizontal platform: the handler keeps the frame's X
+displacement in `($D20F)`, runs the standing test (`$3328`), and on contact adds that
+delta to Sonic's X (`($D3FF)`) while `$7CF5` keeps him glued on top — so he follows the
+arc both horizontally and vertically. Artwork by zone: zone 0 → `$6910`, else `$6922`.
+
+### Fish (`$26`)
+
+The fish (bank 1 `$7D25`) is a pure vertical jumper that hides underwater between leaps.
+It keeps a **cooldown timer** in `IX+20`: while it is non-zero the fish decrements it and
+blanks its sprite (`IX+15/16 = 0` — invisible), so it sits unseen until the timer expires.
+When it fires, it sets an upward velocity of **−4 px/frame** (`IX+10..12 = $FFFC00`, a
+24-bit 16.8 fixed-point value) and flags itself airborne; thereafter each frame **gravity
+adds `$0010` (≈ 0.0625 px/frame²)** to that velocity, with the downward speed clamped to a
+terminal **+4 px/frame** (`$0400`). The launch and gravity give a peak height of
+`v² / 2a = 4² / (2·0.0625) =` **128 px (4 blocks / 8 tiles)**, reached after 64 frames; the
+fall is symmetric, so it is airborne ≈ 128 frames. When it falls back to its reference
+height (`IX+18/19`, recorded once at launch) the handler snaps it to rest, zeroes the
+velocity, and reloads the cooldown with **`$1E` = 30 frames (0.5 s)** — so the full cycle
+is roughly **~158 frames ≈ 2.6 s**. There is no horizontal motion (only a one-time +8 px
+nudge); the X velocity is never touched. On the way up it triggers a sub-action
+(`RST $28`, index `$12` — the splash) and, via the contact test (`($D215) = $0204`,
+`$3328`), calls the hurt routine `$2FC1` if Sonic touches it.
+
+### Sonic's spawn
 
 Sonic is object 0; the loader places him at the position the spawn pointer `($D217)`
 points to (block coordinate × 32). Across all 18 acts the placed position is `blockX×32`
@@ -1016,15 +1050,27 @@ sprite origin). He is *not* dropped to the ground: the original spawn can be in 
 ~248 of 256 — the start of the climb). The camera starts 3 blocks left of him
 (`$D251 = blockX − 3`, `$1959`).
 
-There is also a **respawn table at RAM `$D32F`** (`$D32F + act×2`), and it is now linked
-to a placed object. The **checkpoint** object (type `$51`, handler bank 1 `$6010`) writes
-it from Sonic's current position on contact — code at `$6034`: `($D238)` (act) × 2 indexes
-`$D32F`, and Sonic's position (`IX+2/3` and `IX+5/6`, each `×8`, the Y minus 1) is stored
-there. So the earlier "checkpoint" intuition was right but mis-numbered: it is `$51`, not
-`$50`. (`$50` is a camera/scroll-lock trigger — it drives `$D2AB`, the camera X.)
-
 `cmd/objprobe` reads each act's spawn and `cmd/levelmap`'s overlays mark it (a 2×4-tile
 box at the original position) — see `rendered/level_<zone>_act<N>_objects.png`.
+
+### Checkpoint (`$51`)
+
+The respawn point — where Sonic reappears after a death — lives in a **table at RAM
+`$D32F`** (`$D32F + act×2`, one block coordinate per act), and it is written by the
+**checkpoint** object (type `$51`, handler bank 1 `$6010`). The handler has a 20×24
+collision box (`IX+13/14`) and runs a contact test against Sonic each frame (`($D215) =
+$0003`, `$3328`), refined by a horizontal-proximity check (`$60CC`). On the first contact
+it runs the save at `$6034`: `($D238)` (the act) × 2 indexes `$D32F`, and the **checkpoint
+object's *own* position** — `IX+2/3` and `IX+5/6`, each `×8` and taking the high byte to
+convert pixels → blocks, with the Y block minus 1 — is stored there. (So you respawn *at
+the checkpoint*, one block above it, not at the exact pixel you touched it — and note this
+saves the checkpoint's coordinates, **not** Sonic's, correcting an earlier reading.) It
+also sets a per-act "checkpoint reached" bit in the `$D312` bitmask (`$0B8D` picks the bit
+by act number) so the save fires once, then draws its sprite (`$5500` via `$5E0C`).
+
+This resolves the long-standing guess: the checkpoint *is* a placed object, but it is type
+`$51`, not `$50` (which turned out to be the camera/scroll-lock — it drives `$D2AB`, the
+camera X).
 
 Still to do: name the remaining unidentified handler slots in `$24B2`; Sonic's movement
 and physics; ring collection and collision; scoring.

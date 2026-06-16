@@ -850,6 +850,25 @@ Green Hills levels in the identical art:
 This is the payoff of the descriptor format: one decode, and every act of the zone (and,
 by the same table, the other zones) is reachable from the ROM alone.
 
+### Every zone — and a surprise: the map isn't always 16×256
+
+The same table has 18 entries (6 zones × 3 acts), and `cmd/levelmap` renders them all (to
+`rendered/level_<zone>_act<N>.png`). The zones — Green Hills, Bridge, Jungle, Labyrinth,
+Scrap Brain, Sky Base — each have their own tile set, block table and palette (shared by
+the zone's three acts, exactly as for Green Hills); only the per-zone tile set differs. The
+machine model loads each zone's graphics by forcing the act number `$D238` during the
+level load (injecting a *later* act of a zone doesn't bring its graphics up cleanly, but
+because a zone shares one tile set, loading its first act suffices).
+
+The surprise is the map **shape**. The decompressed map is always 4096 bytes, but it is
+*not* always 16×256: the expander reads a **stride** from `$D232` (`$0938` selects 256 /
+128 / 64 / 32 / 16 from the top bits), and the grid is `(4096 / stride) × stride`. So the
+stride is the column count, and a *small* stride is a **tall, narrow** level. Most acts are
+wide (stride 256 → 16×256, or 128 → 32×128), but Jungle Act 2 has **stride 16 → a 256-row ×
+16-column vertical level** — the waterfall climb, 16 blocks wide and hundreds tall. The
+fixed-grid insight from Green Hills holds (4096 cells), but how those cells are laid out —
+wide platformer vs. vertical climb — is data-driven per act.
+
 *Still open.* The **object** layer. The scenery above (trees, flowers, rings) is baked
 into the block map, but the *interactive* world is not: Sonic, the enemies, and whatever
 the game tracks for ring collection and collision are sprites/objects with their own tile

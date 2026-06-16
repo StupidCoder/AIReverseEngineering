@@ -888,16 +888,17 @@ array at RAM `$D3FD` — 32 records of 26 bytes, type at `+0` and the world posi
 spawn pointer `($D217)`.
 
 For Green Hills Act 1 this reads out cleanly: **Sonic spawns at block (5, 8)** — the left
-edge, on the surface — and there are 26 placed objects. The known types: `$08` = **crab**
-(an enemy, 4 of them), `$10` = **beetle**, `$01`/`$02`/`$03` = bonus items, `$09` =
-swinging platform, `$0F` = horizontal moving platform. Eight `$50` and one `$51` (here
-labelled `?`) are *not* rings — the rings are baked into the block map (below). Overlaying
-the positions on the render shows where each sits, with a marker at the spawn
+edge, on the surface — and there are 26 placed objects. The types (all now named, below):
+`$08` = **crab** (4 of them), `$10` = **beetle**, `$01`/`$02`/`$03` = bonus items, `$09` =
+swinging platform, `$0F` = horizontal moving platform, plus eight `$50` (camera/scroll
+locks) and one `$51` (a **checkpoint**). None are rings — the rings are baked into the
+block map (below). Overlaying the positions on the render shows where each sits, with a
+marker at the spawn
 ([`rendered/level_greenhills_act1_objects.png`](rendered/level_greenhills_act1_objects.png)).
 
 Each object **type** indexes an 8-byte sprite descriptor at `$2560` (the per-frame update
-`$2BFB` reads it; valid types are `< $57`). That gives the sprite *class* — `$50` shares
-the beetle's descriptor and `$51` the bonus-item descriptor — but not yet the behaviour.
+`$2BFB` reads it; valid types are `< $57`) for its sprite *class*, and a behaviour handler
+at `$24B2` (below) for what it *does*.
 
 ### Animated tiles (rings and flowers)
 
@@ -921,46 +922,67 @@ frame of each group into the empty slots (`applyAnimFrame`), which is why the ri
 flowers now appear. Other zones likely animate more than the rings (e.g. real water);
 only the rings were observed in the idle probe so far.
 
-*Still open.* Mapping each **type** to its behaviour (the object handlers). The machine
+The mapping of each **type** to its behaviour is the body of Part V (below). The machine
 model can place the objects but isn't cycle-accurate enough to *run* them — Sonic falls
-through the floor instead of running the level — so watching an enemy walk needs the
-handler decode rather than the oracle. That is the body of Part V.
+through the floor instead of running the level — so identifying a handler needs the static
+decode rather than the oracle.
 
 # Part V — Game mechanics
 
 *In progress.* Object **placement** is decoded (Part IV §4); the **behaviours** are the
 current frontier. Each object's `type` byte selects its behaviour and sprite. The table
 below collects the types as they are identified — from the object placements, from play
-testing, and (where pinned down) from the behaviour code. The per-frame culling pass at
-`$2BD8` indexes a **bounding-box** table at `$2560` by `type` (8 bytes each, valid types
-`< $57`); that gives each type's *size* but not its behaviour, which is dispatched
-separately and still being traced.
+testing, and confirmed against the behaviour code. The per-frame culling pass at `$2BD8`
+indexes a **bounding-box** table at `$2560` by `type` (8 bytes each, valid types `< $57`)
+for each type's *size*; the **behaviour** is dispatched by a separate table at `$24B2`
+(below).
 
-### Object types (work in progress)
+### Object types — the master dispatch
 
-The behaviour dispatch is now found: each object runs the handler at the **`RST $28`
-table `$4740`** (bank 3), indexed by `type×4` = `(addr, bank)`. The table covers types
-`$00`–`$1F` — every object the game's behaviour engine knows. The handler is reached
-cross-bank (banks 1/2), and several types **share** a handler (e.g. `$0E` bird, `$10`
-beetle and `$11` all use bank 2 `$7D6E`), so the code distinguishes them only by their
-data/sprite — the names below come from play-testing, confirmed against the table.
+The behaviour dispatch is now found, and the earlier lead (`$4740`) was a red herring.
+Every live object in the `$D3FD` array is processed once per frame by `$2CBA` (bank 0),
+which dispatches through a **word-pointer table at `$24B2`** (bank 0), indexed by
+`type×2`. This is the real master object dispatch: it is valid for types **`$00`–`$56`**
+(`$4D` and `$4F` are null — unused slots; `$57` is the end), so it covers *all* the
+play-tested types, not just the low ones. The chosen routine runs, then falls through to
+the common "apply velocity to position" code at `$2CD4`.
 
-| Type | Name | Handler (`$4740`) | Notes |
+The handlers live in the **home banking config (banks 0/1/2)**: the object loop pages
+banks 1 and 2 into slots 1/2, runs, then restores the level-graphics banks (4/5). So a
+table address in `$4000`–`$7FFF` is in **bank 1** and one in `$8000`–`$BFFF` is in
+**bank 2**. (The old `$4740` table in bank 3, indexed `type×4`, only covers `$00`–`$23`
+and is a *secondary* interaction table, not the per-frame dispatch — it does not reach
+the bosses, the capsule, the seesaw, etc., which is why it looked incomplete.)
+
+Names below come from play-testing, each confirmed against a real handler at the `$24B2`
+slot:
+
+| Type | Name | Handler (`$24B2`) | Notes |
 |---|---|---|---|
-| `$00`→`$13` | Sonic | — | the player; type becomes `$13` once running |
-| `$01`/`$02`/`$03` | bonus item | b2 `$7B4F`/`$7B80`/`$7BA4` | |
-| `$05` | ? | b2 `$7BF2` | |
-| `$06` | chaos emerald | b2 `$7C24` | |
-| `$07` | goal sign | b2 `$7C4E` | end of level |
-| `$08` | **crab** | b1 `$7C6A` | walking enemy (4 in Green Hills Act 1) |
-| `$09` | swinging platform | b1 `$7C9A` | |
-| `$0B` | ? | b1 `$7CE4` | |
-| `$0E` | bird | b2 `$7D6E` | enemy (shares handler with beetle) |
-| `$0F` | horizontal platform | b1 `$7D6E` | |
-| `$10` | **beetle** | b2 `$7D6E` | enemy |
-| `$12` | ? | b2 `$7D94` | |
-| `$17` | ? | b1 `$7DF2` | |
-| `$50`/`$51` | ? (not active objects) | — *(out of range)* | types ≥ `$20` are **not** in the handler table — a separate, passive class (invisible in play). My earlier "checkpoint" guess is unconfirmed: there *is* a respawn table (below) but it is not linked to `$50` |
+| `$00` | Sonic | b1 `$4AD0` | the player (object 0) |
+| `$01`/`$02`/`$03` | bonus item | b1 `$5DE1`/`$5EB1`/`$5EDD` | |
+| `$04` | shield power-up | b1 `$5FAF` | |
+| `$06` | chaos emerald | b1 `$6183` | |
+| `$07` | goal sign | b1 `$61F8` | end of act |
+| `$08` | **crab** | b1 `$65F9` | walking enemy (4 in Green Hills Act 1) |
+| `$09` | swinging platform | b1 `$6747` | |
+| `$0E` | bird | b1 `$6BD9` | enemy |
+| `$0F` | horizontal platform | b1 `$6DCA` | |
+| `$10` | **beetle** | b1 `$6E65` | enemy |
+| `$12` | **world 1 boss** | b1 `$7065` | |
+| `$25` | capsule | b1 `$736B` | jumped on to free the animals — ends each world |
+| `$26` | fish | b1 `$7D25` | enemy |
+| `$2C` | **world 3 boss** | b2 `$806B` | |
+| `$2D` | porcupine | b2 `$82FB` | enemy |
+| `$48` | **world 2 boss** | b2 `$84AB` | |
+| `$49` | **world 4 boss** | b2 `$9271` | |
+| `$4E` | seesaw | b2 `$8681` | bounce obstacle (weight catapult) |
+| `$50` | camera/scroll lock | b1 `$7B29` | writes the camera X (`$D2AB`) from the object position each frame — pins/limits scrolling |
+| `$51` | **checkpoint** | b1 `$6010` | on contact, writes Sonic's position into the respawn table `$D32F + act×2` (this *is* the `$6034` respawn-save code) |
+
+Unnamed but present (handlers confirmed, behaviour not yet identified): `$05` b1 `$5FD7`,
+`$0A`–`$0D` b1, `$0B` b1 `$69ED`, `$11` b1 `$6F61`, `$13`–`$24` (mostly bank 2),
+`$27`–`$2B`, `$2E`–`$4C`, `$52`–`$56`. The full table is dumped by inspecting `$24B2`.
 
 ### Sonic's spawn and respawn
 
@@ -973,17 +995,18 @@ sprite origin). He is *not* dropped to the ground: the original spawn can be in 
 ~248 of 256 — the start of the climb). The camera starts 3 blocks left of him
 (`$D251 = blockX − 3`, `$1959`).
 
-There is also a **respawn table at RAM `$D32F`** (`$D32F + act×2`). Bank 1 `$6034`
-*writes* it from Sonic's current position (`blockX`, `blockY − 1`) — i.e. it records where
-Sonic should reappear after a death. (I'd guessed this was the `$50` objects acting as
-checkpoints, but `$50` turned out to be outside the object handler table, so that link is
-*not* established — `$D32F` is the respawn point, but what updates it is still open.)
+There is also a **respawn table at RAM `$D32F`** (`$D32F + act×2`), and it is now linked
+to a placed object. The **checkpoint** object (type `$51`, handler bank 1 `$6010`) writes
+it from Sonic's current position on contact — code at `$6034`: `($D238)` (act) × 2 indexes
+`$D32F`, and Sonic's position (`IX+2/3` and `IX+5/6`, each `×8`, the Y minus 1) is stored
+there. So the earlier "checkpoint" intuition was right but mis-numbered: it is `$51`, not
+`$50`. (`$50` is a camera/scroll-lock trigger — it drives `$D2AB`, the camera X.)
 
 `cmd/objprobe` reads each act's spawn and `cmd/levelmap`'s overlays mark it (a 2×4-tile
 box at the original position) — see `rendered/level_<zone>_act<N>_objects.png`.
 
-Still to do: name the remaining `?` types (`$05`/`$0B`/`$12`/`$17`) and the passive
-`$50`/`$51` class; Sonic's movement and physics; ring collection and collision; scoring.
+Still to do: name the remaining unidentified handler slots in `$24B2`; Sonic's movement
+and physics; ring collection and collision; scoring.
 
 ---
 

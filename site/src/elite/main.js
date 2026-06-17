@@ -44,8 +44,6 @@ function select(i) {
   buttons[i].scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
 }
 
-document.getElementById('shaded').addEventListener('change', (e) => viewer.setShaded(e.target.checked));
-
 // Open with the Cobra Mk III (the player's ship and the cover star) if present.
 const startIndex = Math.max(0, ships.findIndex((s) => s.type === 11));
 select(startIndex);

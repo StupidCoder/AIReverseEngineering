@@ -1,92 +1,83 @@
-// Elite ship viewer: renders one decoded wireframe blueprint with three.js.
-// Hidden-line removal is done with the depth buffer rather than a per-face
-// normal test: each face is filled into the depth buffer invisibly (no colour),
-// then every edge is drawn on top with a small polygon offset, so the GPU hides
-// any edge lying behind a face. This is exact at every zoom and orientation —
-// no grazing-face popping — and lets the (invisible) hull occlude the background
-// stars, so the ship reads as a solid object in space.
+// Elite ship viewer: renders one decoded wireframe blueprint with three.js and
+// reproduces the game's own hidden-surface removal. The ship sits at the origin
+// and the camera orbits it (OrbitControls), so model space is world space. Each
+// frame we back-face test every face's stored normal against the ship→eye
+// direction — exactly as the C64 game dots each normal with the vector from the
+// ship to the viewer (Elite.md Part IV §1) — and draw an edge only when one of
+// its two adjacent faces is visible. The test uses the eye *direction*, so it is
+// independent of zoom: getting closer never changes which faces face you.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const WHITE = 0xffffff;
+const FACE_NONE = 15; // edge face nibble sentinel: no face this side → always drawn
 
-// ShipMesh builds the geometry for one ship: a depth-only fill mesh (faces) and
-// a white LineSegments (edges), grouped together. Elite's +Y is up, matching
+// ShipMesh holds one ship's geometry and the per-frame visible-edge buffer.
+// Flat typed arrays keep the HSR loop tight; verts/normals stay in model space
+// (the ship never moves — the camera orbits). Elite's +Y is up, matching
 // three.js; X right, Z toward the viewer (the offline montage's handedness).
 class ShipMesh {
   constructor(ship) {
     this.radius = ship.radius || 1;
 
-    const verts = new Float32Array(ship.verts.length * 3);
+    this.verts = new Float32Array(ship.verts.length * 3);
     for (let i = 0; i < ship.verts.length; i++) {
-      verts[i * 3] = ship.verts[i][0];
-      verts[i * 3 + 1] = ship.verts[i][1];
-      verts[i * 3 + 2] = ship.verts[i][2];
+      this.verts[i * 3] = ship.verts[i][0];
+      this.verts[i * 3 + 1] = ship.verts[i][1];
+      this.verts[i * 3 + 2] = ship.verts[i][2];
     }
 
-    // Edges → line segment endpoints.
-    const epos = new Float32Array(ship.edges.length * 6);
-    for (let i = 0; i < ship.edges.length; i++) {
-      const a = ship.edges[i][0] * 3, b = ship.edges[i][1] * 3;
-      epos[i * 6] = verts[a]; epos[i * 6 + 1] = verts[a + 1]; epos[i * 6 + 2] = verts[a + 2];
-      epos[i * 6 + 3] = verts[b]; epos[i * 6 + 4] = verts[b + 1]; epos[i * 6 + 5] = verts[b + 2];
+    this.edges = ship.edges; // [v1, v2, faceA, faceB]
+    this.faceN = new Float32Array(ship.faces.length * 3); // outward normal per face
+    for (let i = 0; i < ship.faces.length; i++) {
+      this.faceN[i * 3] = ship.faces[i][0];
+      this.faceN[i * 3 + 1] = ship.faces[i][1];
+      this.faceN[i * 3 + 2] = ship.faces[i][2];
     }
-    const egeom = new THREE.BufferGeometry();
-    egeom.setAttribute('position', new THREE.BufferAttribute(epos, 3));
-    this.lines = new THREE.LineSegments(egeom, new THREE.LineBasicMaterial({ color: WHITE }));
-    this.lines.frustumCulled = false;
-    this.lines.renderOrder = 1;
+    this.faceVis = new Uint8Array(ship.faces.length);
 
-    // Faces → fill. Non-indexed so each triangle can carry its face's colour
-    // (for the optional shaded view); polygonOffset pushes it back a hair so the
-    // coincident edges win. With colorWrite off it is invisible and only writes
-    // depth — robust hidden-line removal; toggling colorWrite on reveals the
-    // solid shaded faces. Either way it occludes edges and stars behind it.
-    const tcount = ship.tris.length;
-    const fpos = new Float32Array(tcount * 9);
-    const fcol = new Float32Array(tcount * 9);
-    const c = new THREE.Color();
-    for (let t = 0; t < tcount; t++) {
-      // a distinct, muted colour per face so the white wireframe stays readable
-      c.setHSL((((ship.triFace[t] * 0.137) % 1) + 1) % 1, 0.55, 0.42);
-      for (let k = 0; k < 3; k++) {
-        const v = ship.tris[t][k] * 3;
-        const o = t * 9 + k * 3;
-        fpos[o] = verts[v]; fpos[o + 1] = verts[v + 1]; fpos[o + 2] = verts[v + 2];
-        fcol[o] = c.r; fcol[o + 1] = c.g; fcol[o + 2] = c.b;
-      }
-    }
-    const fgeom = new THREE.BufferGeometry();
-    fgeom.setAttribute('position', new THREE.BufferAttribute(fpos, 3));
-    fgeom.setAttribute('color', new THREE.BufferAttribute(fcol, 3));
-    const fmat = new THREE.MeshBasicMaterial({
-      vertexColors: true,
-      colorWrite: false,
-      side: THREE.DoubleSide,
-      polygonOffset: true,
-      polygonOffsetFactor: 1,
-      polygonOffsetUnits: 1,
-    });
-    this.fill = new THREE.Mesh(fgeom, fmat);
-    this.fill.frustumCulled = false;
-    this.fill.renderOrder = 0;
-
-    this.object = new THREE.Group();
-    this.object.add(this.fill);
-    this.object.add(this.lines);
+    // One LineSegments whose position buffer we refill each frame with only the
+    // currently-visible edges; drawRange caps it to what we wrote.
+    const positions = new Float32Array(this.edges.length * 6);
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geom.setDrawRange(0, 0);
+    this.geom = geom;
+    this.positions = positions;
+    this.object = new THREE.LineSegments(geom, new THREE.LineBasicMaterial({ color: WHITE }));
+    this.object.frustumCulled = false;
   }
 
-  // setShaded reveals (or hides) the solid coloured faces. Hidden, the fill is
-  // pure depth (wireframe with hidden lines removed); shown, it is a solid model.
-  setShaded(on) {
-    this.fill.material.colorWrite = on;
+  // updateForCamera rebuilds the visible-edge list for a camera at camPos
+  // (THREE.Vector3). A face is visible when its outward normal points toward the
+  // eye: dot(normal, camPos) > 0, with the ship centred at the origin so camPos
+  // is the ship→eye direction. This is the game's single ship→viewer back-face
+  // test; its sign depends only on direction, so zoom does not change it.
+  updateForCamera(camPos) {
+    const { verts, faceN, faceVis, edges } = this;
+    for (let i = 0; i < faceVis.length; i++) {
+      const dot = faceN[i * 3] * camPos.x
+        + faceN[i * 3 + 1] * camPos.y
+        + faceN[i * 3 + 2] * camPos.z;
+      faceVis[i] = dot > 0 ? 1 : 0;
+    }
+    const pos = this.positions;
+    let n = 0;
+    for (const e of edges) {
+      const fa = e[2], fb = e[3];
+      const vis = fa === FACE_NONE || fb === FACE_NONE || faceVis[fa] || faceVis[fb];
+      if (!vis) continue;
+      const a = e[0] * 3, b = e[1] * 3;
+      pos[n++] = verts[a]; pos[n++] = verts[a + 1]; pos[n++] = verts[a + 2];
+      pos[n++] = verts[b]; pos[n++] = verts[b + 1]; pos[n++] = verts[b + 2];
+    }
+    this.geom.setDrawRange(0, n / 3);
+    this.geom.attributes.position.needsUpdate = true;
   }
 
   dispose() {
-    this.lines.geometry.dispose();
-    this.lines.material.dispose();
-    this.fill.geometry.dispose();
-    this.fill.material.dispose();
+    this.geom.dispose();
+    this.object.material.dispose();
   }
 }
 
@@ -106,7 +97,6 @@ function fitDistance(radius, fovDeg) {
 function makeStarfield(count, radius) {
   const pos = new Float32Array(count * 3);
   for (let i = 0; i < count; i++) {
-    // uniform on the sphere
     const u = Math.random() * 2 - 1;
     const t = Math.random() * Math.PI * 2;
     const r = Math.sqrt(1 - u * u);
@@ -119,9 +109,6 @@ function makeStarfield(count, radius) {
   const mat = new THREE.PointsMaterial({ color: 0xdfe6f2, size: 2, sizeAttenuation: false });
   const pts = new THREE.Points(geom, mat);
   pts.frustumCulled = false;
-  // Draw after the ship's depth fill (renderOrder 0) and edges (1) so the hull
-  // occludes any star behind it.
-  pts.renderOrder = 2;
   return pts;
 }
 
@@ -131,14 +118,6 @@ export class ShipViewer {
     this.hud = hud;
     this.ships = [];
     this.current = null;
-    this.shaded = false;
-  }
-
-  // setShaded toggles the solid coloured-face view (off = wireframe with hidden
-  // lines removed). Remembered so it persists when you switch ships.
-  setShaded(on) {
-    this.shaded = on;
-    if (this.current) this.current.setShaded(on);
   }
 
   async init() {
@@ -154,8 +133,7 @@ export class ShipViewer {
     this.scene.background = new THREE.Color(0x000000);
     this.camera = new THREE.PerspectiveCamera(fov, 1, 0.1, 200000);
 
-    // Stars on a sphere well beyond any ship (radius < far plane). Constant
-    // pixel size, so they stay a calm backdrop at every zoom.
+    // Stars on a sphere well beyond any ship; a calm vector-graphics backdrop.
     this.scene.add(makeStarfield(500, 60000));
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -174,6 +152,7 @@ export class ShipViewer {
 
     const tick = () => {
       this.controls.update();
+      if (this.current) this.current.updateForCamera(this.camera.position);
       this.renderer.render(this.scene, this.camera);
       requestAnimationFrame(tick);
     };
@@ -197,7 +176,6 @@ export class ShipViewer {
       this.current.dispose();
     }
     const mesh = new ShipMesh(ship);
-    mesh.setShaded(this.shaded);
     this.scene.add(mesh.object);
     this.current = mesh;
     this.currentIndex = index;
@@ -212,13 +190,13 @@ export class ShipViewer {
 
     if (this.hud) {
       this.hud.textContent =
-        `${ship.name}  ·  type ${ship.type}  ·  ${ship.verts.length} verts  ${ship.edges.length} edges  ${ship.faces} faces`;
+        `${ship.name}  ·  type ${ship.type}  ·  ${ship.verts.length} verts  ${ship.edges.length} edges  ${ship.faces.length} faces`;
     }
   }
 
   // renderThumbnail draws one ship at the shared 3/4 view into a 2D canvas,
   // using a single throwaway WebGL renderer for every thumbnail (so the page
-  // never holds more than two GL contexts).
+  // never holds more than two GL contexts). HSR is applied for that fixed eye.
   renderThumbnail(index, canvas2d, size) {
     if (!this._thumbRenderer) {
       this._thumbRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
@@ -232,6 +210,7 @@ export class ShipViewer {
     const dist = fitDistance(mesh.radius, this._thumbCam.fov);
     this._thumbCam.position.copy(VIEW_DIR).multiplyScalar(dist);
     this._thumbCam.lookAt(0, 0, 0);
+    mesh.updateForCamera(this._thumbCam.position);
     this._thumbScene.add(mesh.object);
     this._thumbRenderer.render(this._thumbScene, this._thumbCam);
     canvas2d.getContext('2d').drawImage(this._thumbRenderer.domElement, 0, 0, size, size);

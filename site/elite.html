@@ -26,19 +26,14 @@
       <div id="hud" class="hud"></div>
     </div>
     <div class="ship-strip" id="ships" title="scroll horizontally"></div>
-    <div class="controls">
-      <label><input type="checkbox" id="shaded" /> Shaded faces</label>
-      <span class="hint">drag to rotate · scroll or pinch to zoom</span>
-    </div>
     <p class="legend">
       Each model is a real wireframe blueprint decoded from the game's engine block — the
       same vertex, edge and face tables the C64 draws from. <b>Drag</b> to rotate, <b>scroll or
-      pinch</b> to zoom; the ship spins on its own until you grab it. Hidden lines are removed
-      by filling each face into the depth buffer (invisibly) and drawing the edges on top, so
-      the GPU hides whatever lies behind the hull — which also lets the ship occlude the
-      background stars and read as a solid object. Each face is reconstructed from the
-      blueprint as the convex outline of its vertices; tick <b>Shaded faces</b> to colour them
-      in and see those surfaces. The thumbnails below are rendered from the
+      pinch</b> to zoom; the ship spins on its own until you grab it. The hidden-surface removal
+      is Elite's own: every frame each face's stored normal is dotted with the direction from the
+      ship to your eye, and an edge is drawn only when one of the two faces beside it points
+      toward you — the same back-face test the 6502 game runs. It depends only on the viewing
+      angle, so zooming never changes which faces show. The thumbnails below are rendered from the
       same geometry — click one to load it. Ship <em>names</em> come from the documented C64
       blueprint table; they live only in the manual, never in the program — the game knows a
       Cobra by its geometry, not by a name. See the

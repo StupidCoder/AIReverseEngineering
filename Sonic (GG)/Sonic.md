@@ -1582,7 +1582,10 @@ each frame; when it runs out the decoder reads the next bytes:
   The **noise channel's "notes" are voice commands**: each `$70`/`$71` is a drum hit (a noise
   mode + a short percussive envelope), which is the zone's percussion.
 - **`$80`–`$FF` — a command** (no time of its own), dispatched through `$4529`:
-  `$80` set tempo (note-length multiplier + per-frame tick), `$81` volume, `$82` instrument
+  `$80` set tempo — a note-length multiplier (the duration counter is `durByte × multiplier`,
+  decremented by a per-frame tick) written **both per-channel and to a global**; only the
+  control channel carries `$80`, so the other channels inherit the global multiplier (getting
+  this wrong runs the non-control voices several times too fast). `$81` volume, `$82` instrument
   envelope (6 bytes, inline), `$83` vibrato (5 bytes), `$84` detune, `$85` skip,
   **`$86`/`$87` repeat a block** (`$86` pushes a counter, `$87 <n> <addr>` loops back to
   `addr+base` *n* times — a nested loop stack), **`$88` mark loop point** (saves the pointer

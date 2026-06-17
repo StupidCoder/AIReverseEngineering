@@ -88,7 +88,8 @@ type channel struct {
 	vibStep      int     // IX+28/29: signed per-step increment (vib[3] | vib[4]<<8)
 }
 
-var tick int // global per-frame counter decrement ($DC0A), set by $80
+var tick int   // global per-frame counter decrement ($DC0A), set by $80
+var gTempo int // global note-length multiplier ($DC08); used by channels with no own $80
 
 // decode advances the channel past zero-time commands until it sets a new note/rest duration.
 func (c *channel) decode() {
@@ -138,6 +139,9 @@ func (c *channel) startNote(d int, rest bool) {
 		d = c.defDur
 	}
 	t := c.tempo
+	if t == 0 { // no per-channel $80: use the global tempo set by the control channel
+		t = gTempo
+	}
 	c.dur += d * t
 	c.silent = rest
 	if !c.tie {
@@ -162,6 +166,7 @@ func (c *channel) command(b int) bool {
 	switch b {
 	case 0x80: // tempo: word (mult) + tick + 1
 		c.tempo = int(rb(c.pos)) | int(rb(c.pos+1))<<8
+		gTempo = c.tempo // $80 also sets the global ($DC08) used by channels without their own
 		tick = int(rb(c.pos + 2))
 		c.pos += 4
 	case 0x81:
@@ -346,7 +351,7 @@ func newChannels(base int) []*channel {
 	chs := make([]*channel, 4)
 	for i := 0; i < 4; i++ {
 		off := w(base + i*2)
-		c := &channel{pos: base + off, base: base, active: true, tempo: 1, defDur: 1, vol: 15, noise: i == 3}
+		c := &channel{pos: base + off, base: base, active: true, tempo: 0, defDur: 1, vol: 15, noise: i == 3}
 		c.dur = 0
 		c.decode() // prime the first event
 		chs[i] = c
@@ -393,7 +398,7 @@ func main() {
 // period). Returns 0 if the channel never loops (it ends, or uses an unhandled command).
 func loopLength(base, ci int) int {
 	off := w(base + ci*2)
-	c := &channel{pos: base + off, base: base, active: true, tempo: 1, defDur: 1, vol: 15, noise: ci == 3}
+	c := &channel{pos: base + off, base: base, active: true, tempo: 0, defDur: 1, vol: 15, noise: ci == 3}
 	c.decode()
 	first := -1
 	for f := 0; f < 90*fps; f++ {
@@ -418,6 +423,7 @@ func render(base int) ([]int16, int) {
 	// the simulation: each channel's pointer stream is periodic with that channel's loop, and
 	// the musical loop is the longest channel's period (the melody). No oracle, no scraping.
 	tick = 1
+	gTempo = 1
 	chs := newChannels(base)
 	const maxF = 90 * fps
 	pos := make([][4]int, 0, maxF)
@@ -575,6 +581,7 @@ func verifyTrack(name string) {
 		}
 	}
 	tick = 1
+	gTempo = 1
 	chs := newChannels(base)
 	// Dump ch0's period per frame, for frame-aligned comparison against the oracle's PSG reg0
 	// (extract/cmd/soundprobe captures the same): the synthesis code is shared, so any

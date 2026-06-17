@@ -61,7 +61,8 @@ type channel struct {
 	dur     int  // duration counter (counts down by tick/frame)
 	tempo   int  // note-length multiplier ($80; 0 -> global)
 	defDur  int  // default duration ($8A)
-	period  int  // base period from the note (freqtable >> octave)
+	baseFreq int // freqtable[note] for the current note (NOT yet octave-shifted)
+	octave   int // high nibble of the note byte; period = (baseFreq+detune+vib) >> octave
 	detune  int  // $84
 	vol     int  // base volume 0-15 ($81/$8B/$8C)
 	silent  bool // rest / ended
@@ -77,13 +78,14 @@ type channel struct {
 	env       [6]byte // $82 ADSR params: attack, decay, sustain, decay2, sustain2, release
 	envLevel  int     // 0-255
 	envPhase  int     // 0 attack,1 decay,2 decay2,3 release
-	vib       [5]byte // $83 vibrato params
-	vibVal    int     // current vibrato offset (signed)
-	vibAccum  int
-	vibDelay  int
-	vibSpeed  int
-	vibDepth  int
-	vibStep   int
+	vib          [5]byte // $83 vibrato params: delay, speed, depth, step-lo, step-hi
+	vibVal       int     // IX+10/11: running vibrato offset (signed), added to the period
+	vibDelay     int     // IX+25: frames before vibrato starts
+	vibSpeedCtr  int     // IX+26: counts down to the next vibrato step
+	vibSpeed     int     // reload for the speed counter (vib[1])
+	vibDepthCtr  int     // IX+27: steps left before the step direction flips
+	vibDepthFull int     // reload for the depth counter (vib[2])
+	vibStep      int     // IX+28/29: signed per-step increment (vib[3] | vib[4]<<8)
 }
 
 var tick int // global per-frame counter decrement ($DC0A), set by $80
@@ -127,8 +129,8 @@ func (c *channel) decode() {
 }
 
 func (c *channel) octaveNote(b int) {
-	oct := b >> 4
-	c.period = freq(b&0x0F) >> oct
+	c.octave = b >> 4
+	c.baseFreq = freq(b & 0x0F)
 }
 
 func (c *channel) startNote(d int, rest bool) {
@@ -141,13 +143,15 @@ func (c *channel) startNote(d int, rest bool) {
 	if !c.tie {
 		c.envLevel = 0
 		c.envPhase = 0
-		// load working vibrato from params
+		// Note init ($436E): reset the vibrato to its params. The depth counter starts at
+		// half ($437D SRL), but reloads to the full value each flip; vibVal starts at 0.
 		c.vibDelay = int(c.vib[0])
+		c.vibSpeedCtr = int(c.vib[1])
 		c.vibSpeed = int(c.vib[1])
-		c.vibDepth = int(c.vib[2]) >> 1
-		c.vibVal = int(int8(c.vib[3]))
-		c.vibStep = int(int8(c.vib[4]))
-		c.vibAccum = 0
+		c.vibDepthCtr = int(c.vib[2]) >> 1
+		c.vibDepthFull = int(c.vib[2])
+		c.vibStep = int(int16(uint16(c.vib[3]) | uint16(c.vib[4])<<8))
+		c.vibVal = 0
 	}
 	c.tie = false
 }
@@ -266,22 +270,28 @@ func (c *channel) envStep() {
 	}
 }
 
-// vibStepFrame advances the triangle vibrato one frame and returns the pitch offset.
+// vibStepFrame advances the triangle vibrato one frame and returns the pitch offset, exactly
+// as the driver does ($4412-$4459): wait out the delay; step only when the speed counter
+// hits 0; each step decrements the depth counter and adds the step to the running offset —
+// except when the depth counter reaches 0, where it reloads (full depth), flips the step
+// direction, and SKIPS the add that frame (so the triangle stays symmetric, not drifting).
 func (c *channel) vibStepFrame() int {
 	if c.vibDelay > 0 {
 		c.vibDelay--
-		return 0
+		return c.vibVal
 	}
-	c.vibAccum--
-	if c.vibAccum <= 0 {
-		c.vibAccum = c.vibSpeed
-		c.vibDepth--
-		if c.vibDepth <= 0 {
-			c.vibDepth = int(c.vib[2]) >> 1
-			c.vibStep = -c.vibStep
-		}
-		c.vibVal += c.vibStep
+	c.vibSpeedCtr--
+	if c.vibSpeedCtr != 0 {
+		return c.vibVal
 	}
+	c.vibSpeedCtr = c.vibSpeed
+	c.vibDepthCtr--
+	if c.vibDepthCtr == 0 {
+		c.vibDepthCtr = c.vibDepthFull
+		c.vibStep = -c.vibStep
+		return c.vibVal
+	}
+	c.vibVal += c.vibStep
 	return c.vibVal
 }
 
@@ -291,12 +301,14 @@ func (c *channel) tickFrame() (int, float64, bool) {
 		return 0, 0, c.noise
 	}
 	c.dur -= tick
-	for c.dur <= 0 && c.active && !c.end {
+	if c.dur <= 0 && c.active && !c.end { // the driver decodes one note per frame, not a loop
 		c.decode()
 	}
 	c.envStep()
 	vib := c.vibStepFrame()
-	per := c.period + c.detune + vib
+	// The driver adds detune + vibrato to the un-shifted period, THEN applies the octave
+	// shift ($445A then $4468) — so the vibrato depth is divided by 2^octave too.
+	per := (c.baseFreq + c.detune + vib) >> c.octave
 	if per < 1 {
 		per = 1
 	}
@@ -564,13 +576,18 @@ func verifyTrack(name string) {
 	}
 	tick = 1
 	chs := newChannels(base)
-	fmt.Printf("%s base $%04X — first 16 frames (period per tone channel):\n", name, base)
-	for f := 0; f < 16; f++ {
-		var per [4]int
+	// Dump ch0's period per frame, for frame-aligned comparison against the oracle's PSG reg0
+	// (extract/cmd/soundprobe captures the same): the synthesis code is shared, so any
+	// difference is in the notes. A 169-frame exact run confirms notes + vibrato match.
+	for f := 0; f < 1800; f++ {
+		var p0 int
 		for i, c := range chs {
-			per[i], _, _ = c.tickFrame()
+			p, _, _ := c.tickFrame()
+			if i == 0 {
+				p0 = p
+			}
 		}
-		fmt.Printf("  f%02d: ch0=%4d ch1=%4d ch2=%4d noise=%d\n", f, per[0], per[1], per[2], per[3])
+		fmt.Println(p0)
 	}
 }
 

@@ -1591,10 +1591,14 @@ each frame; when it runs out the decoder reads the next bytes:
   to the `$88` mark). The loop is therefore **in the data** — `$88` … `$FF` bracket the
   repeating section.
 
-Per frame the render (`$43DE`) forms the period as `freqtable>>octave + detune + vibrato`
-(`$83` drives a triangle-LFO vibrato after a delay), and an **ADSR envelope** (the `$82`
-params: attack, decay, sustain, decay2, sustain2, release) scales the volume; the result is
-written to the PSG as `period` (two writes) and `15 − volume` attenuation.
+Per frame the render (`$43DE`) forms the period as **`(freqtable[note] + detune + vibrato) >>
+octave`** — note the octave shift is applied *after* adding the vibrato (`$445A` then
+`$4468`), so the vibrato depth is divided down with the pitch. `$83`'s vibrato is a triangle
+LFO that, after a start delay, steps the offset up/down: at each direction flip it reloads the
+full depth and **skips the step that frame** (keeping the triangle symmetric — getting this
+wrong makes held notes drift out of tune). An **ADSR envelope** (the `$82` params: attack,
+decay, sustain, decay2, sustain2, release) scales the volume; the result is written to the PSG
+as the period (two writes) and `15 − volume` attenuation.
 
 ## Synthesising from the ROM
 

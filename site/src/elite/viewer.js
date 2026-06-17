@@ -28,14 +28,12 @@ class ShipMesh {
     }
 
     this.edges = ship.edges; // [v1, v2, faceA, faceB]
-    this.faceN = new Float32Array(ship.faces.length * 3);
-    this.faceV = new Int32Array(ship.faces.length); // representative vertex per face
+    this.faceN = new Float32Array(ship.faces.length * 3); // outward normal per face
     for (let i = 0; i < ship.faces.length; i++) {
       const f = ship.faces[i];
       this.faceN[i * 3] = f[0];
       this.faceN[i * 3 + 1] = f[1];
       this.faceN[i * 3 + 2] = f[2];
-      this.faceV[i] = f[3];
     }
     this.faceVis = new Uint8Array(ship.faces.length);
 
@@ -51,17 +49,20 @@ class ShipMesh {
     this.object.frustumCulled = false;
   }
 
-  // updateForCamera rebuilds the visible-edge list for an eye at camPos
-  // (THREE.Vector3, model space). Returns the number of edges drawn.
+  // updateForCamera rebuilds the visible-edge list for an eye looking from
+  // camPos (THREE.Vector3) toward the model centre at the origin. A face is
+  // visible when its outward normal points toward the eye. We test the normal
+  // against the eye *direction* (camPos, the model is centred on the orbit
+  // target) rather than the eye *position*: for a distant eye the two agree —
+  // the regime the game itself draws in — but the direction test is independent
+  // of zoom, so a grazing face stays visible as you dolly in instead of popping
+  // out when the eye crosses its plane. Returns the number of edges drawn.
   updateForCamera(camPos) {
-    const { verts, faceN, faceV, faceVis } = this;
+    const { verts, faceN, faceVis } = this;
     for (let i = 0; i < faceVis.length; i++) {
-      let px = 0, py = 0, pz = 0;
-      const pv = faceV[i];
-      if (pv >= 0) { px = verts[pv * 3]; py = verts[pv * 3 + 1]; pz = verts[pv * 3 + 2]; }
-      const dot = faceN[i * 3] * (camPos.x - px)
-        + faceN[i * 3 + 1] * (camPos.y - py)
-        + faceN[i * 3 + 2] * (camPos.z - pz);
+      const dot = faceN[i * 3] * camPos.x
+        + faceN[i * 3 + 1] * camPos.y
+        + faceN[i * 3 + 2] * camPos.z;
       faceVis[i] = dot > 0 ? 1 : 0;
     }
     const pos = this.positions;
@@ -118,6 +119,7 @@ export class ShipViewer {
     this.controls.dampingFactor = 0.08;
     this.controls.enablePan = false;
     this.controls.rotateSpeed = 0.9;
+    this.controls.zoomSpeed = 4.0;
     this.controls.autoRotate = true;
     this.controls.autoRotateSpeed = 1.1;
     // Once the user grabs the ship, stop the idle spin for good.

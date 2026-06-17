@@ -69,14 +69,16 @@ main { max-width: 1100px; margin: 0 auto; padding: 24px 20px; }
 .viewport-3d canvas { image-rendering: auto; }
 
 .ship-strip {
+  /* exactly the viewport's width, centered under it; scrolls horizontally */
+  width: min(100%, calc(64vh * 16 / 10)); margin: 12px auto 0;
   display: flex; gap: 10px; align-items: flex-start;
-  margin-top: 12px; padding: 10px;
-  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px;
+  background: #000; border: 1px solid var(--line); border-radius: 8px;
   overflow-x: auto; overflow-y: hidden;
   scrollbar-width: thin; scrollbar-color: var(--line) transparent;
 }
 .thumb {
-  flex: 0 0 auto; width: 92px;
+  flex: 0 0 auto; width: 88px;
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   padding: 6px 4px; cursor: pointer;
   background: #000; color: var(--muted);
@@ -87,6 +89,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 24px 20px; }
 .thumb.active { border-color: var(--accent); color: var(--fg); }
 .thumb canvas { width: 80px; height: 80px; display: block; }
 .thumb-label {
+  width: 100%;
   font-size: 11px; line-height: 1.2; text-align: center;
-  max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  overflow-wrap: anywhere; white-space: normal;
 }

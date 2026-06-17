@@ -258,3 +258,12 @@
 96FA  obj_special_20  (bank2) type $20 = a special-stage sprite object, ROLE UNIDENTIFIED. Drawn as a hardware SPRITE via the per-frame allocator $D2DF (reset $154D, +6/sprite, cap $24, emit $2F5D); drifts horizontally (IX+7 +/-$20), culled off-screen ($9814-$9860 -> (IX+0)=$FF); on contact ($3328) zeroes Sonic's fall velocity $D407/$D409. NOT in any per-act object table. (Earlier guesses "ring" then "bouncy platform" both retracted - not confirmed.)
 9AD0  obj_bumper  (bank2) type $21 = special-stage BUMPER (placed 3-6/round; earlier mislabelled "ring"). Oscillates horizontally (phase IX+18 0-$C0) around its anchor; on contact (box $0602) REVERSES Sonic's velocity ($D2E7/$D2E9 = his negated velocity, written back to $D407) and plays the bounce sound (RST $28 idx $07). A spring, not a collectible.
 6061  obj_continue  (bank1) type $52 = special-stage CONTINUE POWERUP (from in-game observation). Contact ($3328 box $0003, refined $60CC) sets flag (IY+9) bit3 and runs the collect path $5E01. (Special-stage RINGS are NOT objects: they are baked into the block map as $79-$7B = tiles 252-255, filled by the runtime ring animation, same as every zone.)
+
+# --- SOUND DRIVER + MUSIC FORMAT (Part VI) ---
+46EB  sound_play  (bank3) RST $18 handler: sound id in A indexes the song-pointer table $4716 (word/id), then CALL $4018 to load the song. (RST $18 gateway $0018->$02E2 pages bank3 into slot1.)
+4716  song_table  (bank3) sound-id -> song pointer (word each). A song = 5 relative channel-data pointers.
+4018  song_load  (bank3) relocate a song's 5 channel pointers (add the song base BC) into RAM $DC1C-$DC25 = the 5 live channel data pointers (3 square + noise + control).
+423E  music_seq  (bank3) per-frame sequencer: for each channel load its $DC1C.. pointer, run note decoder $42F4, store the advanced pointer back. Per-channel work areas $DC53/$DC80/$DCAD/$DCDA; timing $DC0A/$DC0E.
+42F4  music_note  (bank3) channel note/command decoder reading one data byte: <$70 = NOTE (low nibble -> period table $44D5, high nibble = duration); $71-$7E = voice/instrument (low nibble -> 8-byte param table $43CE); $7F = rest; >=$80 = command ($44F3).
+44F3  music_cmd  (bank3) command dispatch (bytes >=$80, table $4529). $FF = LOOP (reload channel data pointer from the loop-start kept in IX+34/35); $FE = end/silence channel. The $FF loop is what makes each channel repeat -> the song loop = the longest channel's loop period.
+44D5  music_freqtable  (bank3) note index -> 10-bit SN76489 tone period (2 bytes/entry).

@@ -1553,8 +1553,8 @@ Game Gear; the music is square waves.) Each tone channel has a 10-bit period (pi
 4-bit attenuation (volume); the noise channel has a 3-bit control. The music driver
 reprograms these registers **once per video frame** to play the melody.
 
-Rather than reverse the driver and the music-data format, the music is captured the same
-oracle way as the sprites: the `gamegear` machine now models the PSG register state
+The **waveform** is captured the same oracle way as the sprites (the driver/data are traced
+just below, for the loop points): the `gamegear` machine now models the PSG register state
 (`psg.go`, fed by `Out` port `$7F`), so booting an act runs the **real driver** and writes
 the real notes. **`extract/cmd/soundprobe`** snapshots the four channels each frame and
 synthesises the waveform — phase-continuous square oscillators for the tones, a 16-bit LFSR
@@ -1564,10 +1564,45 @@ zone and pipes the PCM through `ffmpeg` (`libmp3lame`) to a small MP3.
 
 Acts within a zone share the zone theme, so one track per zone (+ the special stage) is
 baked to `site/public/sonic/music/`, and the level viewer's **Music** checkbox plays the
-current act's track (looping), switching it when you change zones. *Open ends:* the clip is
-a fixed 30 s looped in the browser (no seamless loop-point detection yet), the boss acts are
-assumed to reuse the zone theme (not verified per-act), and the LFSR noise + volume curve
-are approximate — all refinements for a later pass.
+current act's track (looping), switching it when you change zones.
+
+## The sound driver and music format
+
+The synthesis is captured from the oracle, but the **driver and the data were traced** to
+get correct loops. A sound is started by **`RST $18`** with a sound id in `A`; the gateway
+pages **bank 3** into slot 1 and jumps to the handler at **`$46EB`**, which indexes a
+**song-pointer table at `$4716`** (one word per id) and calls the loader **`$4018`**. A song
+is **five relative channel pointers**; the loader relocates them (adding the song's base
+address) into RAM at **`$DC1C`–`$DC25`** — the five live channel data pointers (the three
+square channels, the noise channel, and a control track).
+
+The **per-frame sequencer** is **`$423E`** (bank 3): for each channel it loads the data
+pointer, runs the note decoder **`$42F4`**, and stores the advanced pointer back. The decoder
+reads one byte of channel data and branches on its value:
+
+- **`< $70` — a note.** The low nibble selects a 10-bit PSG period from a frequency table at
+  **`$44D5`**; the high nibble is the duration. (A separate voice command sets the octave/
+  envelope.)
+- **`$71`–`$7E` — a voice/instrument change.** The low nibble indexes an 8-byte parameter
+  table at **`$43CE`** (envelope + transpose), copied into the channel's work area.
+- **`$7F` — a rest** (key off).
+- **`≥ $80` — a command** (`$44F3`), dispatched through a table at `$4529`. Two are the keys
+  to looping: **`$FF` = loop** — it reloads the channel's data pointer from the **loop-start
+  address kept in the channel work area (`IX+34/35`)**, set earlier by a "mark loop point"
+  command; and **`$FE` = end** (silence the channel).
+
+So each channel carries its **own loop point**, and the loop lengths can differ (a fast
+arpeggio repeating several times per melody phrase). That is exactly why a recording loops
+correctly only at the **melody channel's** period: `extract/cmd/musicbake` watches the five
+channel pointers (`$DC1C`–`$DC25`) in the oracle, finds each channel's repeat period, and
+trims the clip to the **longest** one — the musical loop — with a short cross-fade at the
+seam (the loop length is exact, but the synth's square phase isn't, so a hard wrap would
+click). The detected loops: Green Hills 38.4 s, Bridge 25.6 s, Jungle/Labyrinth 28.8 s,
+Scrap Brain/Sky Base 51.2 s, special stage 17.0 s.
+
+*Open ends:* the synthesis is still rendered from the captured PSG registers (not re-derived
+from the note data — though the loop point now is), the boss acts are assumed to reuse the
+zone theme, and the LFSR-noise + volume curve are approximate.
 
 ---
 

@@ -1,0 +1,329 @@
+// webexport serializes the decoded Sonic levels for the static web viewer (see
+// site/PLAN.md). Everything is reconstructed from the cartridge by the same decode
+// path as cmd/levelmap, then written as small block-indexed JSON plus a per-(tileset,
+// palette) tile-atlas PNG:
+//
+//   meta.json            zone names, the 18-act index, animation cadence
+//   shapes.json          the 48 collision height profiles ($3E7A) + angles ($3978)
+//   atlas_<k>.png        256 tiles (8x8) at a zone palette, 16 wide; reused across acts
+//   act<NN>.json         per act: block map, block->tile table, block->collision shape,
+//                        palette, spawn, objects, atlas reference
+//
+// The client expands blocks -> tiles into a tilemap. Output defaults to
+// site/public/sonic (relative to the repo root).
+//
+// Usage: webexport <rom.gg> [outdir]
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"image"
+	"image/color"
+	"image/png"
+	"os"
+	"path/filepath"
+
+	"sonicgg/extract/decomp"
+
+	"stupidcoder.com/tools/gamegear"
+)
+
+const (
+	descTable = 0x15600 // bank 5 $5600: 18 word-pointers -> per-act descriptors
+	blockBase = 0x10000 // block tile tables: file $10000 + descriptor word
+	tileBase  = 0x30000 // compressed tile sets: file $30000 + descriptor word
+	palTable  = 0x23400 // bank 8 $7400: per-index palette offset table
+	objTable  = 0x15600 // object tables: $15600 + descriptor word +30
+	attrPtrs  = 0x343D   // per-zone block-attribute table pointers (bit7 priority, bits0-5 shape)
+	shapeTbl  = 0x3E7A   // floor height-profile pointer table (shape*2 -> 32-byte profile)
+	angleTbl  = 0x3978   // per-shape surface angle (signed)
+	numShapes = 48       // collision shapes $00-$2F (the table ends where profile data begins)
+)
+
+var zoneNames = []string{"Green Hills", "Bridge", "Jungle", "Labyrinth", "Scrap Brain", "Sky Base"}
+
+// objNames maps the object type bytes we have identified (Part V §1) to display names.
+var objNames = map[byte]string{
+	0x00: "Sonic", 0x01: "bonus", 0x02: "bonus", 0x03: "bonus", 0x04: "shield",
+	0x06: "emerald", 0x07: "goal", 0x08: "crab", 0x09: "swing platform",
+	0x0E: "bird", 0x0F: "moving platform", 0x10: "beetle", 0x12: "world 1 boss",
+	0x25: "capsule", 0x26: "fish", 0x2C: "world 3 boss", 0x2D: "porcupine",
+	0x48: "world 2 boss", 0x49: "world 4 boss", 0x4E: "seesaw",
+	0x50: "scroll lock", 0x51: "checkpoint",
+}
+
+type Act struct {
+	num      int
+	zone     int
+	name     string
+	mapFile  int
+	mapLen   int
+	widthBlk int
+	stride   int
+	blkTable int
+	tileFile int
+	bgPal    int
+}
+
+func w(rom []byte, o int) int { return int(rom[o]) | int(rom[o+1])<<8 }
+
+func parseActs(rom []byte) []Act {
+	var acts []Act
+	for i := 0; i < 18; i++ {
+		d := descTable + w(rom, descTable+i*2)
+		acts = append(acts, Act{
+			num: i, zone: i / 3,
+			name:     fmt.Sprintf("%s Act %d", zoneNames[i/3], i%3+1),
+			mapFile:  0x14000 + w(rom, d+15),
+			mapLen:   w(rom, d+17),
+			widthBlk: w(rom, d+7) / 32,
+			stride:   w(rom, d+1),
+			blkTable: blockBase + w(rom, d+19),
+			tileFile: tileBase + w(rom, d+21),
+			bgPal:    int(rom[d+29]),
+		})
+	}
+	return acts
+}
+
+func romPalette(rom []byte, idx int) color.Palette {
+	off := w(rom, palTable+idx*2)
+	return gamegear.Palette(rom[palTable+off : palTable+off+32])
+}
+
+// objectTable reads a level's [type, blockX, blockY] placements straight from ROM.
+type Obj struct {
+	Type byte   `json:"type"`
+	Bx   int    `json:"bx"`
+	By   int    `json:"by"`
+	Name string `json:"name"`
+}
+
+func objectTable(rom []byte, act int) []Obj {
+	d := descTable + w(rom, descTable+act*2)
+	t := objTable + w(rom, d+30)
+	count := int(rom[t])
+	objs := make([]Obj, 0, count)
+	for i := 0; i < count; i++ {
+		p := t + 1 + i*3
+		typ := rom[p]
+		objs = append(objs, Obj{typ, int(rom[p+1]), int(rom[p+2]), objNames[typ]})
+	}
+	return objs
+}
+
+// blockShapes returns block index -> collision shape (0-47) for a zone, from the $343D
+// per-zone attribute table (low 6 bits of each block's attribute byte). Home-config
+// addresses map 1:1 to file offsets, so the pointer is read directly.
+func blockShapes(rom []byte, zone int) []int {
+	p := w(rom, attrPtrs+zone*2)
+	out := make([]int, 256)
+	for b := 0; b < 256; b++ {
+		out[b] = int(rom[p+b]) & 0x3F
+	}
+	return out
+}
+
+// animFrame is a runtime-animated tile group (see cmd/levelmap).
+type animFrame struct{ vramTile, fileOff, nTiles int }
+
+var ringAnim = animFrame{252, 0x2F73D, 4}
+var zoneAnims = map[int][]animFrame{0: {{12, 0x2FA3D, 4}}}
+
+func applyAnimFrame(rom, tiles []byte, zone int) {
+	apply := func(a animFrame) {
+		n := a.nTiles * 32
+		if a.fileOff+n <= len(rom) && a.vramTile*32+n <= len(tiles) {
+			copy(tiles[a.vramTile*32:], rom[a.fileOff:a.fileOff+n])
+		}
+	}
+	apply(ringAnim)
+	for _, a := range zoneAnims[zone] {
+		apply(a)
+	}
+}
+
+// renderAtlas paints the 256 tiles into a 16-wide RGBA atlas (128x128) at the palette.
+func renderAtlas(tiles []byte, pal color.Palette) *image.RGBA {
+	const cols = 16
+	rows := 256 / cols
+	img := image.NewRGBA(image.Rect(0, 0, cols*8, rows*8))
+	for ti := 0; ti < 256; ti++ {
+		t := gamegear.DecodeTile(tiles[ti*32:])
+		ox, oy := (ti%cols)*8, (ti/cols)*8
+		for y := 0; y < 8; y++ {
+			for x := 0; x < 8; x++ {
+				img.Set(ox+x, oy+y, pal[t[y][x]])
+			}
+		}
+	}
+	return img
+}
+
+// JSON shapes ----------------------------------------------------------------
+
+type Meta struct {
+	Zones []string   `json:"zones"`
+	Acts  []ActIndex `json:"acts"`
+	Anim  AnimMeta   `json:"anim"`
+}
+type ActIndex struct {
+	File  string `json:"file"`
+	Zone  int    `json:"zone"`
+	Name  string `json:"name"`
+	Atlas string `json:"atlas"`
+}
+type AnimMeta struct {
+	FramesPerTick int `json:"framesPerTick"`
+}
+
+type Shapes struct {
+	Count    int     `json:"count"`
+	Profiles [][]int `json:"profiles"` // 48 x 32 signed heights; -128 = no surface
+	Angles   []int   `json:"angles"`   // 48 signed angles
+}
+
+type ActFile struct {
+	Zone         int      `json:"zone"`
+	Act          int      `json:"act"`
+	Name         string   `json:"name"`
+	Atlas        string   `json:"atlas"`
+	TileSize     int      `json:"tileSize"`
+	Stride       int      `json:"stride"`
+	WidthBlocks  int      `json:"widthBlocks"`
+	HeightBlocks int      `json:"heightBlocks"`
+	Palette      []string `json:"palette"`
+	BlockTiles   [][]int  `json:"blockTiles"` // block -> 16 tile indices (4x4)
+	BlockShape   []int    `json:"blockShape"` // block -> collision shape 0-47
+	Blocks       []int    `json:"blocks"`     // block-index map, row-major, len = w*h
+	Spawn        [2]int   `json:"spawn"`      // [bx, by]
+	Objects      []Obj    `json:"objects"`
+}
+
+func main() {
+	if len(os.Args) < 2 {
+		fmt.Fprintln(os.Stderr, "usage: webexport <rom.gg> [outdir]")
+		os.Exit(2)
+	}
+	rom, err := os.ReadFile(os.Args[1])
+	chk(err)
+	outdir := "site/public/sonic"
+	if len(os.Args) > 2 {
+		outdir = os.Args[2]
+	}
+	chk(os.MkdirAll(outdir, 0o755))
+
+	// shapes.json (global)
+	sh := Shapes{Count: numShapes}
+	for s := 0; s < numShapes; s++ {
+		p := w(rom, shapeTbl+s*2)
+		prof := make([]int, 32)
+		for c := 0; c < 32; c++ {
+			prof[c] = int(int8(rom[p+c])) // signed; -128 ($80) = no surface
+		}
+		sh.Profiles = append(sh.Profiles, prof)
+		sh.Angles = append(sh.Angles, int(int8(rom[angleTbl+s])))
+	}
+	writeJSON(filepath.Join(outdir, "shapes.json"), sh)
+
+	acts := parseActs(rom)
+	// Dedup atlases by (tileFile, bgPal): same tiles + palette -> one PNG.
+	atlasName := map[[2]int]string{}
+	meta := Meta{Zones: zoneNames, Anim: AnimMeta{FramesPerTick: 10}}
+
+	const screenBlk = 5
+	for _, a := range acts {
+		tiles := decomp.Decompress(rom, a.tileFile)
+		applyAnimFrame(rom, tiles, a.zone)
+		pal := romPalette(rom, a.bgPal)
+
+		// atlas (deduped)
+		key := [2]int{a.tileFile, a.bgPal}
+		atlas, ok := atlasName[key]
+		if !ok {
+			atlas = fmt.Sprintf("atlas_%d.png", len(atlasName))
+			atlasName[key] = atlas
+			writePNG(filepath.Join(outdir, atlas), renderAtlas(tiles, pal))
+		}
+
+		// map + geometry
+		mp := decomp.LoadMapRLE(rom, a.mapFile, a.mapLen)
+		cols := clampi(a.widthBlk+screenBlk, 1, a.stride)
+		rows := 4096 / a.stride
+		blocks := make([]int, cols*rows)
+		for r := 0; r < rows; r++ {
+			for c := 0; c < cols; c++ {
+				blocks[r*cols+c] = int(mp[r*a.stride+c])
+			}
+		}
+
+		// block tile table (256 blocks x 16 tiles) + collision shapes
+		bt := make([][]int, 256)
+		for b := 0; b < 256; b++ {
+			row := make([]int, 16)
+			for i := 0; i < 16; i++ {
+				row[i] = int(rom[a.blkTable+b*16+i])
+			}
+			bt[b] = row
+		}
+
+		spawn := [2]int{0, 0}
+		objs := objectTable(rom, a.num)
+		if len(objs) > 0 {
+			spawn = [2]int{objs[0].Bx, objs[0].By} // record 0 = Sonic spawn
+		}
+
+		af := ActFile{
+			Zone: a.zone, Act: a.num%3 + 1, Name: a.name, Atlas: atlas,
+			TileSize: 8, Stride: a.stride, WidthBlocks: cols, HeightBlocks: rows,
+			Palette:    paletteHex(pal),
+			BlockTiles: bt, BlockShape: blockShapes(rom, a.zone),
+			Blocks: blocks, Spawn: spawn, Objects: objs,
+		}
+		file := fmt.Sprintf("act%02d.json", a.num+1)
+		writeJSON(filepath.Join(outdir, file), af)
+		meta.Acts = append(meta.Acts, ActIndex{File: file, Zone: a.zone, Name: a.name, Atlas: atlas})
+		fmt.Printf("%-16s %3dx%-3d blocks  atlas %s  %d objects\n", a.name, cols, rows, atlas, len(objs))
+	}
+	writeJSON(filepath.Join(outdir, "meta.json"), meta)
+	fmt.Printf("wrote %d acts, %d atlases, shapes(%d) + meta to %s\n", len(acts), len(atlasName), numShapes, outdir)
+}
+
+func paletteHex(p color.Palette) []string {
+	out := make([]string, len(p))
+	for i, c := range p {
+		r, g, b, _ := c.RGBA()
+		out[i] = fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
+	}
+	return out
+}
+
+func clampi(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+func writeJSON(path string, v any) {
+	b, err := json.Marshal(v)
+	chk(err)
+	chk(os.WriteFile(path, b, 0o644))
+}
+
+func writePNG(path string, img image.Image) {
+	f, err := os.Create(path)
+	chk(err)
+	defer f.Close()
+	chk(png.Encode(f, img))
+}
+
+func chk(e error) {
+	if e != nil {
+		panic(e)
+	}
+}

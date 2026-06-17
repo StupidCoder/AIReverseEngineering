@@ -29,11 +29,13 @@ class ShipMesh {
 
     this.edges = ship.edges; // [v1, v2, faceA, faceB]
     this.faceN = new Float32Array(ship.faces.length * 3); // outward normal per face
+    this.faceV = new Int32Array(ship.faces.length); // a vertex lying on each face
     for (let i = 0; i < ship.faces.length; i++) {
       const f = ship.faces[i];
       this.faceN[i * 3] = f[0];
       this.faceN[i * 3 + 1] = f[1];
       this.faceN[i * 3 + 2] = f[2];
+      this.faceV[i] = f[3];
     }
     this.faceVis = new Uint8Array(ship.faces.length);
 
@@ -49,20 +51,23 @@ class ShipMesh {
     this.object.frustumCulled = false;
   }
 
-  // updateForCamera rebuilds the visible-edge list for an eye looking from
-  // camPos (THREE.Vector3) toward the model centre at the origin. A face is
-  // visible when its outward normal points toward the eye. We test the normal
-  // against the eye *direction* (camPos, the model is centred on the orbit
-  // target) rather than the eye *position*: for a distant eye the two agree —
-  // the regime the game itself draws in — but the direction test is independent
-  // of zoom, so a grazing face stays visible as you dolly in instead of popping
-  // out when the eye crosses its plane. Returns the number of edges drawn.
+  // updateForCamera rebuilds the visible-edge list for an eye at camPos
+  // (THREE.Vector3, model space). A face is visible when the eye lies on the
+  // outward side of its plane — dot(normal, eye - P) > 0 for a point P on the
+  // face — the game's own perspective-correct back-face test (Elite.md Part IV
+  // §1). This is exact and stable as long as the eye stays outside the hull,
+  // which the caller guarantees by clamping the orbit minDistance to the
+  // bounding-sphere radius (the model is wholly inside that sphere).
+  // Returns the number of edges drawn.
   updateForCamera(camPos) {
-    const { verts, faceN, faceVis } = this;
+    const { verts, faceN, faceV, faceVis } = this;
     for (let i = 0; i < faceVis.length; i++) {
-      const dot = faceN[i * 3] * camPos.x
-        + faceN[i * 3 + 1] * camPos.y
-        + faceN[i * 3 + 2] * camPos.z;
+      const pv = faceV[i];
+      let px = 0, py = 0, pz = 0;
+      if (pv >= 0) { px = verts[pv * 3]; py = verts[pv * 3 + 1]; pz = verts[pv * 3 + 2]; }
+      const dot = faceN[i * 3] * (camPos.x - px)
+        + faceN[i * 3 + 1] * (camPos.y - py)
+        + faceN[i * 3 + 2] * (camPos.z - pz);
       faceVis[i] = dot > 0 ? 1 : 0;
     }
     const pos = this.positions;
@@ -161,7 +166,10 @@ export class ShipViewer {
     const dist = fitDistance(mesh.radius, this.camera.fov);
     this.camera.position.copy(VIEW_DIR).multiplyScalar(dist);
     this.controls.target.set(0, 0, 0);
-    this.controls.minDistance = mesh.radius * 0.4;
+    // Keep the eye just outside the model's bounding sphere so it never enters
+    // the hull — the back-face HSR stays exact and faces don't pop (the sphere
+    // already fills the view at this distance, so it's close enough to inspect).
+    this.controls.minDistance = mesh.radius * 1.02;
     this.controls.maxDistance = dist * 3;
     this.controls.autoRotate = true;
     this.controls.update();

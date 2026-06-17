@@ -1248,17 +1248,19 @@ is **hardwired to where it sits**:
 | `(20, 15)` | 26 |
 
 Mapping every placement against that table exposes something the act list hides: **Scrap Brain
-Act 2 is not one level but seven** — scene 13 plus six **sub-scenes 20–25** that never appear
-in the 18-act table and are reachable *only* through teleporters. They are wired into a maze
-with deliberate **loops** — e.g. scene 20's pad `(1,59)` → 24, and scene 24's pad `(124,1)`
-→ 20, so the wrong choice sends you in circles (the infamous Scrap Brain Act 2 maze). Several
-sub-scenes share a map source entered at a different spawn, so they *look* alike — which is the
-whole trick.
+Act 2 is not one level but seven** — scene 13 plus six **sub-scenes (table indices 20–25,
+named here Scrap Brain Act 2a–2f)** that never appear in the 18-act table and are reachable
+*only* through teleporters. They are wired into a maze with deliberate **loops** — e.g. Act 2a's
+pad `(1,59)` → 2e, and Act 2e's pad `(124,1)` → 2a, so the wrong choice sends you in circles
+(the infamous Scrap Brain Act 2 maze). Several sub-scenes share a map source entered at a
+different spawn, so they *look* alike — which is the whole trick.
 
-The other teleporter is in **Sky Base Act 2**: the pad at `(20, 15)` warps to **scene 26**, a
-**7th pseudo-"zone" (`zone = 7`)** — a Scrap-Brain-styled interior (it reuses that tile set)
-holding a **goal sign and a Chaos Emerald** (`$06`). So the route to that emerald is a hidden
-teleporter room, outside the normal act flow entirely.
+The other teleporter is in **Sky Base Act 2**: the pad at `(20, 15)` warps to **scene 26
+(Sky Base Act 2a)**, a **7th pseudo-"zone" (`zone = 7`)** — a Scrap-Brain-styled fortress
+interior (it reuses that tile set) holding a **goal sign and a Chaos Emerald** (`$06`). So the
+route to that emerald is a hidden teleporter room, outside the normal act flow entirely.
+
+All seven hidden scenes are exported as their own viewable acts (`extract/cmd/webexport`).
 
 ## 2. Movement and collision
 

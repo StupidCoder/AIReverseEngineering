@@ -96,6 +96,25 @@ func parseActs(rom []byte) []Act {
 			spawnY:   int(rom[d+14]) - 1,
 		})
 	}
+	// The teleporter sub-scenes (Part V §1): Scrap Brain Act 2's hidden maze rooms (scene
+	// table 20-25) and Sky Base Act 2's hidden room (26, a zone-7 interior). They use the same
+	// descriptor format and are reachable only through type-$13 teleporters. Listed right after
+	// the normal acts (before the special stages) so they group with their parent zones.
+	for _, e := range hiddenScenes {
+		d := descTable + w(rom, descTable+e.idx*2)
+		acts = append(acts, Act{
+			num: e.idx, zone: e.zone, name: e.name,
+			mapFile:  0x14000 + w(rom, d+15),
+			mapLen:   w(rom, d+17),
+			widthBlk: w(rom, d+7) / 32,
+			stride:   w(rom, d+1),
+			blkTable: blockBase + w(rom, d+19),
+			tileFile: tileBase + w(rom, d+21),
+			bgPal:    int(rom[d+29]),
+			spawnX:   int(rom[d+13]),
+			spawnY:   int(rom[d+14]) - 1,
+		})
+	}
 	// Bonus/special stages (zone 6): same descriptor layout, one shared map.
 	for n := 0; n < bonusCount; n++ {
 		i := bonusFirst + n
@@ -115,6 +134,16 @@ func parseActs(rom []byte) []Act {
 		})
 	}
 	return acts
+}
+
+// hiddenScenes are the teleporter-only sub-scenes, named by the act they branch off.
+var hiddenScenes = []struct {
+	idx, zone int
+	name      string
+}{
+	{20, 4, "Scrap Brain Act 2a"}, {21, 4, "Scrap Brain Act 2b"}, {22, 4, "Scrap Brain Act 2c"},
+	{23, 4, "Scrap Brain Act 2d"}, {24, 4, "Scrap Brain Act 2e"}, {25, 4, "Scrap Brain Act 2f"},
+	{26, 7, "Sky Base Act 2a"},
 }
 
 func romPalette(rom []byte, idx int) color.Palette {
@@ -519,10 +548,11 @@ func main() {
 			writePNG(filepath.Join(outdir, atlas), img)
 		}
 
-		// map + geometry
+		// map + geometry. The map window is usually 4096 bytes, but the hidden teleporter
+		// rooms decode to a smaller buffer, so size the height from the actual decoded length.
 		mp := decomp.LoadMapRLE(rom, a.mapFile, a.mapLen)
 		cols := clampi(a.widthBlk+screenBlk, 1, a.stride)
-		rows := 4096 / a.stride
+		rows := len(mp) / a.stride
 		blocks := make([]int, cols*rows)
 		for r := 0; r < rows; r++ {
 			for c := 0; c < cols; c++ {

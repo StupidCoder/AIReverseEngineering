@@ -62,18 +62,79 @@ var shipNames = map[int]string{
 	33: "Dodo space station",
 }
 
-// jsonVec is a 3-component vector serialized as a JSON array.
+// jsonShip is one ship for the three.js viewer. Edges are drawn as white lines;
+// tris fill each face into the depth buffer (invisibly) so the GPU hides the
+// edges behind them — robust hidden-line removal without a per-face normal test.
 type jsonShip struct {
 	Type   int      `json:"type"`
 	Name   string   `json:"name"`
 	Radius float64  `json:"radius"`
+	Faces  int      `json:"faces"` // face count (for the HUD)
 	Verts  [][3]int `json:"verts"`
-	Edges  [][4]int `json:"edges"` // v1, v2, faceA, faceB
-	Faces  [][4]int `json:"faces"` // nx, ny, nz, representative vertex (-1 if none)
+	Edges  [][2]int `json:"edges"` // v1, v2
+	Tris   [][3]int `json:"tris"`  // triangulated faces, vertex indices
 }
 
 type jsonDoc struct {
 	Ships []jsonShip `json:"ships"`
+}
+
+// triangulate rebuilds each face as a fan of triangles over the model's
+// vertices, used only to fill the depth buffer (so winding is irrelevant). A
+// face is a flat convex polygon bounded by its edges (Elite.md Part IV §1); we
+// recover the polygon by walking those edges into a vertex loop, then fan it.
+// Walking the boundary needs no surface normal, which matters for the alloy
+// plate — a single face with a zero normal whose four edges carry only the $F
+// "always-draw" sentinel (so for a single-face model every edge bounds it).
+func triangulate(s *shipmodel.Ship) [][3]int {
+	var tris [][3]int
+	single := len(s.Faces) == 1
+	for f := range s.Faces {
+		// adjacency among the vertices joined by this face's boundary edges
+		adj := map[int][]int{}
+		for _, e := range s.Edges {
+			if single || e.FaceA == f || e.FaceB == f {
+				adj[e.V1] = append(adj[e.V1], e.V2)
+				adj[e.V2] = append(adj[e.V2], e.V1)
+			}
+		}
+		if len(adj) < 3 {
+			continue
+		}
+		// walk the loop: from any vertex, keep stepping to the neighbour we did
+		// not just come from until we return to the start.
+		var start int
+		for v := range adj {
+			start = v
+			break
+		}
+		loop := []int{start}
+		prev, cur := -1, start
+		for {
+			next := -1
+			for _, nb := range adj[cur] {
+				if nb != prev {
+					next = nb
+					break
+				}
+			}
+			if next == -1 || next == start {
+				break
+			}
+			loop = append(loop, next)
+			prev, cur = cur, next
+			if len(loop) > len(adj) {
+				break // not a simple cycle; bail out
+			}
+		}
+		if len(loop) < 3 {
+			continue
+		}
+		for i := 1; i+1 < len(loop); i++ {
+			tris = append(tris, [3]int{loop[0], loop[i], loop[i+1]})
+		}
+	}
+	return tris
 }
 
 func main() {
@@ -110,29 +171,11 @@ func run(extracted, outDir string) error {
 			}
 		}
 		js.Radius = r
-
-		// A representative vertex for each face, used by the viewer to place the
-		// face in space for the perspective-correct back-face test. Both ends of
-		// an edge lie on the two faces the edge borders (Elite.md Part IV §1), so
-		// either endpoint will do.
-		faceVert := make([]int, len(s.Faces))
-		for i := range faceVert {
-			faceVert[i] = -1
-		}
+		js.Faces = len(s.Faces)
 		for _, e := range s.Edges {
-			if e.FaceA != shipmodel.FaceNone && faceVert[e.FaceA] < 0 {
-				faceVert[e.FaceA] = e.V1
-			}
-			if e.FaceB != shipmodel.FaceNone && faceVert[e.FaceB] < 0 {
-				faceVert[e.FaceB] = e.V1
-			}
+			js.Edges = append(js.Edges, [2]int{e.V1, e.V2})
 		}
-		for _, e := range s.Edges {
-			js.Edges = append(js.Edges, [4]int{e.V1, e.V2, e.FaceA, e.FaceB})
-		}
-		for i, f := range s.Faces {
-			js.Faces = append(js.Faces, [4]int{f.NX, f.NY, f.NZ, faceVert[i]})
-		}
+		js.Tris = triangulate(s)
 		doc.Ships = append(doc.Ships, js)
 	}
 

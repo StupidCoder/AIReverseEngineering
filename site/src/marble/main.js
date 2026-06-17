@@ -16,4 +16,6 @@ meta.levels.forEach((l, i) => {
 });
 sel.addEventListener('change', () => viewer.loadLevel(meta.levels[+sel.value]));
 
+document.getElementById('slopes').addEventListener('change', (e) => viewer.setMode(e.target.checked ? 'slopes' : 'tilemap'));
+
 await viewer.loadLevel(meta.levels[0]);

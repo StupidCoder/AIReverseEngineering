@@ -44,6 +44,11 @@ main { max-width: 1100px; margin: 0 auto; padding: 24px 20px; }
 .viewport-43 { aspect-ratio: 4 / 3; width: min(100%, calc(62vh * 4 / 3)); }
 /* Marble Madness: 3:4 portrait, suiting the tall isometric courses */
 .viewport-34 { aspect-ratio: 3 / 4; width: min(100%, calc(78vh * 3 / 4)); }
+/* the page hosts two stacked canvases (PixiJS tilemap + three.js slopes); only
+   one is shown at a time, and the 3-D canvas renders smooth (not pixelated) */
+.viewport-34 canvas { position: absolute; inset: 0; z-index: 1; }
+.viewport-34 canvas.mm-three { image-rendering: auto; }
+.viewport-34 .hud { z-index: 2; }
 .viewport canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
 .hud {
   position: absolute; left: 8px; bottom: 8px;

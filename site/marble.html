@@ -6,7 +6,13 @@
   <title>Marble Madness (Amiga) — course viewer</title>
   <link rel="stylesheet" href="src/style.css" />
   <script type="importmap">
-  { "imports": { "pixi.js": "https://cdn.jsdelivr.net/npm/pixi.js@8/dist/pixi.min.mjs" } }
+  {
+    "imports": {
+      "pixi.js": "https://cdn.jsdelivr.net/npm/pixi.js@8/dist/pixi.min.mjs",
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
   </script>
 </head>
 <body>
@@ -24,15 +30,20 @@
       <label>Course
         <select id="level"></select>
       </label>
-      <span class="hint">drag to pan · scroll or pinch to zoom</span>
+      <span class="sep"></span>
+      <label><input type="checkbox" id="slopes" /> Slopes (3D)</label>
+      <span class="hint">tilemap: drag to pan · slopes: drag to rotate · scroll to zoom</span>
     </div>
     <p class="legend">
       Each course is the actual playfield tilemap, decoded from its <code>.mlb</code> map file and
       assembled tile-by-tile exactly as the game's blitter does — a 36-tile-wide column of 8×8,
       16-colour tiles, in the course's own palette (the isometric look is painted into the tile
       art itself, not a 3-D projection). Drag to pan, scroll to zoom; the marble starts at the top
-      and the <b>GOAL</b> is at the bottom. This is the visual surface only — the height field the
-      marble actually rolls on is a separate layer, coming later. See the
+      and the <b>GOAL</b> is at the bottom. Tick <b>Slopes (3D)</b> to switch to the course's
+      <em>height field</em> — the surface the marble physically rolls on, reconstructed from the
+      Track file's slope regions (the engine's own <code>build_region</code> mesh) and rendered as
+      a 3-D model you can <b>drag to rotate</b>; height is coloured low→high and slightly
+      exaggerated to read the gentle ramps. See the
       <a href="https://github.com/StupidCoder/AIReverseEngineering/blob/main/Marble%20Madness%20(Amiga)/Marble_Madness.md">write-up</a>
       for how the tile format was decoded.
     </p>

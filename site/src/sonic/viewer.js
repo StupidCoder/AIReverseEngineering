@@ -263,7 +263,7 @@ export class LevelViewer {
 
     this._buildCollision(level);
     this._buildObjects(level);
-    this._setMusicForZone(level.zone);
+    this._setMusicTrack(level.music);
     this._fitDefault(level);
     return level;
   }
@@ -300,13 +300,12 @@ export class LevelViewer {
   }
 
   // --- music --------------------------------------------------------------
-  // Per-zone background music (baked from the PSG by extract/cmd/musicbake). One <audio>
-  // whose src follows the current act's zone; toggled by the Music checkbox.
-  _zoneTrack(zone) {
-    return ['greenhills', 'bridge', 'jungle', 'labyrinth', 'scrapbrain', 'skybase', 'special'][zone];
-  }
-  _setMusicForZone(zone) {
-    const src = DATA + 'music/' + this._zoneTrack(zone) + '.mp3';
+  // Per-act background music, synthesized from the ROM sound-driver data (extract/cmd/
+  // musicrom). The track name comes from the act's descriptor (+36 music id); one <audio>
+  // follows it, toggled by the Music checkbox.
+  _setMusicTrack(track) {
+    if (!track) { if (this.audio) this.audio.pause(); return; }
+    const src = DATA + 'music/' + track + '.mp3';
     if (!this.audio) {
       this.audio = new Audio();
       this.audio.loop = true;
@@ -382,7 +381,7 @@ export class LevelViewer {
   setLayer(name, on) {
     if (name === 'music') {
       this.musicOn = on;
-      if (this.level) this._setMusicForZone(this.level.zone);
+      if (this.level) this._setMusicTrack(this.level.music);
     }
     if (name === 'collision') this.collisionLayer.visible = on;
     if (name === 'objects') this.objectLayer.visible = on;

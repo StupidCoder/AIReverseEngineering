@@ -424,6 +424,18 @@ type ActFile struct {
 	Anim         []AnimGroup   `json:"anim"`                   // animated tile groups (atlas indices per frame)
 	PaletteCycle *PaletteCycle `json:"paletteCycle,omitempty"` // runtime BG-palette rotation (water/waterfall)
 	Water        *Water        `json:"water,omitempty"`        // Labyrinth flooded-act underwater split (Part V §3)
+	Music        string        `json:"music,omitempty"`        // background-music track name (descriptor +36 -> id)
+}
+
+// musicTrack returns the act's background-music track name. The music id is descriptor byte
+// +36 (the loader $1A66 stores it to $D2F7 and plays it via RST $18); the id indexes the
+// $4716 song table. Acts map to ids 0-5 by zone, with two Sky Base acts reusing Scrap Brain's
+// theme and the special stage on id 16 (Part VI). cmd/musicrom bakes these by the same names.
+func musicTrack(rom []byte, act int) string {
+	d := descTable + w(rom, descTable+act*2)
+	names := map[byte]string{0: "greenhills", 1: "bridge", 2: "jungle", 3: "labyrinth",
+		4: "scrapbrain", 5: "skybase", 16: "special"}
+	return names[rom[d+36]]
 }
 
 // Water describes a Labyrinth act's underwater split. The engine raster-swaps the BG
@@ -544,7 +556,7 @@ func main() {
 			Palette:    paletteHex(pal),
 			BlockTiles: bt, BlockShape: blockShapes(rom, a.zone),
 			Blocks: blocks, Spawn: spawn, Objects: objs,
-			Anim: atlasAnim[atlas],
+			Anim: atlasAnim[atlas], Music: musicTrack(rom, a.num),
 		}
 		// The palette cycle is oracle-captured by booting the act; only do it for the real
 		// zones (the bonus stages can't be reached by forcing $D238 and have no water/lava

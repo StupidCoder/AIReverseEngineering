@@ -339,13 +339,21 @@ func boolf(b bool) float64 {
 
 type song struct {
 	name string
-	base int
+	id   int // index into the song-pointer table $4716 (the music id, $D2F7)
 }
 
+// The music tracks, keyed by their song id (from the descriptor +36 / the RST $18 id). The
+// level music is id = descriptor+36: zones map to 0-5, the special stage to 16; the rest are
+// context themes (title, world map, boss, jingles).
 var songs = []song{
-	{"greenhills", 0x47D0}, {"bridge", 0x574A}, {"jungle", 0x524A},
-	{"labyrinth", 0x760C}, {"scrapbrain", 0x5B4F}, {"skybase", 0x61A7}, {"special", 0x64C3},
+	{"greenhills", 0}, {"bridge", 1}, {"jungle", 2}, {"labyrinth", 3},
+	{"scrapbrain", 4}, {"skybase", 5}, {"special", 16},
+	{"title", 6}, {"worldmap", 7}, {"gotthrough", 8}, {"actclear", 9},
+	{"invincible", 10}, {"boss", 11}, {"ending", 14}, {"jingle", 20},
 }
+
+// songBase resolves a music id to its channel-data base via the song-pointer table $4716.
+func songBase(id int) int { return w(0x4716 + id*2) }
 
 func newChannels(base int) []*channel {
 	chs := make([]*channel, 4)
@@ -377,7 +385,7 @@ func main() {
 	}
 	os.MkdirAll(outdir, 0o755)
 	for _, s := range songs {
-		pcm, loopFrames := render(s.base)
+		pcm, loopFrames := render(songBase(s.id))
 		wav := filepath.Join(outdir, s.name+".wav")
 		writeWAV(wav, pcm)
 		mp3 := filepath.Join(outdir, s.name+".mp3")
@@ -389,7 +397,7 @@ func main() {
 		}
 		os.Remove(wav)
 		fi, _ := os.Stat(mp3)
-		fmt.Printf("%-12s base $%04X -> %s (%d KB, loop %.1fs)\n", s.name, s.base, s.name+".mp3", fi.Size()/1024, float64(loopFrames)/fps)
+		fmt.Printf("%-12s id %2d base $%04X -> %s (%d KB, loop %.1fs)\n", s.name, s.id, songBase(s.id), s.name+".mp3", fi.Size()/1024, float64(loopFrames)/fps)
 	}
 }
 
@@ -577,7 +585,7 @@ func verifyTrack(name string) {
 	var base int
 	for _, s := range songs {
 		if s.name == name {
-			base = s.base
+			base = songBase(s.id)
 		}
 	}
 	tick = 1

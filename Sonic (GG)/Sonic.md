@@ -859,6 +859,36 @@ Green Hills levels in the identical art:
 This is the payoff of the descriptor format: one decode, and every act of the zone (and,
 by the same table, the other zones) is reachable from the ROM alone.
 
+### The act descriptor — a field map
+
+Each act descriptor is **37 bytes**, reached as `$5600 + word($5600 + act×2)` in bank 5
+(file `$15600`). Words are little-endian. Offsets verified against `cmd/levelmap` /
+`cmd/webexport` (0.00 % pixel diff) and the loader (`$19D0`–`$1A6A`); a few in the
+`+23…+28` graphics-pointer region and `+32/+34/+35` aren't individually pinned.
+
+| Off | Size | Field | Notes |
+|----|------|-------|-------|
+| +0 | 1 | **zone** 0–6 | selects the per-zone tile table (`$343D`), palette set and collision table; **6 = the special stage** |
+| +1 | 2 | **map stride** (`$D232`) | column count, hi byte: `$80`→128, `$40`→64, `$20`→32, `$10`→16, else 256 — so the map is `(4096/stride)` rows tall |
+| +3 | 2 | (vertical scroll extent — not pinned) | |
+| +5 | 2 | **left scroll bound** (`$D26D`) | |
+| +7 | 2 | **right scroll bound** (`$D26F`) | ÷32 = the played width in blocks |
+| +9 | 2 | **top scroll bound** | |
+| +11 | 2 | **bottom scroll bound** | |
+| +13 | 1 | **spawn block X** | Sonic's start column |
+| +14 | 1 | **spawn block Y + 1** | the loader uses `byte − 1` |
+| +15 | 2 | **map data offset** | file = `$14000 + word` (banks 5–7); `$0A73` RLE → a 4096-byte block-index map |
+| +17 | 2 | **map data length** (compressed) | |
+| +19 | 2 | **block-tile-table offset** | file = `$10000 + word`; 16 bytes/block = a 4×4 tile grid |
+| +21 | 2 | **tile-set offset** | file = `$30000 + word`; `$0406`-compressed BG tiles |
+| +23 | 6 | graphics-stream pointers/banks | the BG + sprite tile-load sources (`+24/+25` is a second `$0406` source); not all individually pinned |
+| +29 | 1 | **BG palette index** (`$D22C`) | resolved through the bank-8 `$7400` offset table (Part IV §1) |
+| +30 | 2 | **object-table offset** | `$15600 + word`; `[count]` then `[type, blockX, blockY] × count` (Part V §1) |
+| +32 | 1 | (not pinned) | |
+| +33 | 1 | **flags** | bit 7 = Labyrinth water (the underwater raster split, Part V §3); bit 6 set on Sky Base Act 2 |
+| +34 | 2 | (not pinned) | |
+| +36 | 1 | **music id** (`$D2F7`) | the loader (`$1A66`) plays it via `RST $18`; indexes the `$4716` song table (Part VI). Zones → 0–5 (Sky Base acts 1 & 3 reuse Scrap Brain's id 4); the special stage → **16** |
+
 ### Every zone — and a surprise: the map isn't always 16×256
 
 The same table has 18 entries (6 zones × 3 acts), and `cmd/levelmap` renders them all (to
@@ -1609,18 +1639,26 @@ as the period (two writes) and `15 − volume` attenuation.
 from the ROM, simulates the sequencer frame-by-frame (notes, durations, the `$86/$87` repeat
 stack, ADSR, vibrato, and the `$88`/`$FF` loop), and emits the PSG state, which it synthesises
 (phase-continuous squares + a 16-bit LFSR for noise) and pipes through `ffmpeg` (`libmp3lame`)
-to the per-zone MP3s in `site/public/sonic/music/`. The **loop comes from the data**: the
-clip is trimmed to one loop of the longest (melody) channel, measured by running the port — no
-pattern-matching on emulator output. Verification against the oracle's PSG (`soundprobe`) is
-exact: five of the seven loop lengths match the hardware *to the frame* (Green Hills 38.4 s,
-Bridge 25.6 s, Jungle/Labyrinth 28.8 s, Scrap Brain 51.2 s); Sky Base is the remaining song id
-(16.0 s) and the special stage plays its intro then loops on a rest, so that intro is looped.
+to MP3s in `site/public/sonic/music/`. The **loop comes from the data**: the clip is trimmed
+to one loop of the longest (melody) channel, measured by running the port — no pattern-matching
+on emulator output. Verification against the oracle's PSG (`soundprobe`) is exact: the loop
+lengths match the hardware *to the frame* (Green Hills 38.4 s, Bridge 25.6 s, Jungle/Labyrinth
+28.8 s, Scrap Brain 51.2 s, Sky Base 16.0 s, the special stage 59.7 s).
+
+**Which track plays** is the act's **music id** = descriptor byte **+36** (Part IV §4), which
+indexes the `$4716` table. The 21 ids resolve to ~15 distinct tunes: the six **zone themes**
+(ids 0–5; Sky Base acts 1 & 3 actually reuse Scrap Brain's id 4, only act 2 uses id 5), the
+**special stage** (id 16 — *not* id 6, which is the **title** theme), the **world map** (7),
+**act-clear** (9), **boss** (11, shared by every boss handler), and assorted jingles. The
+exporter writes each act's track name into its JSON and the viewer plays it per act, so e.g.
+Sky Base Act 1 correctly gets the Scrap Brain music.
 
 (The earlier `extract/cmd/soundprobe`/`musicbake` capture the PSG from the running oracle —
 kept only as the verification reference; the shipped music is `musicrom`'s, from the ROM.)
 
-*Open ends:* the boss acts are assumed to reuse the zone theme, and the LFSR-noise + volume
-curve are approximations of the real chip.
+*Open ends:* a few of the shorter ids (the 1-up / game-over / continue jingles, an "ending"
+tune) are baked but not yet matched to their exact in-game cue; the LFSR-noise + volume curve
+are approximations of the real chip.
 
 ---
 

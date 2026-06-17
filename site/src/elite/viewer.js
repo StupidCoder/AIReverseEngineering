@@ -37,12 +37,30 @@ class ShipMesh {
     this.lines.frustumCulled = false;
     this.lines.renderOrder = 1;
 
-    // Faces → depth-only fill. colorWrite:false makes it invisible but still
-    // write depth; polygonOffset pushes it back a hair so coincident edges win.
+    // Faces → fill. Non-indexed so each triangle can carry its face's colour
+    // (for the optional shaded view); polygonOffset pushes it back a hair so the
+    // coincident edges win. With colorWrite off it is invisible and only writes
+    // depth — robust hidden-line removal; toggling colorWrite on reveals the
+    // solid shaded faces. Either way it occludes edges and stars behind it.
+    const tcount = ship.tris.length;
+    const fpos = new Float32Array(tcount * 9);
+    const fcol = new Float32Array(tcount * 9);
+    const c = new THREE.Color();
+    for (let t = 0; t < tcount; t++) {
+      // a distinct, muted colour per face so the white wireframe stays readable
+      c.setHSL((((ship.triFace[t] * 0.137) % 1) + 1) % 1, 0.55, 0.42);
+      for (let k = 0; k < 3; k++) {
+        const v = ship.tris[t][k] * 3;
+        const o = t * 9 + k * 3;
+        fpos[o] = verts[v]; fpos[o + 1] = verts[v + 1]; fpos[o + 2] = verts[v + 2];
+        fcol[o] = c.r; fcol[o + 1] = c.g; fcol[o + 2] = c.b;
+      }
+    }
     const fgeom = new THREE.BufferGeometry();
-    fgeom.setAttribute('position', new THREE.BufferAttribute(verts, 3));
-    fgeom.setIndex(ship.tris.flat());
+    fgeom.setAttribute('position', new THREE.BufferAttribute(fpos, 3));
+    fgeom.setAttribute('color', new THREE.BufferAttribute(fcol, 3));
     const fmat = new THREE.MeshBasicMaterial({
+      vertexColors: true,
       colorWrite: false,
       side: THREE.DoubleSide,
       polygonOffset: true,
@@ -56,6 +74,12 @@ class ShipMesh {
     this.object = new THREE.Group();
     this.object.add(this.fill);
     this.object.add(this.lines);
+  }
+
+  // setShaded reveals (or hides) the solid coloured faces. Hidden, the fill is
+  // pure depth (wireframe with hidden lines removed); shown, it is a solid model.
+  setShaded(on) {
+    this.fill.material.colorWrite = on;
   }
 
   dispose() {
@@ -107,6 +131,14 @@ export class ShipViewer {
     this.hud = hud;
     this.ships = [];
     this.current = null;
+    this.shaded = false;
+  }
+
+  // setShaded toggles the solid coloured-face view (off = wireframe with hidden
+  // lines removed). Remembered so it persists when you switch ships.
+  setShaded(on) {
+    this.shaded = on;
+    if (this.current) this.current.setShaded(on);
   }
 
   async init() {
@@ -165,6 +197,7 @@ export class ShipViewer {
       this.current.dispose();
     }
     const mesh = new ShipMesh(ship);
+    mesh.setShaded(this.shaded);
     this.scene.add(mesh.object);
     this.current = mesh;
     this.currentIndex = index;

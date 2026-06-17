@@ -44,6 +44,13 @@ export class MarbleViewer {
     this._texMode = 'nearest';
     this.sprite = null;
     this.three = null;
+    this.objectsOn = false;
+  }
+
+  // Toggle the Track-layer markers on the slope view (built per level).
+  setObjects(on) {
+    this.objectsOn = on;
+    if (this.three && this.three.markers) this.three.markers.visible = on;
   }
 
   async init() {
@@ -119,7 +126,18 @@ export class MarbleViewer {
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.rotateSpeed = 0.9;
-    this.three = { renderer, scene, camera, controls, group: null, frustumH: 1 };
+    this.three = { renderer, scene, camera, controls, group: null, markers: null, fill: null, frustumH: 1 };
+    // Pivot where you're looking: when a gesture starts, raycast the screen
+    // centre onto the surface and orbit around that point. The centre ray runs
+    // along the current view direction, so moving the target along it doesn't
+    // shift the view — it just relocates the rotation pivot onto the track.
+    const ray = new THREE.Raycaster();
+    controls.addEventListener('start', () => {
+      if (!this.three.fill) return;
+      ray.setFromCamera(new THREE.Vector2(0, 0), this.three.camera);
+      const hit = ray.intersectObject(this.three.fill, false)[0];
+      if (hit) this.three.controls.target.copy(hit.point);
+    });
     new ResizeObserver(() => this._resizeThree()).observe(this.el);
     const tick = () => {
       if (this.mode === 'slopes' && this.three) {
@@ -148,16 +166,18 @@ export class MarbleViewer {
   // the surface are hidden. Pits (no surface) leave holes.
   _buildMesh() {
     const t = this.three;
-    if (t.group) {
-      t.scene.remove(t.group);
-      t.group.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
-    }
+    const dispose = (g) => { if (g) { t.scene.remove(g); g.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); } };
+    dispose(t.group); dispose(t.markers);
     const s = this.slope;
     const { w, h, heights } = s;
     const range = Math.max(1, s.hi - s.lo);
     const cx = (w - 1) / 2, cz = (h - 1) / 2;
-    const present = (gx, gy) => heights[gy * w + gx] > 0;
-    const yOf = (gx, gy) => (heights[gy * w + gx] - 1) * HEIGHT_SCALE;
+    const present = (gx, gy) => gx >= 0 && gy >= 0 && gx < w && gy < h && heights[gy * w + gx] > 0;
+    // Axis swap (tile-X -> world Z, tile-Y -> world X) so the isometric view
+    // matches the offline *.wire.png instead of mirroring it.
+    const wX = (gx, gy) => gy - cz;
+    const wZ = (gx, gy) => gx - cx;
+    const surfY = (gx, gy) => (heights[gy * w + gx] - 1) * HEIGHT_SCALE;
 
     // Invisible depth fill (triangulated quads) for hidden-line removal.
     const vidx = new Int32Array(w * h).fill(-1);
@@ -166,7 +186,7 @@ export class MarbleViewer {
       for (let gx = 0; gx < w; gx++) {
         if (!present(gx, gy)) continue;
         vidx[gy * w + gx] = fpos.length / 3;
-        fpos.push(gx - cx, yOf(gx, gy), gy - cz);
+        fpos.push(wX(gx, gy), surfY(gx, gy), wZ(gx, gy));
       }
     }
     const idx = [];
@@ -179,24 +199,23 @@ export class MarbleViewer {
     const fgeom = new THREE.BufferGeometry();
     fgeom.setAttribute('position', new THREE.Float32BufferAttribute(fpos, 3));
     fgeom.setIndex(idx);
-    const fmat = new THREE.MeshBasicMaterial({
+    const fill = new THREE.Mesh(fgeom, new THREE.MeshBasicMaterial({
       colorWrite: false, side: THREE.DoubleSide,
       polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
-    });
-    const fill = new THREE.Mesh(fgeom, fmat);
+    }));
 
     // Height-coloured grid edges.
     const epos = [], ecol = [];
     const pushV = (gx, gy) => {
-      epos.push(gx - cx, yOf(gx, gy), gy - cz);
+      epos.push(wX(gx, gy), surfY(gx, gy), wZ(gx, gy));
       const c = heightRamp((heights[gy * w + gx] - 1) / range);
       ecol.push(c[0], c[1], c[2]);
     };
     for (let gy = 0; gy < h; gy++) {
       for (let gx = 0; gx < w; gx++) {
         if (!present(gx, gy)) continue;
-        if (gx + 1 < w && present(gx + 1, gy)) { pushV(gx, gy); pushV(gx + 1, gy); }
-        if (gy + 1 < h && present(gx, gy + 1)) { pushV(gx, gy); pushV(gx, gy + 1); }
+        if (present(gx + 1, gy)) { pushV(gx, gy); pushV(gx + 1, gy); }
+        if (present(gx, gy + 1)) { pushV(gx, gy); pushV(gx, gy + 1); }
       }
     }
     const egeom = new THREE.BufferGeometry();
@@ -208,9 +227,14 @@ export class MarbleViewer {
     group.add(fill, lines);
     t.scene.add(group);
     t.group = group;
+    t.fill = fill;
 
-    // Frame it isometrically (orthographic), looking down a 2:1 dimetric angle.
     const span = Math.max(w, h);
+    t.markers = this._buildMarkers(s, { present, wX, wZ, surfY, span });
+    t.markers.visible = this.objectsOn || false;
+    t.scene.add(t.markers);
+
+    // Frame it isometrically (orthographic), down a 2:1 dimetric angle.
     const ctr = new THREE.Vector3(0, (range * HEIGHT_SCALE) / 2, 0);
     // The iso mesh is ~1.4·span wide on screen; in the portrait (3:4) viewport
     // width binds, so size the half-height to fit that width with a little margin.
@@ -223,6 +247,55 @@ export class MarbleViewer {
     t.controls.minZoom = 0.4; t.controls.maxZoom = 6;
     t.controls.update();
     this._resizeThree();
+  }
+
+  // Build the Track-layer markers (the same overlays as the offline wire PNGs):
+  // a coloured pin per single object (placement/ooze/dynamic region) and a
+  // coloured route polyline per creature path. Drawn on top (depthTest off).
+  _buildMarkers(s, m) {
+    const { present, wX, wZ, surfY, span } = m;
+    const stem = Math.max(2, span * 0.045);
+    const gx = (x) => x - s.x0, gy = (y) => y - s.y0;
+    const surf = (x, y) => (present(gx(x), gy(y)) ? surfY(gx(x), gy(y)) : 0);
+    const W = (x, y) => [wX(gx(x), gy(y)), surf(x, y), wZ(gx(x), gy(y))];
+    const rgb = (c) => [((c >> 16) & 255) / 255, ((c >> 8) & 255) / 255, (c & 255) / 255];
+
+    const stemPos = [], stemCol = [], headPos = [], headCol = [], routePos = [], routeCol = [];
+    const pin = (x, y, c) => {
+      const [px, py, pz] = W(x, y), col = rgb(c);
+      stemPos.push(px, py, pz, px, py + stem, pz); stemCol.push(...col, ...col);
+      headPos.push(px, py + stem, pz); headCol.push(...col);
+    };
+    for (const p of s.markers.points) pin(p.x, p.y, p.c);
+    for (const path of s.markers.paths) {
+      const col = rgb(path.c);
+      for (let i = 0; i + 1 < path.pts.length; i++) {
+        const a = W(path.pts[i][0], path.pts[i][1]), b = W(path.pts[i + 1][0], path.pts[i + 1][1]);
+        routePos.push(...a, ...b); routeCol.push(...col, ...col);
+      }
+      if (path.pts.length) pin(path.pts[0][0], path.pts[0][1], path.c); // spawn pin
+    }
+
+    const g = new THREE.Group();
+    const lineSeg = (pos, col) => {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      const o = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false }));
+      o.renderOrder = 3;
+      return o;
+    };
+    if (routePos.length) g.add(lineSeg(routePos, routeCol));
+    if (stemPos.length) g.add(lineSeg(stemPos, stemCol));
+    if (headPos.length) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(headPos, 3));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(headCol, 3));
+      const pts = new THREE.Points(geo, new THREE.PointsMaterial({ vertexColors: true, size: 6, sizeAttenuation: false, depthTest: false }));
+      pts.renderOrder = 4;
+      g.add(pts);
+    }
+    return g;
   }
 
   // --- PixiJS tilemap camera (shared pattern; only active in tilemap mode) -

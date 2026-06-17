@@ -162,3 +162,138 @@ func Build(im []byte) Field {
 	}
 	return f
 }
+
+// MarkerSet is the course's Track-layer markers in iso-tile (X,Y) coordinates —
+// the same overlays the offline *.wire.png draws (Marble_Madness.md Part V §4-5).
+type MarkerSet struct {
+	Placement [][2]int   // object-placement table (Track +4) — cyan
+	Ooze      [][2]int   // +$20 ooze candidate positions — orange
+	DynRegion [][2]int   // +$14 dynamic/animated terrain regions — yellow
+	Marbles   [][][2]int // +$18 black-marble patrol routes (pts[0] = spawn) — magenta
+	Slinkies  [][][2]int // +$1C slinky patrol routes (pts[0] = spawn) — green
+}
+
+type spawn struct {
+	home [2]int
+	pos  [][2]int
+}
+
+// parseSpawns reads a creature-spawn list (Track header +$18 or +$20): 8-byte
+// [X][Y][animPtr:4][type][pad] records. A record with an animPtr points at the
+// creature's patrol route; one without (ooze) falls back to the +$20 block's RNG
+// definition table for its candidate positions.
+func parseSpawns(im []byte, hdrOff uint32) []spawn {
+	block := u32(im, hdrOff)
+	defs := func() [][2]int {
+		var d [][2]int
+		for _, doff := range []uint32{0x14, 0x18, 0x1C, 0x34} {
+			if dp := u32(im, block+doff); dp != 0 && int(dp)+2 <= len(im) {
+				d = append(d, [2]int{int(im[dp]), int(im[dp+1])})
+			}
+		}
+		return d
+	}
+	var out []spawn
+	for o := u32(im, block); int(o)+8 <= len(im) && len(out) < 200; o += 8 {
+		if im[o] == 0xFF {
+			break
+		}
+		s := spawn{home: [2]int{int(im[o]), int(im[o+1])}}
+		if ap := u32(im, o+2); ap != 0 && int(ap) < len(im) {
+			for p := ap; int(p)+2 <= len(im) && im[p] != 0xFF && len(s.pos) < 24; p += 6 {
+				s.pos = append(s.pos, [2]int{int(im[p]), int(im[p+1])})
+			}
+		} else {
+			s.pos = defs()
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// parseActors reads the Track +$1C actor list (the slinkies): 8-byte
+// [homeX][homeY][pathPtr:4][type][pad] records whose pathPtr is an $FF-terminated
+// 3-byte [X][Y][dir] waypoint route.
+func parseActors(im []byte) []spawn {
+	tbl := u32(im, 0x1C)
+	if tbl == 0 || int(tbl)+4 > len(im) {
+		return nil
+	}
+	rec := u32(im, tbl)
+	if rec == 0 || int(rec) >= len(im) {
+		return nil
+	}
+	var out []spawn
+	for o := rec; int(o)+8 <= len(im) && len(out) < 200; o += 8 {
+		if im[o] == 0xFF {
+			break
+		}
+		s := spawn{home: [2]int{int(im[o]), int(im[o+1])}}
+		if pp := u32(im, o+2); pp != 0 && int(pp) < len(im) {
+			for p := pp; int(p)+3 <= len(im) && im[p] != 0xFF && len(s.pos) < 40; p += 3 {
+				s.pos = append(s.pos, [2]int{int(im[p]), int(im[p+1])})
+			}
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// parseDynRegions reads the +$14 source list (6-byte [x][y][scriptPtr:4]); each
+// region's position is its script's first KEYFRAME (refX,refY), else the cell.
+func parseDynRegions(im []byte) [][2]int {
+	block := u32(im, 0x14)
+	if block == 0 || int(block)+4 > len(im) {
+		return nil
+	}
+	var out [][2]int
+	for o := u32(im, block); int(o)+6 <= len(im) && len(out) < 200; o += 6 {
+		if im[o] == 0xFF {
+			break
+		}
+		p := [2]int{int(im[o]), int(im[o+1])}
+		if sp := u32(im, o+2); sp != 0 && int(sp)+10 <= len(im) && u16(im, sp) == 0 {
+			p = [2]int{u16(im, sp+2), u16(im, sp+4)}
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// parseXY collects the [X][Y] of each stride-byte record from off until $FF.
+func parseXY(im []byte, off uint32, stride int) [][2]int {
+	var out [][2]int
+	for o := off; int(o)+stride <= len(im) && len(out) < 1000; o += uint32(stride) {
+		if im[o] == 0xFF {
+			break
+		}
+		out = append(out, [2]int{int(im[o]), int(im[o+1])})
+	}
+	return out
+}
+
+// Markers parses every Track-layer overlay for a course.
+func Markers(im []byte) MarkerSet {
+	m := MarkerSet{Placement: parseXY(im, u32(im, u32(im, 4)), 3)}
+	for _, s := range parseSpawns(im, 0x18) {
+		if len(s.pos) > 0 {
+			m.Marbles = append(m.Marbles, s.pos)
+		}
+	}
+	seen := map[[2]int]bool{}
+	for _, s := range parseSpawns(im, 0x20) {
+		for _, p := range s.pos {
+			if !seen[p] {
+				seen[p] = true
+				m.Ooze = append(m.Ooze, p)
+			}
+		}
+	}
+	for _, s := range parseActors(im) {
+		if len(s.pos) > 0 {
+			m.Slinkies = append(m.Slinkies, s.pos)
+		}
+	}
+	m.DynRegion = parseDynRegions(im)
+	return m
+}

@@ -32,6 +32,7 @@
       </label>
       <span class="sep"></span>
       <label><input type="checkbox" id="slopes" /> Slopes (3D)</label>
+      <label><input type="checkbox" id="objects" /> Objects</label>
       <span class="hint">tilemap: drag to pan · slopes: drag to rotate · scroll to zoom</span>
     </div>
     <p class="legend">
@@ -44,7 +45,10 @@
       Track file's slope regions (the engine's own <code>build_region</code> mesh) and drawn as an
       <b>isometric wireframe</b> with hidden lines removed — the same style as the write-up's
       slope renders. Edges are coloured low→high and the height is slightly exaggerated to read
-      the gentle ramps; <b>drag to rotate</b> the angle, scroll to zoom. See the
+      the gentle ramps; <b>drag to rotate</b> (the pivot follows the point you're looking at),
+      scroll to zoom. <b>Objects</b> then overlays the Track-layer markers — object placements
+      (cyan), the dynamic/animated regions (yellow), and the creature patrol routes (black
+      marbles magenta, slinkies green) — the same overlays as the write-up's slope renders. See the
       <a href="https://github.com/StupidCoder/AIReverseEngineering/blob/main/Marble%20Madness%20(Amiga)/Marble_Madness.md">write-up</a>
       for how the tile format was decoded.
     </p>

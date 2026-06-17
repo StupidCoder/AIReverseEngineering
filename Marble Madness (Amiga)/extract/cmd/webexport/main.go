@@ -43,13 +43,58 @@ type metaLevel struct {
 // row-major from x0,y0) where each cell is the tile's height above lo plus one,
 // or 0 where there is no rolling surface (a pit). lo/hi give the real range.
 type slopeJSON struct {
-	X0      int   `json:"x0"`
-	Y0      int   `json:"y0"`
-	W       int   `json:"w"`
-	H       int   `json:"h"`
-	Lo      int   `json:"lo"`
-	Hi      int   `json:"hi"`
-	Heights []int `json:"heights"`
+	X0      int        `json:"x0"`
+	Y0      int        `json:"y0"`
+	W       int        `json:"w"`
+	H       int        `json:"h"`
+	Lo      int        `json:"lo"`
+	Hi      int        `json:"hi"`
+	Heights []int      `json:"heights"`
+	Markers markerJSON `json:"markers"`
+}
+
+// markerJSON is the course's Track-layer overlays for the 3-D view: single pins
+// (Points) and patrol routes (Paths), each carrying an RGB colour, in tile coords.
+type markerJSON struct {
+	Points []ptJSON   `json:"points"`
+	Paths  []pathJSON `json:"paths"`
+}
+type ptJSON struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+	C int `json:"c"`
+}
+type pathJSON struct {
+	C   int      `json:"c"`
+	Pts [][2]int `json:"pts"`
+}
+
+// marker colours, matching the offline *.wire.png overlays.
+const (
+	colPlacement = 0x46d4ff // cyan
+	colOoze      = 0xff9430 // orange
+	colDynRegion = 0xffe000 // yellow
+	colMarble    = 0xff46c8 // magenta
+	colSlinky    = 0x46e05a // green
+)
+
+func buildMarkers(m slope.MarkerSet) markerJSON {
+	mj := markerJSON{Points: []ptJSON{}, Paths: []pathJSON{}}
+	add := func(pts [][2]int, c int) {
+		for _, p := range pts {
+			mj.Points = append(mj.Points, ptJSON{p[0], p[1], c})
+		}
+	}
+	add(m.Placement, colPlacement)
+	add(m.Ooze, colOoze)
+	add(m.DynRegion, colDynRegion)
+	for _, p := range m.Marbles {
+		mj.Paths = append(mj.Paths, pathJSON{colMarble, p})
+	}
+	for _, p := range m.Slinkies {
+		mj.Paths = append(mj.Paths, pathJSON{colSlinky, p})
+	}
+	return mj
 }
 
 func main() {
@@ -116,6 +161,7 @@ func run(adfPath, outDir string) error {
 			return fmt.Errorf("%s: hunk load: %w", c.track, err)
 		}
 		sj := buildSlope(slope.Build(prog.Image))
+		sj.Markers = buildMarkers(slope.Markers(prog.Image))
 		slopeFile := c.key + ".slope.json"
 		if err := writeJSON(filepath.Join(outDir, slopeFile), sj); err != nil {
 			return err

@@ -929,6 +929,28 @@ model can place the objects but isn't cycle-accurate enough to *run* them — So
 through the floor instead of running the level — so identifying a handler needs the static
 decode rather than the oracle.
 
+### Sprites — Sonic and the enemies
+
+Objects are drawn as **hardware sprites** (VDP 8×16 mode), not from the tilemap. The loader
+decompresses a per-zone **sprite tile set into VRAM `$2000`** (sprite pattern base, reg 6),
+and the sprite-attribute table at `$3F00` lists each active sprite's `(Y, X, tile)`. The
+per-object draw builds a display list in RAM `$D000` (the helpers `$2F07` lay out a tile grid,
+`$2F5D`/`$2FA8` append single sprites), which `sat_flush $033F` copies to the SAT each vblank.
+
+Sonic's animation is **data-driven and streamed**: his pose id `(IX+20)` indexes an animation
+table at `$5C5B` → a frame sequence (a byte stream; bit-7-set bytes are loop/jump controls),
+and the current frame id both selects a sprite-layout (`$5C1B`) and computes a ROM source whose
+**16 tiles are streamed into the sprite VRAM** when the frame changes — so only the live frame
+(plus neighbours) is resident, not a full sheet.
+
+Because the frames stream, the cleanest capture is the **oracle**: boot an act, let the engine
+draw, then read `VRAM $2000` + the SAT + the sprite palette (CRAM 16–31) and compose the real
+sprites. `extract/cmd/spriteprobe` dumps each zone's resident sprite tile sheet
+(`rendered/sprites/`); `extract/cmd/spritecompose` lifts Sonic's spawn frame; and
+`extract/cmd/enemyprobe` scrolls Green Hills so enemies activate and crops each one (the crab
+`$08` and beetle `$10` came out clean). Those PNGs are what the level viewer now draws on its
+Objects layer in place of the coloured boxes for Sonic, the crab and the beetle.
+
 # Part V — Game mechanics
 
 *In progress.* Object **placement** is decoded (Part IV §4); the **behaviours** are the

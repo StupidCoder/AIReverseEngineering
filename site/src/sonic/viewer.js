@@ -52,6 +52,7 @@ export class LevelViewer {
     this.world.addChild(this.tileLayer, this.collisionLayer, this.objectLayer);
     this.app.stage.addChild(this.world);
     this.shapes = await fetch(DATA + 'shapes.json').then((r) => r.json());
+    await this._loadSprites();
     this._wireCamera();
     this.animOn = true; this.animTick = 0; this.animAccum = 0;
     this.app.ticker.add(() => this._advanceAnim());
@@ -297,6 +298,23 @@ export class LevelViewer {
     this.collisionLayer.addChild(g);
   }
 
+  // Sprites lifted from the running game (oracle): Sonic's spawn frame + a few enemies.
+  // Each is a tight-cropped, native-resolution PNG drawn at nearest-neighbour.
+  async _loadSprites() {
+    this.spriteTex = {};
+    for (const n of ['sonic', 'crab', 'beetle']) {
+      try {
+        const img = await new Promise((res, rej) => {
+          const i = new Image();
+          i.onload = () => res(i); i.onerror = rej; i.src = DATA + 'sprites/' + n + '.png';
+        });
+        const tx = Texture.from(img);
+        tx.source.scaleMode = 'nearest';
+        this.spriteTex[n] = tx;
+      } catch { /* sprite optional */ }
+    }
+  }
+
   // --- object markers -----------------------------------------------------
   _buildObjects(level) {
     this.objectLayer.removeChildren();
@@ -310,14 +328,33 @@ export class LevelViewer {
         this.objectLayer.addChild(txt);
       }
     };
+    // Place a native-resolution sprite centred in the object's 32px cell.
+    const sprite = (tex, bx, by) => {
+      const s = new Sprite(tex);
+      s.x = Math.round(bx * BLOCK + (BLOCK - tex.width) / 2);
+      s.y = Math.round(by * BLOCK + (BLOCK - tex.height) / 2);
+      this.objectLayer.addChild(s);
+    };
+    // The captured enemy sprites carry the Green Hills sprite palette, so only use them in
+    // the overworld zones where those enemies actually appear (not the special stage).
+    const enemySprites = level.zone <= 2;
     for (const o of level.objects) {
       if (o.type === 0) continue; // Sonic handled as the spawn marker
+      const tex = enemySprites ? this.spriteTex[o.name] : null;
+      if (tex) { sprite(tex, o.bx, o.by); continue; }
       const cat = OBJ_CAT[o.name] || 'default';
       mk(o.bx, o.by, BLOCK, BLOCK, OBJ_COLORS[cat], o.name || '?' + o.type.toString(16));
     }
-    // Sonic spawn: 2x4-tile box
+    // Sonic spawn: his actual first frame, replacing the old box.
     const [sx, sy] = level.spawn;
-    mk(sx, sy, 16, 32, 0x3cb4ff, 'SONIC');
+    if (this.spriteTex.sonic) {
+      const s = new Sprite(this.spriteTex.sonic);
+      s.x = Math.round(sx * BLOCK + (16 - s.texture.width) / 2);
+      s.y = Math.round((sy + 1) * BLOCK - s.texture.height); // feet near the block's bottom
+      this.objectLayer.addChild(s);
+    } else {
+      mk(sx, sy, 16, 32, 0x3cb4ff, 'SONIC');
+    }
   }
 
   setLayer(name, on) {

@@ -176,7 +176,7 @@ export class LevelViewer {
         flush(BLOCK);
       }
     }
-    g.fill({ color: 0xff2020, alpha: 0.4 });
+    g.fill({ color: 0xff2020, alpha: 0.8 });
     this.collisionLayer.addChild(g);
     this.collisionLayer.visible = false;
   }

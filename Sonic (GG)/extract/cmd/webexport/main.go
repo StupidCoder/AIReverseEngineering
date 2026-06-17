@@ -57,7 +57,8 @@ var objNames = map[byte]string{
 	0x25: "capsule", 0x26: "fish", 0x2C: "world 3 boss", 0x2D: "porcupine",
 	0x48: "world 2 boss", 0x49: "world 4 boss", 0x4E: "seesaw",
 	0x50: "scroll lock", 0x51: "checkpoint",
-	0x21: "ring", 0x52: "emerald", // special-stage objects ($21 floating ring, $52 collect-to-finish)
+	0x20: "bouncy platform", 0x21: "bumper", 0x52: "goal", // special-stage objects
+	// (rings are not objects: they are baked into the block map as $79-$7B, like normal zones)
 }
 
 type Act struct {
@@ -167,12 +168,10 @@ func applyAnimFrame(rom, tiles []byte, zone int) {
 			copy(tiles[a.vramTile*32:], rom[a.fileOff:a.fileOff+n])
 		}
 	}
-	// Zones 0-5 leave tiles 252-255 empty and the engine fills them with the spinning
-	// ring frames at runtime. The special stage (zone 6) instead uses 252-255 for real
-	// graphics and has no baked ring-tile animation (its rings are objects), so skip it.
-	if zone < 6 {
-		apply(ringAnim)
-	}
+	// Tiles 252-255 are empty in every zone's base set (including the special stage); the
+	// engine fills them with the spinning ring frames at runtime. The special stage's
+	// rectangular ring fields are blocks $79-$7B (= those tiles), so it needs this too.
+	apply(ringAnim)
 	for _, a := range zoneAnims[zone] {
 		apply(a)
 	}
@@ -227,10 +226,7 @@ func renderAtlas(rom, tiles []byte, pal color.Palette, zone int) (*image.RGBA, [
 		}
 		return g
 	}
-	var groups []AnimGroup
-	if zone < 6 { // the special stage uses tiles 252-255 statically (no ring-tile animation)
-		groups = append(groups, appendGroup("rings", []int{252, 253, 254, 255}, ringSrc, ringFrames))
-	}
+	groups := []AnimGroup{appendGroup("rings", []int{252, 253, 254, 255}, ringSrc, ringFrames)}
 	if zone == 0 {
 		groups = append(groups, appendGroup("flowers", []int{12, 13, 14, 15}, flowerSrc, flowerFrames))
 	}

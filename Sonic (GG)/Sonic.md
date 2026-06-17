@@ -1150,30 +1150,23 @@ This resolves the long-standing guess: the checkpoint *is* a placed object, but 
 `$51`, not `$50` (which turned out to be the camera/scroll-lock — it drives `$D2AB`, the
 camera X).
 
-### Special-stage objects — bouncy platform (`$20`), bumper (`$21`), goal (`$52`)
+### Special-stage objects — bumper (`$21`), Continue powerup (`$52`)
 
 The bonus stages (Part IV — the "Special Stage" zone) use a small object cast of their own.
 
-The **horizontally moving bouncy platform** is type `$20` (handler bank 2 `$96FA`). Unlike
-the terrain, it is drawn as a **hardware sprite**, not from the tilemap: each frame it claims
-a slot in the shared sprite display list through the per-frame allocator **`$D2DF`** (reset
-at `$154D`, advanced by 6 per sprite and capped at `$24` = up to six on screen), and emits
-its tiles via `$2F5D`. It **drifts horizontally** (`IX+7` velocity set to `±$20` from a phase
-bit) and is culled when it leaves the camera window (`$9814`–`$9860` bounds-check Sonic's
-camera `$D254`/`$D257`, then `(IX+0) = $FF`). On contact it acts on Sonic's vertical motion
-(`$3328` box, then it zeroes his fall velocity `$D407/$D409`) — the "bounce". (It is not
-listed in any per-act object table; the special-stage setup spawns it.)
+The **bumper** is type `$21` (handler bank 2 `$9AD0`) — placed in the stage tables (3–6 per
+round), and the object an earlier pass mislabelled a "ring". It oscillates horizontally (phase
+`IX+18`, `0…$C0`) around its anchor and, on contact (`$3328` box `$0602`), **reverses Sonic's
+velocity** (`$D2E7/$D2E9` are his negated velocity; it writes the negation back to `$D407`)
+and plays the bounce sound (`RST $28` idx `$07`) — a spring/bumper, not a collectible.
 
-The **bumper** is type `$21` (handler `$9AD0`) — *this* is the object actually placed in the
-stage tables (3–6 per round), which an earlier pass mislabelled a "ring". It oscillates
-horizontally (phase `IX+18`, `0…$C0`) around its anchor and, on contact (`$3328` box `$0602`),
-**reverses Sonic's velocity** (`$D2E7/$D2E9` are his negated velocity; it writes the negation
-back to `$D407`) and plays the bounce sound (`RST $28` idx `$07`) — a spring/bumper, not a
-collectible.
+The **Continue powerup** is type `$52` (handler bank 1 `$6061`). On contact (`$3328` box
+`$0003`, refined by `$60CC`) it sets a flag (`(IY+9) bit 3`) and runs the collect path
+(`$5E01`). (Its exact award — a Continue — is from in-game observation; the handler only shows
+the collect.)
 
-The **goal sign** is type `$52` (handler `$6061`): the bonus stages end with a goal sign just
-like the normal acts. On contact (`$3328` box `$0003`, refined by `$60CC`) it sets a
-completion flag (`(IY+9) bit 3`) and runs the act-clear path (`$5E01`).
+(Type `$20`, handler `$96FA`, is another sprite-drawn object in this zone — drawn through the
+`$D2DF` sprite allocator — but its role isn't pinned down, so it is left unlabelled.)
 
 **Where the rings come from.** The bonus stages are full of rings, but **none of them are
 objects** — they are baked into the level the same way as every normal zone: block indices

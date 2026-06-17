@@ -34,6 +34,10 @@ type VDP struct {
 	// ResetWrites. CRAMWrites does the same for the 64-byte CRAM as a single counter.
 	Writes     [16]uint32
 	CRAMWrites uint32
+
+	// CRAMLineLog, when non-nil, records (cramAddr, scanline) for every CRAM write — to
+	// tell a vblank palette load from a mid-frame raster palette change.
+	CRAMLineLog *[][2]byte
 }
 
 // ResetWrites zeroes the VRAM/CRAM write counters (call before the window of interest).
@@ -77,6 +81,9 @@ func (v *VDP) writeControl(b byte) {
 func (v *VDP) writeData(b byte) {
 	v.latched = false
 	if v.code == 3 {
+		if v.CRAMLineLog != nil {
+			*v.CRAMLineLog = append(*v.CRAMLineLog, [2]byte{byte(v.addr & 0x3F), v.line})
+		}
 		v.CRAM[v.addr&0x3F] = b
 		v.CRAMWrites++
 	} else {

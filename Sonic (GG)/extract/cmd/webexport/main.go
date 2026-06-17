@@ -486,7 +486,10 @@ func main() {
 			pc = capturePaletteCycle(rom, a.num, pal)
 			cycleCache[a.bgPal] = pc
 		}
-		if pc != nil {
+		// Labyrinth (World 4, zone 3): the slot 10-12 cycle is a real global vblank cycle,
+		// but there those slots colour decoration/spikes, not a visible water surface
+		// (playtested: no water shimmer), so applying it looks wrong. Exclude it.
+		if pc != nil && a.zone != 3 {
 			actPC := *pc // per-act copy: the cycling tiles depend on this act's tile set
 			actPC.Tiles = cyclingTiles(tiles, pc.Slots)
 			af.PaletteCycle = &actPC

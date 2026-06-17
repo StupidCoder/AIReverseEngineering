@@ -349,6 +349,18 @@ export class LevelViewer {
   _panTo(wx, wy) {
     this.world.position.set(this.app.screen.width / 2 - wx * this.zoom, this.app.screen.height / 2 - wy * this.zoom);
   }
+  // Map a client (CSS-px) point to app screen-px, accounting for the canvas CSS scaling.
+  _screenPt(cx, cy) {
+    const r = this.el.getBoundingClientRect();
+    return { x: (cx - r.left) * (this.app.screen.width / r.width), y: (cy - r.top) * (this.app.screen.height / r.height) };
+  }
+  // Zoom by `f` about the screen point (px,py), keeping the world point under it fixed.
+  _zoomAt(px, py, f) {
+    const wx = (px - this.world.position.x) / this.zoom, wy = (py - this.world.position.y) / this.zoom;
+    this.zoom = Math.min(this.maxZoom, Math.max(this.minZoom, this.zoom * f));
+    this.world.position.set(px - wx * this.zoom, py - wy * this.zoom);
+    this._apply();
+  }
   _clampPan() {
     const sw = this.app.screen.width, sh = this.app.screen.height;
     const lw = this.levelW * this.zoom, lh = this.levelH * this.zoom;
@@ -373,29 +385,58 @@ export class LevelViewer {
     for (const idx in this.blockTex) this.blockTex[idx].source.scaleMode = mode;
     if (this.blockTexUW) for (const idx in this.blockTexUW) this.blockTexUW[idx].source.scaleMode = mode;
   }
+  // Drag to pan (mouse or one finger); pinch with two fingers to zoom; wheel to zoom.
+  // Tracks every active pointer so the same handlers serve mouse and multi-touch.
   _wireCamera() {
     const c = this.el;
-    let dragging = false, lx = 0, ly = 0;
-    c.addEventListener('pointerdown', (e) => { dragging = true; lx = e.clientX; ly = e.clientY; c.classList.add('dragging'); c.setPointerCapture(e.pointerId); });
-    c.addEventListener('pointermove', (e) => {
-      if (!dragging) return;
-      this.world.position.x += e.clientX - lx; this.world.position.y += e.clientY - ly;
-      lx = e.clientX; ly = e.clientY; this._clampPan();
+    const pts = new Map();        // pointerId -> last {x, y} in client (CSS) px
+    let pinchDist = 0, pinchMid = null; // previous two-finger distance + midpoint
+
+    c.addEventListener('pointerdown', (e) => {
+      try { c.setPointerCapture(e.pointerId); } catch {}
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      c.classList.add('dragging');
+      if (pts.size === 2) {
+        const [a, b] = [...pts.values()];
+        pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+        pinchMid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      }
     });
-    const end = (e) => { dragging = false; c.classList.remove('dragging'); try { c.releasePointerCapture(e.pointerId); } catch {} };
+
+    c.addEventListener('pointermove', (e) => {
+      const p = pts.get(e.pointerId);
+      if (!p) return;
+      const dx = e.clientX - p.x, dy = e.clientY - p.y;
+      p.x = e.clientX; p.y = e.clientY;
+      if (pts.size >= 2) {
+        // Pinch: pan by the midpoint's motion, then zoom by the distance ratio about it.
+        const [a, b] = [...pts.values()];
+        const dist = Math.hypot(a.x - b.x, a.y - b.y);
+        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        if (pinchMid) { this.world.position.x += mid.x - pinchMid.x; this.world.position.y += mid.y - pinchMid.y; }
+        const sp = this._screenPt(mid.x, mid.y);
+        this._zoomAt(sp.x, sp.y, pinchDist > 0 ? dist / pinchDist : 1);
+        pinchDist = dist; pinchMid = mid;
+      } else {
+        // Single pointer: drag-pan.
+        this.world.position.x += dx; this.world.position.y += dy;
+        this._clampPan();
+      }
+    });
+
+    const end = (e) => {
+      pts.delete(e.pointerId);
+      try { c.releasePointerCapture(e.pointerId); } catch {}
+      if (pts.size < 2) { pinchMid = null; pinchDist = 0; }
+      if (pts.size === 0) c.classList.remove('dragging');
+    };
     c.addEventListener('pointerup', end);
     c.addEventListener('pointercancel', end);
+
     c.addEventListener('wheel', (e) => {
       e.preventDefault();
-      const rect = c.getBoundingClientRect();
-      const px = (e.clientX - rect.left) * (this.app.screen.width / rect.width);
-      const py = (e.clientY - rect.top) * (this.app.screen.height / rect.height);
-      const wx = (px - this.world.position.x) / this.zoom, wy = (py - this.world.position.y) / this.zoom;
-      const f = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
-      this.zoom = Math.min(this.maxZoom, Math.max(this.minZoom, this.zoom * f));
-      this.world.scale.set(this.zoom);
-      this.world.position.set(px - wx * this.zoom, py - wy * this.zoom);
-      this._apply();
+      const sp = this._screenPt(e.clientX, e.clientY);
+      this._zoomAt(sp.x, sp.y, e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
     }, { passive: false });
   }
 }

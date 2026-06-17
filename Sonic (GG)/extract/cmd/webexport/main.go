@@ -78,72 +78,49 @@ type Act struct {
 
 func w(rom []byte, o int) int { return int(rom[o]) | int(rom[o+1])<<8 }
 
+// mkAct reads one scene descriptor (index in the $5600 table) into an Act.
+func mkAct(rom []byte, idx, zone int, name string) Act {
+	d := descTable + w(rom, descTable+idx*2)
+	return Act{
+		num: idx, zone: zone, name: name,
+		mapFile:  0x14000 + w(rom, d+15),
+		mapLen:   w(rom, d+17),
+		widthBlk: w(rom, d+7) / 32,
+		stride:   w(rom, d+1),
+		blkTable: blockBase + w(rom, d+19),
+		tileFile: tileBase + w(rom, d+21),
+		bgPal:    int(rom[d+29]),
+		spawnX:   int(rom[d+13]),
+		spawnY:   int(rom[d+14]) - 1,
+	}
+}
+
 func parseActs(rom []byte) []Act {
 	var acts []Act
 	for i := 0; i < 18; i++ {
-		d := descTable + w(rom, descTable+i*2)
-		acts = append(acts, Act{
-			num: i, zone: i / 3,
-			name:     fmt.Sprintf("%s Act %d", zoneNames[i/3], i%3+1),
-			mapFile:  0x14000 + w(rom, d+15),
-			mapLen:   w(rom, d+17),
-			widthBlk: w(rom, d+7) / 32,
-			stride:   w(rom, d+1),
-			blkTable: blockBase + w(rom, d+19),
-			tileFile: tileBase + w(rom, d+21),
-			bgPal:    int(rom[d+29]),
-			spawnX:   int(rom[d+13]),
-			spawnY:   int(rom[d+14]) - 1,
-		})
-	}
-	// The teleporter sub-scenes (Part V §1): Scrap Brain Act 2's hidden maze rooms (scene
-	// table 20-25) and Sky Base Act 2's hidden room (26, a zone-7 interior). They use the same
-	// descriptor format and are reachable only through type-$13 teleporters. Listed right after
-	// the normal acts (before the special stages) so they group with their parent zones.
-	for _, e := range hiddenScenes {
-		d := descTable + w(rom, descTable+e.idx*2)
-		acts = append(acts, Act{
-			num: e.idx, zone: e.zone, name: e.name,
-			mapFile:  0x14000 + w(rom, d+15),
-			mapLen:   w(rom, d+17),
-			widthBlk: w(rom, d+7) / 32,
-			stride:   w(rom, d+1),
-			blkTable: blockBase + w(rom, d+19),
-			tileFile: tileBase + w(rom, d+21),
-			bgPal:    int(rom[d+29]),
-			spawnX:   int(rom[d+13]),
-			spawnY:   int(rom[d+14]) - 1,
-		})
+		acts = append(acts, mkAct(rom, i, i/3, fmt.Sprintf("%s Act %d", zoneNames[i/3], i%3+1)))
+		// Each teleporter sub-scene (Part V §1) is listed right under its parent act.
+		for _, e := range hiddenScenes {
+			if e.parent == i {
+				acts = append(acts, mkAct(rom, e.idx, e.zone, e.name))
+			}
+		}
 	}
 	// Bonus/special stages (zone 6): same descriptor layout, one shared map.
 	for n := 0; n < bonusCount; n++ {
-		i := bonusFirst + n
-		d := descTable + w(rom, descTable+i*2)
-		acts = append(acts, Act{
-			num: i, zone: 6,
-			name:     fmt.Sprintf("Special Stage %d", n+1),
-			mapFile:  0x14000 + w(rom, d+15),
-			mapLen:   w(rom, d+17),
-			widthBlk: w(rom, d+7) / 32,
-			stride:   w(rom, d+1),
-			blkTable: blockBase + w(rom, d+19),
-			tileFile: tileBase + w(rom, d+21),
-			bgPal:    int(rom[d+29]),
-			spawnX:   int(rom[d+13]),
-			spawnY:   int(rom[d+14]) - 1,
-		})
+		acts = append(acts, mkAct(rom, bonusFirst+n, 6, fmt.Sprintf("Special Stage %d", n+1)))
 	}
 	return acts
 }
 
-// hiddenScenes are the teleporter-only sub-scenes, named by the act they branch off.
+// hiddenScenes are the teleporter-only sub-scenes, each listed under its parent act (num).
 var hiddenScenes = []struct {
-	idx, zone int
-	name      string
+	idx, zone, parent int
+	name              string
 }{
-	{20, 4, "Scrap Brain Act 2a"}, {21, 4, "Scrap Brain Act 2b"}, {22, 4, "Scrap Brain Act 2c"},
-	{23, 4, "Scrap Brain Act 2d"}, {24, 4, "Scrap Brain Act 2e"}, {25, 4, "Scrap Brain Act 2f"},
-	{26, 7, "Sky Base Act 2a"},
+	{20, 4, 13, "Scrap Brain Act 2a"}, {21, 4, 13, "Scrap Brain Act 2b"}, {22, 4, 13, "Scrap Brain Act 2c"},
+	{23, 4, 13, "Scrap Brain Act 2d"}, {24, 4, 13, "Scrap Brain Act 2e"}, {25, 4, 13, "Scrap Brain Act 2f"},
+	{26, 7, 16, "Sky Base Act 2a"},
 }
 
 func romPalette(rom []byte, idx int) color.Palette {

@@ -327,6 +327,78 @@ func (g *Game) HelicopterPoses() [][2]byte {
 	return poses
 }
 
+// AnimChar describes one playfield character the IRQ animates in place
+// (Part IV §2 / Part V §8). Frames is the sequence of 8-byte bitmaps it
+// cycles through; Period is how many display frames each one is held.
+type AnimChar struct {
+	Char   byte
+	Period int
+	Frames [][8]byte
+}
+
+const cosmWallAlt = 0xAF80 // $4C-$4F alternate dither pattern ($AF54)
+
+// SoftCharAnim returns the in-place character animations for the playfield,
+// reconstructed from the same patterns the game's IRQ routines use. The static
+// charset (PlayfieldCharset) holds each char's lit/base state; here we add the
+// alternate states so the web viewer can reproduce the blinking. Behaviour that
+// the game drives from live SID noise (the water/exhaust flicker) is rendered as
+// a short two-state cycle.
+func (g *Game) SoftCharAnim() []AnimChar {
+	cs := g.PlayfieldCharset()
+	bm := func(ch byte) [8]byte { var b [8]byte; copy(b[:], cs[int(ch)*8:]); return b }
+	var blank [8]byte
+	lit := [8]byte{0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55}
+	var out []AnimChar
+
+	// Energy barriers ($A7ED/$A830): the two halves flash half a cycle apart —
+	// group A ($01-$04) lit then off, group B ($05-$08) off then lit.
+	for _, ch := range []byte{0x01, 0x02, 0x03, 0x04} {
+		out = append(out, AnimChar{ch, 45, [][8]byte{bm(ch), blank}})
+	}
+	for _, ch := range []byte{0x05, 0x06, 0x07, 0x08} {
+		out = append(out, AnimChar{ch, 45, [][8]byte{blank, bm(ch)}})
+	}
+	// Laser-grid segments ($A86B): blink on/off, alternating phase per segment.
+	for i, ch := range []byte{0x0A, 0x0B, 0x0C, 0x0D} {
+		if i%2 == 0 {
+			out = append(out, AnimChar{ch, 24, [][8]byte{lit, blank}})
+		} else {
+			out = append(out, AnimChar{ch, 24, [][8]byte{blank, lit}})
+		}
+	}
+	// Rotating beacon ($A8B8): one of the four chars lit per phase.
+	for i, ch := range []byte{0x0E, 0x0F, 0x10, 0x11} {
+		fr := make([][8]byte, 4)
+		for j := range fr {
+			fr[j] = blank
+		}
+		fr[i] = lit
+		out = append(out, AnimChar{ch, 11, fr})
+	}
+	// Fort core ($3F, $A8F3): noise flicker, as a two-state cycle.
+	fc := bm(0x3F)
+	dim := fc
+	for j := range dim {
+		dim[j] &= 0x66
+	}
+	out = append(out, AnimChar{0x3F, 5, [][8]byte{fc, dim}})
+	// Cosmetic destructible-rock shimmer ($47, $AF54): two middle rows toggled.
+	rk := bm(0x47)
+	rkAlt := rk
+	rkAlt[3] ^= 0xFF
+	rkAlt[4] ^= 0xFF
+	out = append(out, AnimChar{0x47, 8, [][8]byte{rk, rkAlt}})
+	// Cosmetic wall shimmer ($4C-$4F, $AF54): base dither vs the $AF80 pattern.
+	for i := 0; i < 4; i++ {
+		ch := byte(0x4C + i)
+		var alt [8]byte
+		copy(alt[:], g.mem[cosmWallAlt+i*8:])
+		out = append(out, AnimChar{ch, 8, [][8]byte{bm(ch), alt}})
+	}
+	return out
+}
+
 // multicolor pixel-pair palette indices for the playfield:
 // 00 = $D021 (black), 01 = $D022 (per level), 10 = $D023 (white),
 // 11 = colour RAM (the playfield rows are mostly $0D = green).

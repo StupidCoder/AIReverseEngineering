@@ -1367,6 +1367,99 @@ is re-evaluated every frame, so Sonic can't out-run the floor check — no tunne
 
 Still to do: the remaining unidentified handler slots in `$24B2`; scoring and the timer.
 
+## 3. Underwater — Labyrinth's flooded acts
+
+Labyrinth is the only zone with water, and its three acts are *half-flooded*: a horizontal
+water line splits each act into an air part (top) and a submerged part (bottom). Crossing it
+changes three things at once — **the palette**, **the physics**, and a **drowning timer** —
+and tracing the one flag that drives all three pins down exactly how the game does it.
+
+### The water surface is an object
+
+The water line is not a level constant; it is a real **object, type `$40`** (handler in
+bank 2 at `$8D59`, reached through the master dispatch `$24B2 + $40×2`). It is the **first
+object** placed in every Labyrinth act, and its placement block-Y *is* the water level:
+
+| Act | Water object block-Y | Water world-Y (`×32`) |
+|-----|----------------------|------------------------|
+| Labyrinth Act 1 (`$D238`=9)  | 13 | **416** (`$01A0`) |
+| Labyrinth Act 2 (`$D238`=10) | 27 | **864** (`$0360`) |
+| Labyrinth Act 3 (`$D238`=11) | 10 | **320** (`$0140`) |
+
+Each frame the handler writes its current world-Y to **`$D2DD`** (with a sub-pixel sine bob
+from the wave table at `$8E4A`, so the surface ripples) and derives the **water-line
+*scanline*** `$D2DC = waterY − cameraY($D257)`, clamped to the visible range `[$0C,$B4]`.
+`$D2DC = $FF` means the line is above the top of the screen (the whole view is underwater);
+`$00` means it is below the bottom (all air). The level loader (`$185D`) arms this only for
+acts 9–11 (`$18B6`: `CP 9 … CP $0B`); every other act leaves `$D2DC = 0`, so the split code
+never fires.
+
+> The oracle can load a Labyrinth act but never *runs* the type-`$40` handler (its simplified
+> object engine leaves `$D2DD` at the loader's placeholder `$0800`/`$0020`), which is why the
+> underwater state could not be reproduced live earlier — this section is static, traced from
+> the handler table and the IRQ.
+
+### The palette swap is a raster split (`$0216`)
+
+There is no second palette index loaded for water — the swap is a **mid-frame raster effect**.
+The IRQ handler (`$0073`) programs a VDP **line interrupt** (register 10) at scanline `$D2DC`
+(`$0091`–`$00A1`). When that line is reached, the line-interrupt service (`$01B4`/`$01D7`,
+state machine in `$D241`) rewrites the **16 background CRAM colours** straight from a fixed
+table in bank 0 at **`$0216`**, cycle-precise with unrolled `OUT ($BE)` writes during active
+display. At vblank CRAM is restored (`$019F`, from `$0216`/`$0256`) to the surface palette for
+the next frame's top. The net effect on screen:
+
+- **Above the water line:** the normal Labyrinth surface palette (`romPalette` index **3**)
+  *with* the water/green-ooze colour **cycle** running (Part IV §4).
+- **Below the water line:** the static underwater palette at `$0216`, **no cycle** —
+  blue/cyan shifted (`#002244 #004477 #007777 #00aa99 #4477bb #0011ee #33eebb #0055ff #004488
+  #001199 #bbffaa #66bb99 #007733 #bbff77 #002255 #aaffff`). This is why submerged vines and
+  walls read as **cyan** rather than the surface greens/purples.
+
+(An earlier guess that the underwater palette was `palTable` index 8 was wrong; the real
+colours are this hand-written bank-0 table, found by following the line interrupt.)
+
+### The physics flag, and what it changes
+
+The Sonic handler (`$4AD0`) carries a per-zone *"this is a water level"* bit (`IY+6` bit 7,
+set by the loader). When it is set, each frame it calls **`$535C`**, which compares Sonic's
+world-Y (`$D402`) with the water surface (`$D2DD`):
+
+```
+$535C  HL=($D2DD); DE=($D402); SBC HL,DE
+       JP C,$5845        ; Sonic below the surface → underwater
+       ($D296)=0; RES 4,(IX+24); RET   ; above → clear timer + flag
+$5845  BIT 4,(IX+24); JR NZ,…          ; already wet?
+       LD A,$12; RST $28               ; entering → SPLASH sub-action ($12)
+       SET 4,(IX+24); RET              ; set Sonic's underwater flag
+```
+
+So **`IX+24` bit 4 is the underwater flag**. In the handler's physics-block selector
+(`$4B30`: `BIT 4,(IX+24); JP Z,$4B57`), the underwater branch (`$4B37`) loads a *different,
+slower* constant set into the movement variables. Comparing the blocks (each copied to
+`$D20F`, plus the explicit `$D23A/$D23C/$D23E`):
+
+| Variable | Normal (ground) | Underwater (`$4FE9` / `$4B37`) | Effect |
+|----------|-----------------|--------------------------------|--------|
+| `$D20F` acceleration | `$0010` | `$0004` | **¼** accel |
+| `$D20F+2` deceleration | `$0030` | `$000C` | ~0.4× |
+| `$D23A` top speed | `$0300`–`$0C00` | `$0100` | much slower |
+| `$D23C` jump impulse (up) | `$FD00` (−768) | `$FDC0` (−576) | weaker jump |
+| `$D23E` gravity | `$0038` (56) | `$0010` (16) | **~0.45×** gravity (slow sink) |
+
+Gravity is the constant added to vertical velocity at `$4DCF` (`DE=($D23E)`); the lower value
+is what makes Sonic drift down slowly underwater. So both the user-observed "lower gravity and
+acceleration" fall straight out of the one flag.
+
+### Drowning
+
+The flag also gates an underwater-only sub-handler, **`$526C`** (run via `$4B0D`: `BIT
+4,(IX+24); CALL NZ,$526C`). It is fenced to Labyrinth and skips the Act-3 boss
+(`CP $03`/`CP $0B`), then runs an **air timer `$D296`**: it counts up while submerged and,
+past `$0300` (768 frames ≈ 12.8 s), fires the warning/countdown effect (`RST $28` idx `$1A`)
+and eventually drowns Sonic. (So the 8-bit game *does* have drowning, contrary to a common
+belief that only the 16-bit version does.)
+
 ---
 
 # Appendix A — Toolchain and reproduction

@@ -82,10 +82,9 @@ export class LevelViewer {
     }
   }
 
-  // Draw block `idx` into its canvas at animation tick `t` (animated tiles pick the
-  // current frame's atlas tile; others use their static index), then flag the texture.
-  _drawBlock(idx, t) {
-    const ctx = this.blockCanvas[idx].getContext('2d');
+  // Paint block `idx`'s 4x4 tiles from the atlas into `ctx` at animation tick `t`
+  // (animated tiles pick the current frame's atlas tile; others use their static index).
+  _paintBlock(ctx, idx, t) {
     ctx.imageSmoothingEnabled = false;
     const tiles = this.level.blockTiles[idx];
     for (let r = 0; r < 4; r++) {
@@ -97,12 +96,35 @@ export class LevelViewer {
         ctx.drawImage(this.atlasImg, sx, sy, TILE, TILE, c * TILE, r * TILE, TILE, TILE);
       }
     }
+  }
+
+  // Draw block `idx` into its canvas at animation tick `t`, then flag the texture.
+  _drawBlock(idx, t) {
+    this._paintBlock(this.blockCanvas[idx].getContext('2d'), idx, t);
     if (this.blockTex[idx]) this.blockTex[idx].source.update();
   }
 
-  // Bake one 32x32 texture per distinct block index used in the map (frame 0).
+  // Underwater variant: paint the block, then remap each surface BG colour to its
+  // underwater counterpart (the Labyrinth raster-split palette, Part V §3). Used for the
+  // map rows at/below the water line; these never run the palette cycle (they're static).
+  _drawBlockUW(idx, t) {
+    const ctx = this.blockCanvasUW[idx].getContext('2d', { willReadFrequently: true });
+    this._paintBlock(ctx, idx, t);
+    const img = ctx.getImageData(0, 0, BLOCK, BLOCK), d = img.data;
+    for (let p = 0; p < d.length; p += 4) {
+      const u = this.water.map.get((d[p] << 16) | (d[p + 1] << 8) | d[p + 2]);
+      if (u) { d[p] = u[0]; d[p + 1] = u[1]; d[p + 2] = u[2]; }
+    }
+    ctx.putImageData(img, 0, 0);
+    if (this.blockTexUW[idx]) this.blockTexUW[idx].source.update();
+  }
+
+  // Bake one 32x32 texture per distinct block index used in the map (frame 0). When the act
+  // is flooded (Labyrinth), also bake an underwater-palette variant of each block for the
+  // map rows below the water line.
   _bakeBlocks(level) {
     this.blockCanvas = {}; this.blockTex = {}; this.animBlocks = [];
+    this.blockCanvasUW = {}; this.blockTexUW = {};
     const animSet = new Set(Object.keys(this.tileFrames).map(Number));
     for (const idx of new Set(level.blocks)) {
       const cv = document.createElement('canvas');
@@ -113,6 +135,16 @@ export class LevelViewer {
       tx.source.autoGenerateMipmaps = true;           // mipmaps: no moiré when zoomed out
       tx.source.scaleMode = this._texMode || 'nearest';
       this.blockTex[idx] = tx;
+      if (this.water) {
+        const cvu = document.createElement('canvas');
+        cvu.width = cvu.height = BLOCK;
+        this.blockCanvasUW[idx] = cvu;
+        this._drawBlockUW(idx, 0);
+        const txu = Texture.from(cvu);
+        txu.source.autoGenerateMipmaps = true;
+        txu.source.scaleMode = this._texMode || 'nearest';
+        this.blockTexUW[idx] = txu;
+      }
       if (level.blockTiles[idx].some((t) => animSet.has(t))) this.animBlocks.push(idx);
       // a "cycle block" contains a tile that genuinely uses a cycling palette slot (not just
       // a tile that shares the colour at rest — that's the sky/fruit, which must not blink)
@@ -165,7 +197,10 @@ export class LevelViewer {
       if (this.animAccum >= period) {
         this.animAccum = 0;
         this.animTick = (this.animTick + 1) | 0;
-        for (const idx of this.animBlocks) this._drawBlock(idx, this.animTick);
+        for (const idx of this.animBlocks) {
+          this._drawBlock(idx, this.animTick);
+          if (this.water && this.blockTexUW[idx]) this._drawBlockUW(idx, this.animTick);
+        }
       }
     }
     // palette cycle (water / lava)
@@ -197,13 +232,26 @@ export class LevelViewer {
       this.waterTiles = new Set(level.paletteCycle.tiles); // tiles that actually use a cycling slot
     }
 
+    // Labyrinth underwater split (Part V §3): below the water line the engine raster-swaps
+    // the BG palette to a static underwater set. The line sits on a block-row boundary, so
+    // rows at/below water.row use the underwater-baked block textures (no cycle).
+    this.water = null;
+    if (level.water) {
+      const surf = level.palette.map(hexToRgb), uw = level.water.palette.map(hexToRgb);
+      const map = new Map();
+      for (let i = 0; i < uw.length; i++) map.set((surf[i][0] << 16) | (surf[i][1] << 8) | surf[i][2], uw[i]);
+      this.water = { row: Math.round(level.water.lineY / BLOCK), map };
+    }
+
     // base tilemap
     this.tileLayer.removeChildren();
     this._bakeBlocks(level);
     const { widthBlocks: W, heightBlocks: H, blocks } = level;
     for (let r = 0; r < H; r++) {
+      const underwater = this.water && r >= this.water.row;
       for (let c = 0; c < W; c++) {
-        const tx = this.blockTex[blocks[r * W + c]];
+        const blk = blocks[r * W + c];
+        const tx = (underwater && this.blockTexUW[blk]) ? this.blockTexUW[blk] : this.blockTex[blk];
         if (!tx) continue;
         const s = new Sprite(tx);
         s.x = c * BLOCK; s.y = r * BLOCK;
@@ -278,7 +326,10 @@ export class LevelViewer {
     if (name === 'animation') {
       this.animOn = on;
       if (!on) {
-        if (this.animBlocks) { this.animTick = 0; for (const i of this.animBlocks) this._drawBlock(i, 0); }
+        if (this.animBlocks) {
+          this.animTick = 0;
+          for (const i of this.animBlocks) { this._drawBlock(i, 0); if (this.water && this.blockTexUW[i]) this._drawBlockUW(i, 0); }
+        }
         if (this.cycleColors && this.cycleBlocks.length) { this.cycleStep = 0; this._applyCycleStep(0); }
       }
     }
@@ -320,6 +371,7 @@ export class LevelViewer {
     if (mode === this._texMode) return;
     this._texMode = mode;
     for (const idx in this.blockTex) this.blockTex[idx].source.scaleMode = mode;
+    if (this.blockTexUW) for (const idx in this.blockTexUW) this.blockTexUW[idx].source.scaleMode = mode;
   }
   _wireCamera() {
     const c = this.el;

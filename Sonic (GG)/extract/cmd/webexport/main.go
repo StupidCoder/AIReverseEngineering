@@ -394,6 +394,38 @@ type ActFile struct {
 	Objects      []Obj         `json:"objects"`
 	Anim         []AnimGroup   `json:"anim"`                   // animated tile groups (atlas indices per frame)
 	PaletteCycle *PaletteCycle `json:"paletteCycle,omitempty"` // runtime BG-palette rotation (water/waterfall)
+	Water        *Water        `json:"water,omitempty"`        // Labyrinth flooded-act underwater split (Part V §3)
+}
+
+// Water describes a Labyrinth act's underwater split. The engine raster-swaps the BG
+// palette at the water-line scanline (IRQ line interrupt, palette from bank 0 $0216) and
+// runs slower physics below it. For the viewer: blocks whose top is at or below LineY use
+// the static underwater palette (no cycle); above it is the normal surface palette + cycle.
+type Water struct {
+	LineY   int      `json:"lineY"`   // water surface world-Y (px); >= this is underwater
+	Palette []string `json:"palette"` // 16 underwater BG colours, static (bank 0 $0216)
+}
+
+// underwaterPalette returns the 16 static underwater BG colours the IRQ line-split writes
+// to CRAM from the bank-0 table at file $0216 (Part V §3).
+func underwaterPalette(rom []byte) []string {
+	pal := gamegear.Palette(rom[0x0216 : 0x0216+32])
+	return paletteHex(pal)
+}
+
+// waterLine returns the water surface world-Y (px) for a Labyrinth act, or -1 if the act
+// has no water. The water surface is object type $40 (the first object placed); its block-Y
+// times 32 is the surface line (loader $185D arms the split only for acts 9-11).
+func waterLine(rom []byte, act int) int {
+	if act < 9 || act > 11 {
+		return -1
+	}
+	for _, o := range objectTable(rom, act) {
+		if o.Type == 0x40 {
+			return o.By * 32
+		}
+	}
+	return -1
 }
 
 func main() {
@@ -490,6 +522,9 @@ func main() {
 			actPC := *pc // per-act copy: the cycling tiles depend on this act's tile set
 			actPC.Tiles = cyclingTiles(tiles, pc.Slots)
 			af.PaletteCycle = &actPC
+		}
+		if ly := waterLine(rom, a.num); ly >= 0 {
+			af.Water = &Water{LineY: ly, Palette: underwaterPalette(rom)}
 		}
 		file := fmt.Sprintf("act%02d.json", a.num+1)
 		writeJSON(filepath.Join(outdir, file), af)

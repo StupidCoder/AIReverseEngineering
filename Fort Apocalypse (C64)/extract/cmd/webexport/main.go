@@ -119,33 +119,33 @@ func run(prgPath, outDir string) error {
 			return err
 		}
 
-		// Cells in render order: the wrap-seam column (stored at 255), then the
-		// 215 content columns (Part IV §4).
-		w := fortgfx.ContentWidth + 1
+		// Cells: the 215 content columns (Part IV §4). The playfield is a
+		// cylinder — column 214 joins back to column 0 — so the stored wrap-seam
+		// column (a duplicate of column 0) is dropped; the viewer wraps instead.
+		w := fortgfx.ContentWidth
 		jl.Width, jl.Height = w, fortgfx.MapHeight
 		jl.Cells = make([]int, w*fortgfx.MapHeight)
 		for r := 0; r < fortgfx.MapHeight; r++ {
-			jl.Cells[r*w] = int(lm.Cells[r][fortgfx.MapWidth-1])
 			for c := 0; c < fortgfx.ContentWidth; c++ {
-				jl.Cells[r*w+1+c] = int(lm.Cells[r][c])
+				jl.Cells[r*w+c] = int(lm.Cells[r][c])
 			}
 		}
 
-		// Objects (render coords: content column + 1 for the seam), mirroring the
-		// gfxrender markers — footprints in characters.
-		jl.Spawn = [2]int{lm.PlayerSpawn.Col + 1, lm.PlayerSpawn.Row}
-		jl.Objects = append(jl.Objects, jsonObj{lm.PlayerSpawn.Col + 1, lm.PlayerSpawn.Row, 4, 3, "player"})
+		// Objects in content-column coordinates, mirroring the gfxrender markers
+		// (footprints in characters).
+		jl.Spawn = [2]int{lm.PlayerSpawn.Col, lm.PlayerSpawn.Row}
+		jl.Objects = append(jl.Objects, jsonObj{lm.PlayerSpawn.Col, lm.PlayerSpawn.Row, 4, 3, "player"})
 		for _, p := range lm.PrisonerSpawns {
-			jl.Objects = append(jl.Objects, jsonObj{p.Col + 1, p.Row - 1, 2, 2, "prisoner"})
+			jl.Objects = append(jl.Objects, jsonObj{p.Col, p.Row - 1, 2, 2, "prisoner"})
 		}
 		for _, p := range lm.TankHomes {
-			jl.Objects = append(jl.Objects, jsonObj{p.Col + 1, p.Row - 1, 3, 2, "tank"})
+			jl.Objects = append(jl.Objects, jsonObj{p.Col, p.Row - 1, 3, 2, "tank"})
 		}
 		for _, p := range lm.EnemySpawns {
-			jl.Objects = append(jl.Objects, jsonObj{p.Col + 1, p.Row, 4, 3, "enemy"})
+			jl.Objects = append(jl.Objects, jsonObj{p.Col, p.Row, 4, 3, "enemy"})
 		}
 		for _, p := range lm.DropPoints {
-			jl.Drops = append(jl.Drops, [2]int{p.Col + 1, p.Row})
+			jl.Drops = append(jl.Drops, [2]int{p.Col, p.Row})
 		}
 
 		file := fmt.Sprintf("level%d.json", level)

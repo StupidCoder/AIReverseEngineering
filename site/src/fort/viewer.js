@@ -14,6 +14,7 @@ const ATLAS_COLS = 16;     // atlas is 16 chars wide
 const DATA = 'public/fort/';
 const NATIVE_W = 320;      // C64 screen width (40 chars) — 1:1 reference
 const ZOOM_STEP = Math.pow(1.15, 0.25);
+const WRAP_COPIES = 3;     // cylinder is drawn as 3 copies; min zoom shows ≤2 periods
 
 const OBJ = {              // marker colour + label per object type
   player: { color: 0x3cb4ff, label: 'COPTER' },
@@ -83,17 +84,23 @@ export class FortViewer {
       this.charTex[ch] = tx;
     }
 
-    // Base tilemap: one sprite per cell.
+    // Base tilemap. The playfield is a cylinder (column W-1 joins back to 0), so
+    // it's drawn as WRAP_COPIES side-by-side copies one period (cyl px) apart;
+    // the camera wraps horizontally across them for seamless scrolling.
     this.tileLayer.removeChildren();
     const { width: W, height: H, cells } = level;
-    for (let r = 0; r < H; r++) {
-      for (let c = 0; c < W; c++) {
-        const s = new Sprite(this.charTex[cells[r * W + c]]);
-        s.x = c * CHAR; s.y = r * CHAR;
-        this.tileLayer.addChild(s);
+    this.cyl = W * CHAR;
+    for (let copy = 0; copy < WRAP_COPIES; copy++) {
+      const ox = copy * this.cyl;
+      for (let r = 0; r < H; r++) {
+        for (let c = 0; c < W; c++) {
+          const s = new Sprite(this.charTex[cells[r * W + c]]);
+          s.x = ox + c * CHAR; s.y = r * CHAR;
+          this.tileLayer.addChild(s);
+        }
       }
     }
-    this.levelW = W * CHAR; this.levelH = H * CHAR;
+    this.levelW = this.cyl; this.levelH = H * CHAR;
 
     // Animation entries; reset to base if animation is currently off.
     this.anim = (level.anim || []).map((a) => ({ ...a, _last: 0 }));
@@ -123,22 +130,25 @@ export class FortViewer {
   // --- object markers -----------------------------------------------------
   _buildObjects(level) {
     this.objectLayer.removeChildren();
-    const g = new Graphics();
-    for (const o of level.objects) {
-      const def = OBJ[o.type] || { color: 0xaaaaaa };
-      g.rect(o.col * CHAR, o.row * CHAR, o.w * CHAR, o.h * CHAR).stroke({ width: 1, color: def.color });
-    }
-    for (const [cx, cy] of level.drops || []) {
-      g.circle((cx * CHAR) + (4 * CHAR) / 2, (cy * CHAR) + (3 * CHAR) / 2, 10).stroke({ width: 1, color: 0xffffff });
-    }
-    this.objectLayer.addChild(g);
-    // labels for the singleton-ish markers (player); keep the dense ones unlabelled
-    for (const o of level.objects) {
-      const def = OBJ[o.type];
-      if (!def || !def.label || o.type !== 'player') continue;
-      const t = new Text({ text: def.label, style: { fontFamily: 'monospace', fontSize: 7, fill: def.color } });
-      t.x = o.col * CHAR; t.y = o.row * CHAR - 9;
-      this.objectLayer.addChild(t);
+    // Markers are drawn once per cylinder copy so they wrap with the map.
+    for (let copy = 0; copy < WRAP_COPIES; copy++) {
+      const ox = copy * this.cyl;
+      const g = new Graphics();
+      for (const o of level.objects) {
+        const def = OBJ[o.type] || { color: 0xaaaaaa };
+        g.rect(ox + o.col * CHAR, o.row * CHAR, o.w * CHAR, o.h * CHAR).stroke({ width: 1, color: def.color });
+      }
+      for (const [cx, cy] of level.drops || []) {
+        g.circle(ox + cx * CHAR + (4 * CHAR) / 2, cy * CHAR + (3 * CHAR) / 2, 10).stroke({ width: 1, color: 0xffffff });
+      }
+      this.objectLayer.addChild(g);
+      for (const o of level.objects) {
+        const def = OBJ[o.type];
+        if (!def || !def.label || o.type !== 'player') continue;
+        const t = new Text({ text: def.label, style: { fontFamily: 'monospace', fontSize: 7, fill: def.color } });
+        t.x = ox + o.col * CHAR; t.y = o.row * CHAR - 9;
+        this.objectLayer.addChild(t);
+      }
     }
   }
 
@@ -153,9 +163,11 @@ export class FortViewer {
   // --- camera (shared pattern with the Sonic viewer) ----------------------
   _fitDefault(level) {
     const W = this.app.screen.width, H = this.app.screen.height;
-    this.minZoom = Math.min(W / this.levelW, H / this.levelH) * 0.95;
+    // Don't zoom out past two cylinder periods (so the 3 copies always cover the
+    // view); the repetition makes the wrap visible. Fit height by default.
+    this.minZoom = W / (2 * this.cyl);
     this.maxZoom = (W / NATIVE_W) * 3;
-    this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, H / this.levelH)); // fit height, scroll across
+    this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, H / this.levelH));
     const [sx, sy] = level.spawn;
     this._panTo(sx * CHAR, sy * CHAR);
     this._apply();
@@ -173,19 +185,23 @@ export class FortViewer {
     this.world.position.set(px - wx * this.zoom, py - wy * this.zoom);
     this._apply();
   }
+  // Vertical clamps to the map; horizontal wraps the cylinder: the camera x is
+  // kept so the viewport's left edge maps into the first copy's [0, cyl) range,
+  // which the three copies always cover.
   _clampPan() {
-    const sw = this.app.screen.width, sh = this.app.screen.height;
-    const lw = this.levelW * this.zoom, lh = this.levelH * this.zoom;
+    const sh = this.app.screen.height;
+    const lh = this.levelH * this.zoom;
     let { x, y } = this.world.position;
-    x = lw <= sw ? (sw - lw) / 2 : Math.min(0, Math.max(sw - lw, x));
     y = lh <= sh ? (sh - lh) / 2 : Math.min(0, Math.max(sh - lh, y));
+    const m = this.cyl * this.zoom;
+    if (m > 0) x = -(((-x % m) + m) % m);
     this.world.position.set(x, y);
   }
   _apply() {
     this.world.scale.set(this.zoom);
     this._clampPan();
     this._updateTexFilter();
-    if (this.hud) this.hud.textContent = `${this.levelW / CHAR}x${this.levelH / CHAR} chars`;
+    if (this.hud) this.hud.textContent = `${this.levelW / CHAR}x${this.levelH / CHAR} chars · wraps`;
   }
   _updateTexFilter() {
     const mode = this.zoom < 1 ? 'linear' : 'nearest';

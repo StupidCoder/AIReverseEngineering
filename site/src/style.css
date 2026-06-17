@@ -33,7 +33,9 @@ main { max-width: 1100px; margin: 0 auto; padding: 24px 20px; }
 /* --- Sonic viewer --- */
 .viewer-wrap { max-width: 1100px; margin: 0 auto; padding: 16px 20px; }
 .viewport {
-  position: relative; width: 100%; aspect-ratio: 10 / 9;   /* Game Gear screen */
+  /* Game Gear 10:9, capped by viewport height so it always fits on screen */
+  position: relative; aspect-ratio: 10 / 9;
+  width: min(100%, calc(60vh * 10 / 9)); margin: 0 auto;
   background: #000; border: 1px solid var(--line); border-radius: 8px;
   overflow: hidden; touch-action: none; cursor: grab;
 }

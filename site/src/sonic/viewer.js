@@ -35,6 +35,8 @@ export class LevelViewer {
     this.tileLayer = new Container();
     this.collisionLayer = new Container();
     this.objectLayer = new Container();
+    this.collisionLayer.visible = false; // toggled by the control bar; persists across acts
+    this.objectLayer.visible = false;
     this.zoom = 1; this.minZoom = 0.1; this.maxZoom = 12;
     this.atlasCache = new Map();   // atlas name -> HTMLImageElement
     this.shapes = null;
@@ -178,7 +180,6 @@ export class LevelViewer {
     }
     g.fill({ color: 0xff2020, alpha: 0.8 });
     this.collisionLayer.addChild(g);
-    this.collisionLayer.visible = false;
   }
 
   // --- object markers -----------------------------------------------------
@@ -202,7 +203,6 @@ export class LevelViewer {
     // Sonic spawn: 2x4-tile box
     const [sx, sy] = level.spawn;
     mk(sx, sy, 16, 32, 0x3cb4ff, 'SONIC');
-    this.objectLayer.visible = false;
   }
 
   setLayer(name, on) {

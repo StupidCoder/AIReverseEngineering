@@ -1577,8 +1577,10 @@ each frame; when it runs out the decoder reads the next bytes:
   (`$0356`=C down to `$01C4`=B), and the octave field shifts it down. The **next byte is the
   duration** (a tick count; `0` ⇒ the default duration). So a note is *two* bytes.
 - **`$7F` — a rest** (+ a duration byte): the volume mask is cleared, silencing the channel.
-- **`$71`–`$7E` — a voice**: the low nibble picks an 8-byte instrument from the table at
-  **`$43CE`**.
+- **`$70`–`$7E` — a voice** (+ a duration byte): the low nibble picks an 8-byte instrument
+  from the table at **`$43CE`** — **byte 0 is the noise mode**, bytes 1–6 the ADSR envelope.
+  The **noise channel's "notes" are voice commands**: each `$70`/`$71` is a drum hit (a noise
+  mode + a short percussive envelope), which is the zone's percussion.
 - **`$80`–`$FF` — a command** (no time of its own), dispatched through `$4529`:
   `$80` set tempo (note-length multiplier + per-frame tick), `$81` volume, `$82` instrument
   envelope (6 bytes, inline), `$83` vibrato (5 bytes), `$84` detune, `$85` skip,

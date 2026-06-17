@@ -106,11 +106,13 @@ func (c *channel) decode() {
 			c.pos++
 			c.startNote(d, true)
 			return
-		case b < 0x7F: // voice $71-$7E
+		case b < 0x7F: // voice $70-$7E: an instrument from $43CE (8 bytes): byte0 = noise mode
+			// (IX+37, used by the noise channel as the drum timbre), bytes 1-6 = ADSR envelope.
 			v := b & 0x0F
 			c.pos++
+			c.noiseMd = int(rb(0x43CE + v*8))
 			for i := 0; i < 6; i++ {
-				c.env[i] = rb(0x43CE + v*8 + i)
+				c.env[i] = rb(0x43CE + v*8 + 1 + i)
 			}
 			d := int(rb(c.pos))
 			c.pos++
@@ -305,6 +307,9 @@ func (c *channel) tickFrame() (int, float64, bool) {
 			vol = 15
 		}
 	}
+	if c.noise { // the noise channel reports its mode byte instead of a tone period
+		per = c.noiseMd
+	}
 	return per, psgAtten[15-vol] * boolf(vol > 0), c.noise
 }
 
@@ -440,16 +445,38 @@ func render(base int) ([]int16, int) {
 					out -= amp[i]
 				}
 			}
-			// noise channel (3): white noise at a period from the noise note
-			np := float64(per[3])
-			if np < 1 {
+			// noise channel (3): the SN76489 noise. per[3] carries the mode byte: bit 2 =
+			// white(1)/periodic(0), bits 0-1 = shift rate (clock/512,/1024,/2048, or tone2's
+			// period for mode 3).
+			mode := per[3]
+			var np float64
+			switch mode & 3 {
+			case 0:
 				np = 16
+			case 1:
+				np = 32
+			case 2:
+				np = 64
+			default:
+				np = float64(per[2])
+				if np < 1 {
+					np = 16
+				}
 			}
 			nAcc += PSGClock / (32 * np) / sr
 			for nAcc >= 1 {
 				nAcc--
+				var fb uint16
+				if mode&4 != 0 { // white noise (tapped bits 0 and 3, SMS/GG)
+					fb = (lfsr ^ (lfsr >> 3)) & 1
+				} else { // periodic noise
+					fb = lfsr & 1
+				}
 				bit := lfsr & 1
-				lfsr = (lfsr >> 1) | (((lfsr ^ (lfsr >> 2)) & 1) << 15)
+				lfsr = (lfsr >> 1) | (fb << 15)
+				if lfsr == 0 {
+					lfsr = 0x8000
+				}
 				nOut = float64(int(bit)*2 - 1)
 			}
 			out += nOut * amp[3] * 0.6

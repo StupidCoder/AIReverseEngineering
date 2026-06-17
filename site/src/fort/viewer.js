@@ -252,9 +252,13 @@ export class FortViewer {
     // showing more would repeat the objects (e.g. all 8 prisoners twice).
     this.minZoom = W / this.cyl;
     this.maxZoom = (W / NATIVE_W) * 3;
-    this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, H / this.levelH));
-    const [sx, sy] = level.spawn;
-    this._panTo(sx * CHAR, sy * CHAR);
+    // Default view: the top half of the level fills the viewport vertically
+    // (height = levelH/2 worth of world px), its top edge at the top, and the
+    // player spawn centred horizontally.
+    this.zoom = (2 * H) / this.levelH;
+    const [sx] = level.spawn;
+    const centreX = (sx + 2) * CHAR; // centre of the 4-char-wide copter
+    this.world.position.set(W / 2 - centreX * this.zoom, 0);
     this._apply();
   }
   _panTo(wx, wy) {

@@ -14,6 +14,8 @@ const DATA = 'public/sonic/';
 const GG_W = 160;                       // Game Gear visible width (px); max zoom-in = GG 1:1
 const ZOOM_STEP = Math.pow(1.15, 0.25); // per wheel notch — a quarter of the old 1.15 in log space
 
+const hexToRgb = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+
 const OBJ_COLORS = {     // category tint by object name
   default: 0xaaaaaa,
   enemy: 0xff3838, item: 0xff9020, platform: 0x29d46e, boss: 0xc83cff, ctrl: 0xffe000,
@@ -110,17 +112,66 @@ export class LevelViewer {
       tx.source.scaleMode = 'nearest';
       this.blockTex[idx] = tx;
       if (level.blockTiles[idx].some((t) => animSet.has(t))) this.animBlocks.push(idx);
+      // a "cycle block" is any block whose pixels include one of the cycling colours
+      if (this.cycleColors) {
+        const data = cv.getContext('2d').getImageData(0, 0, BLOCK, BLOCK);
+        if (this._hasCycleColor(data)) { this.cycleBlocks.push(idx); this.blockClean[idx] = data; }
+      }
+    }
+  }
+
+  _hasCycleColor(img) {
+    const d = img.data;
+    for (let p = 0; p < d.length; p += 4) {
+      for (const f of this.cycleFrom) if (d[p] === f[0] && d[p + 1] === f[1] && d[p + 2] === f[2]) return true;
+    }
+    return false;
+  }
+
+  // Recolour every cycle block to palette step `s` by remapping the cycling colours from
+  // its clean (step-0) pixels — a faithful re-creation of the runtime BG-palette rotation.
+  _applyCycleStep(s) {
+    for (const idx of this.cycleBlocks) {
+      const clean = this.blockClean[idx].data;
+      const ctx = this.blockCanvas[idx].getContext('2d');
+      const out = ctx.createImageData(BLOCK, BLOCK);
+      const dst = out.data;
+      for (let p = 0; p < clean.length; p += 4) {
+        let r = clean[p], g = clean[p + 1], b = clean[p + 2];
+        for (let i = 0; i < this.cycleFrom.length; i++) {
+          const f = this.cycleFrom[i];
+          if (r === f[0] && g === f[1] && b === f[2]) { const t = this.cycleColors[s][i]; r = t[0]; g = t[1]; b = t[2]; break; }
+        }
+        dst[p] = r; dst[p + 1] = g; dst[p + 2] = b; dst[p + 3] = clean[p + 3];
+      }
+      ctx.putImageData(out, 0, 0);
+      this.blockTex[idx].source.update();
     }
   }
 
   _advanceAnim() {
-    if (!this.animOn || !this.animBlocks || !this.animBlocks.length) return;
-    this.animAccum += this.app.ticker.deltaMS;
-    const period = 1000 * (this.framesPerTick || 10) / 60;
-    if (this.animAccum < period) return;
-    this.animAccum = 0;
-    this.animTick = (this.animTick + 1) | 0;
-    for (const idx of this.animBlocks) this._drawBlock(idx, this.animTick);
+    if (!this.animOn) return;
+    const dt = this.app.ticker.deltaMS;
+    // tile animation (rings, flowers)
+    if (this.animBlocks && this.animBlocks.length) {
+      this.animAccum += dt;
+      const period = 1000 * (this.framesPerTick || 10) / 60;
+      if (this.animAccum >= period) {
+        this.animAccum = 0;
+        this.animTick = (this.animTick + 1) | 0;
+        for (const idx of this.animBlocks) this._drawBlock(idx, this.animTick);
+      }
+    }
+    // palette cycle (water / lava)
+    if (this.cycleColors && this.cycleBlocks.length) {
+      this.cycleAccum += dt;
+      const cperiod = 1000 * this.cyclePeriod / 60;
+      if (this.cycleAccum >= cperiod) {
+        this.cycleAccum = 0;
+        this.cycleStep = (this.cycleStep + 1) % this.cycleColors.length;
+        this._applyCycleStep(this.cycleStep);
+      }
+    }
   }
 
   async loadAct(actMeta) {
@@ -129,6 +180,15 @@ export class LevelViewer {
     this.level = level;
     this._buildAnim(level);
     this.animTick = 0; this.animAccum = 0;
+
+    // palette cycle (water/lava): per-step colours for the cycling slots; step 0 = atlas.
+    this.cycleColors = null; this.cycleBlocks = []; this.blockClean = {};
+    this.cycleStep = 0; this.cycleAccum = 0;
+    if (level.paletteCycle) {
+      this.cycleColors = level.paletteCycle.steps.map((step) => step.map(hexToRgb));
+      this.cycleFrom = this.cycleColors[0];
+      this.cyclePeriod = level.paletteCycle.periodFrames;
+    }
 
     // base tilemap
     this.tileLayer.removeChildren();
@@ -210,7 +270,10 @@ export class LevelViewer {
     if (name === 'objects') this.objectLayer.visible = on;
     if (name === 'animation') {
       this.animOn = on;
-      if (!on && this.animBlocks) { this.animTick = 0; for (const i of this.animBlocks) this._drawBlock(i, 0); }
+      if (!on) {
+        if (this.animBlocks) { this.animTick = 0; for (const i of this.animBlocks) this._drawBlock(i, 0); }
+        if (this.cycleColors && this.cycleBlocks.length) { this.cycleStep = 0; this._applyCycleStep(0); }
+      }
     }
   }
 

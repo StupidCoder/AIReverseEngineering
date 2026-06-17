@@ -204,6 +204,128 @@ func renderAtlas(rom, tiles []byte, pal color.Palette, zone int) (*image.RGBA, [
 	return img, groups
 }
 
+// PaletteCycle is a runtime BG-palette rotation (e.g. the Green Hills water/waterfall,
+// which cycles colours 10-12 through three blues every ~10 frames — a palette effect, not
+// a tile animation). Steps[0] is aligned to the static palette (= the atlas colours).
+type PaletteCycle struct {
+	Slots        []int      `json:"slots"`        // BG palette slots that cycle
+	Steps        [][]string `json:"steps"`        // per step: hex colour for each slot
+	PeriodFrames int        `json:"periodFrames"` // game frames per step
+}
+
+// capturePaletteCycle boots the act and watches CRAM for a BG-palette cycle, returning the
+// cycling slots + per-step colours (step 0 = the static palette) + period, or nil. It is
+// the one oracle-assisted part of the export (the cycle is driven at runtime).
+func capturePaletteCycle(rom []byte, act int, staticPal color.Palette) *PaletteCycle {
+	m := gamegear.NewMachine(rom)
+	m.CapturePC = 0x0A73
+	for i := 0; i < 700; i++ {
+		m.RunFrame()
+	}
+	for r := 0; r < 40 && !m.Captured; r++ {
+		m.Pad00 = 0x7F
+		m.Write(0xD238, byte(act))
+		for i := 0; i < 8; i++ {
+			m.RunFrame()
+			m.Write(0xD238, byte(act))
+		}
+		m.Pad00 = 0xFF
+		for k := 0; k < 242 && !m.Captured; k++ {
+			m.Write(0xD238, byte(act))
+			m.RunFrame()
+		}
+	}
+	for i := 0; i < 200; i++ { // let the palette fade finish
+		m.RunFrame()
+	}
+	const N = 120
+	rec := make([][]string, N)
+	for f := 0; f < N; f++ {
+		m.RunFrame()
+		rec[f] = paletteHex(gamegear.Palette(m.VDP.CRAM[:32]))
+	}
+	eq := func(a, b []string) bool {
+		for i := range a {
+			if a[i] != b[i] {
+				return false
+			}
+		}
+		return true
+	}
+	// Frames where the palette changes; the period is the gap BETWEEN changes (the first
+	// change is just the remainder of the step the recording started in).
+	var changes []int
+	for f := 1; f < N; f++ {
+		if !eq(rec[f], rec[f-1]) {
+			changes = append(changes, f)
+		}
+	}
+	if len(changes) < 2 {
+		return nil
+	}
+	P := changes[1] - changes[0]
+	// The distinct states in cycle order: the state at the start, then after each change.
+	runVals := [][]string{rec[0]}
+	for _, cf := range changes {
+		runVals = append(runVals, rec[cf])
+	}
+	L := 0
+	for cand := 1; cand <= len(runVals)/2; cand++ {
+		ok := true
+		for i := 0; i+cand < len(runVals); i++ {
+			if !eq(runVals[i], runVals[i+cand]) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			L = cand
+			break
+		}
+	}
+	if L < 2 {
+		return nil
+	}
+	steps := runVals[:L]
+	var slots []int
+	for i := 0; i < 16; i++ {
+		for k := 1; k < len(steps); k++ {
+			if steps[k][i] != steps[0][i] {
+				slots = append(slots, i)
+				break
+			}
+		}
+	}
+	if len(slots) == 0 {
+		return nil
+	}
+	sp := paletteHex(staticPal)
+	rot := 0
+	for k := 0; k < len(steps); k++ {
+		match := true
+		for _, s := range slots {
+			if steps[k][s] != sp[s] {
+				match = false
+				break
+			}
+		}
+		if match {
+			rot = k
+			break
+		}
+	}
+	pc := &PaletteCycle{Slots: slots, PeriodFrames: P}
+	for k := 0; k < len(steps); k++ {
+		st := steps[(rot+k)%len(steps)]
+		row := make([]string, len(slots))
+		for j, s := range slots {
+			row[j] = st[s]
+		}
+		pc.Steps = append(pc.Steps, row)
+	}
+	return pc
+}
+
 // JSON shapes ----------------------------------------------------------------
 
 type Meta struct {
@@ -228,21 +350,22 @@ type Shapes struct {
 }
 
 type ActFile struct {
-	Zone         int         `json:"zone"`
-	Act          int         `json:"act"`
-	Name         string      `json:"name"`
-	Atlas        string      `json:"atlas"`
-	TileSize     int         `json:"tileSize"`
-	Stride       int         `json:"stride"`
-	WidthBlocks  int         `json:"widthBlocks"`
-	HeightBlocks int         `json:"heightBlocks"`
-	Palette      []string    `json:"palette"`
-	BlockTiles   [][]int     `json:"blockTiles"` // block -> 16 tile indices (4x4)
-	BlockShape   []int       `json:"blockShape"` // block -> collision shape 0-47
-	Blocks       []int       `json:"blocks"`     // block-index map, row-major, len = w*h
-	Spawn        [2]int      `json:"spawn"`      // [bx, by]
-	Objects      []Obj       `json:"objects"`
-	Anim         []AnimGroup `json:"anim"` // animated tile groups (atlas indices per frame)
+	Zone         int           `json:"zone"`
+	Act          int           `json:"act"`
+	Name         string        `json:"name"`
+	Atlas        string        `json:"atlas"`
+	TileSize     int           `json:"tileSize"`
+	Stride       int           `json:"stride"`
+	WidthBlocks  int           `json:"widthBlocks"`
+	HeightBlocks int           `json:"heightBlocks"`
+	Palette      []string      `json:"palette"`
+	BlockTiles   [][]int       `json:"blockTiles"` // block -> 16 tile indices (4x4)
+	BlockShape   []int         `json:"blockShape"` // block -> collision shape 0-47
+	Blocks       []int         `json:"blocks"`     // block-index map, row-major, len = w*h
+	Spawn        [2]int        `json:"spawn"`      // [bx, by]
+	Objects      []Obj         `json:"objects"`
+	Anim         []AnimGroup   `json:"anim"`                   // animated tile groups (atlas indices per frame)
+	PaletteCycle *PaletteCycle `json:"paletteCycle,omitempty"` // runtime BG-palette rotation (water/waterfall)
 }
 
 func main() {
@@ -275,6 +398,7 @@ func main() {
 	// Dedup atlases by (tileFile, bgPal): same tiles + palette -> one PNG.
 	atlasName := map[[2]int]string{}
 	atlasAnim := map[string][]AnimGroup{}
+	cycleCache := map[int]*PaletteCycle{} // by bgPal: the BG-palette cycle (oracle-captured)
 	meta := Meta{Zones: zoneNames, Anim: AnimMeta{FramesPerTick: 10}}
 
 	const screenBlk = 5
@@ -329,6 +453,12 @@ func main() {
 			Blocks: blocks, Spawn: spawn, Objects: objs,
 			Anim: atlasAnim[atlas],
 		}
+		pc, seen := cycleCache[a.bgPal]
+		if !seen {
+			pc = capturePaletteCycle(rom, a.num, pal)
+			cycleCache[a.bgPal] = pc
+		}
+		af.PaletteCycle = pc
 		file := fmt.Sprintf("act%02d.json", a.num+1)
 		writeJSON(filepath.Join(outdir, file), af)
 		meta.Acts = append(meta.Acts, ActIndex{File: file, Zone: a.zone, Name: a.name, Atlas: atlas})

@@ -267,3 +267,7 @@
 42F4  music_note  (bank3) channel note/command decoder reading one data byte: <$70 = NOTE (low nibble -> period table $44D5, high nibble = duration); $71-$7E = voice/instrument (low nibble -> 8-byte param table $43CE); $7F = rest; >=$80 = command ($44F3).
 44F3  music_cmd  (bank3) command dispatch (bytes >=$80, table $4529). $FF = LOOP (reload channel data pointer from the loop-start kept in IX+34/35); $FE = end/silence channel. The $FF loop is what makes each channel repeat -> the song loop = the longest channel's loop period.
 44D5  music_freqtable  (bank3) note index -> 10-bit SN76489 tone period (2 bytes/entry).
+43DE  music_render  (bank3) per-frame channel render: period = (freqtable>>octave) + detune(IX+8/9) + vibrato(IX+10/11); octave shift at $4468 (SRL by IX+31); ADSR envelope (IX+13 phase 0-3 -> $4545/$455C/$4579/$4597, params IX+14-19 from $82) scales the volume; writes period (2 bytes) + 15-vol attenuation to PSG $7F. Noise channel (IX+0=$E0) uses IX+37 mode.
+4632  music_cmd86  (bank3) command $86: push a repeat-counter frame on the channel's loop stack (IX+32/33).
+4647  music_cmd87  (bank3) command $87 <count> <addrLo addrHi>: repeat block - jump pointer to addr+base(IX+41/42, = song base) until the pushed counter decrements to 0, then pop + skip the 3 operand bytes. Nested via the IX+32/33 stack.
+43CE  music_voices  (bank3) instrument/voice table, 8 bytes per voice, indexed by the low nibble of a $71-$7E voice command (envelope + params copied to the channel work area).

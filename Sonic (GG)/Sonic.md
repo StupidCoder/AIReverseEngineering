@@ -1553,56 +1553,65 @@ Game Gear; the music is square waves.) Each tone channel has a 10-bit period (pi
 4-bit attenuation (volume); the noise channel has a 3-bit control. The music driver
 reprograms these registers **once per video frame** to play the melody.
 
-The **waveform** is captured the same oracle way as the sprites (the driver/data are traced
-just below, for the loop points): the `gamegear` machine now models the PSG register state
-(`psg.go`, fed by `Out` port `$7F`), so booting an act runs the **real driver** and writes
-the real notes. **`extract/cmd/soundprobe`** snapshots the four channels each frame and
-synthesises the waveform — phase-continuous square oscillators for the tones, a 16-bit LFSR
-for the noise, mixed at 44.1 kHz — which confirms a recognisable tune (all three tone
-channels active, pitches tracking a melody). **`extract/cmd/musicbake`** does the same per
-zone and pipes the PCM through `ffmpeg` (`libmp3lame`) to a small MP3.
+## The sound driver
 
-Acts within a zone share the zone theme, so one track per zone (+ the special stage) is
-baked to `site/public/sonic/music/`, and the level viewer's **Music** checkbox plays the
-current act's track (looping), switching it when you change zones.
+A sound is started by **`RST $18`** with a sound id in `A`; the gateway pages **bank 3** into
+slot 1 and jumps to **`$46EB`**, which indexes the **song-pointer table at `$4716`** (a word
+per id) and calls the loader **`$4018`**. A song begins with a header of **five relative
+channel offsets**; the loader adds the song's base address and stores the five pointers in RAM
+at **`$DC1C`–`$DC25`** — channels 0–2 are the **square tones**, channel 3 the **noise**, and
+the fifth slot is the **sound-effect channel** (its offset is 0, so it points back at the
+header and stays idle during music). The song bases: Green Hills `$47D0`, Bridge `$574A`,
+Jungle `$524A`, Labyrinth `$760C`, Scrap Brain `$5B4F`, Sky Base `$61A7`, special `$64C3`.
 
-## The sound driver and music format
+The **per-frame sequencer `$423E`** loads each channel's pointer, runs the decoder **`$42F4`**
+to advance it, and renders it with **`$43DE`**.
 
-The synthesis is captured from the oracle, but the **driver and the data were traced** to
-get correct loops. A sound is started by **`RST $18`** with a sound id in `A`; the gateway
-pages **bank 3** into slot 1 and jumps to the handler at **`$46EB`**, which indexes a
-**song-pointer table at `$4716`** (one word per id) and calls the loader **`$4018`**. A song
-is **five relative channel pointers**; the loader relocates them (adding the song's base
-address) into RAM at **`$DC1C`–`$DC25`** — the five live channel data pointers (the three
-square channels, the noise channel, and a control track).
+## The channel data format
 
-The **per-frame sequencer** is **`$423E`** (bank 3): for each channel it loads the data
-pointer, runs the note decoder **`$42F4`**, and stores the advanced pointer back. The decoder
-reads one byte of channel data and branches on its value:
+Each channel is a byte stream. A duration counter (`IX+2/3`) is decremented by a global tick
+each frame; when it runs out the decoder reads the next bytes:
 
-- **`< $70` — a note.** The low nibble selects a 10-bit PSG period from a frequency table at
-  **`$44D5`**; the high nibble is the duration. (A separate voice command sets the octave/
-  envelope.)
-- **`$71`–`$7E` — a voice/instrument change.** The low nibble indexes an 8-byte parameter
-  table at **`$43CE`** (envelope + transpose), copied into the channel's work area.
-- **`$7F` — a rest** (key off).
-- **`≥ $80` — a command** (`$44F3`), dispatched through a table at `$4529`. Two are the keys
-  to looping: **`$FF` = loop** — it reloads the channel's data pointer from the **loop-start
-  address kept in the channel work area (`IX+34/35`)**, set earlier by a "mark loop point"
-  command; and **`$FE` = end** (silence the channel).
+- **`$00`–`$6F` — a note**, encoded **`(octave << 4) | note`**. The pitch is the 10-bit PSG
+  period **`freqtable[note] >> octave`** — the table at **`$44D5`** is one chromatic octave
+  (`$0356`=C down to `$01C4`=B), and the octave field shifts it down. The **next byte is the
+  duration** (a tick count; `0` ⇒ the default duration). So a note is *two* bytes.
+- **`$7F` — a rest** (+ a duration byte): the volume mask is cleared, silencing the channel.
+- **`$71`–`$7E` — a voice**: the low nibble picks an 8-byte instrument from the table at
+  **`$43CE`**.
+- **`$80`–`$FF` — a command** (no time of its own), dispatched through `$4529`:
+  `$80` set tempo (note-length multiplier + per-frame tick), `$81` volume, `$82` instrument
+  envelope (6 bytes, inline), `$83` vibrato (5 bytes), `$84` detune, `$85` skip,
+  **`$86`/`$87` repeat a block** (`$86` pushes a counter, `$87 <n> <addr>` loops back to
+  `addr+base` *n* times — a nested loop stack), **`$88` mark loop point** (saves the pointer
+  in `IX+34/35`), `$89` noise mode, `$8A` default duration, `$8B`/`$8C` volume up/down, `$8D`
+  tie (don't retrigger the envelope), **`$FE` end**, and **`$FF` loop** (jump the pointer back
+  to the `$88` mark). The loop is therefore **in the data** — `$88` … `$FF` bracket the
+  repeating section.
 
-So each channel carries its **own loop point**, and the loop lengths can differ (a fast
-arpeggio repeating several times per melody phrase). That is exactly why a recording loops
-correctly only at the **melody channel's** period: `extract/cmd/musicbake` watches the five
-channel pointers (`$DC1C`–`$DC25`) in the oracle, finds each channel's repeat period, and
-trims the clip to the **longest** one — the musical loop — with a short cross-fade at the
-seam (the loop length is exact, but the synth's square phase isn't, so a hard wrap would
-click). The detected loops: Green Hills 38.4 s, Bridge 25.6 s, Jungle/Labyrinth 28.8 s,
-Scrap Brain/Sky Base 51.2 s, special stage 17.0 s.
+Per frame the render (`$43DE`) forms the period as `freqtable>>octave + detune + vibrato`
+(`$83` drives a triangle-LFO vibrato after a delay), and an **ADSR envelope** (the `$82`
+params: attack, decay, sustain, decay2, sustain2, release) scales the volume; the result is
+written to the PSG as `period` (two writes) and `15 − volume` attenuation.
 
-*Open ends:* the synthesis is still rendered from the captured PSG registers (not re-derived
-from the note data — though the loop point now is), the boss acts are assumed to reuse the
-zone theme, and the LFSR-noise + volume curve are approximate.
+## Synthesising from the ROM
+
+**`extract/cmd/musicrom`** is a Go port of this driver: it parses a song's channels straight
+from the ROM, simulates the sequencer frame-by-frame (notes, durations, the `$86/$87` repeat
+stack, ADSR, vibrato, and the `$88`/`$FF` loop), and emits the PSG state, which it synthesises
+(phase-continuous squares + a 16-bit LFSR for noise) and pipes through `ffmpeg` (`libmp3lame`)
+to the per-zone MP3s in `site/public/sonic/music/`. The **loop comes from the data**: the
+clip is trimmed to one loop of the longest (melody) channel, measured by running the port — no
+pattern-matching on emulator output. Verification against the oracle's PSG (`soundprobe`) is
+exact: five of the seven loop lengths match the hardware *to the frame* (Green Hills 38.4 s,
+Bridge 25.6 s, Jungle/Labyrinth 28.8 s, Scrap Brain 51.2 s); Sky Base is the remaining song id
+(16.0 s) and the special stage plays its intro then loops on a rest, so that intro is looped.
+
+(The earlier `extract/cmd/soundprobe`/`musicbake` capture the PSG from the running oracle —
+kept only as the verification reference; the shipped music is `musicrom`'s, from the ROM.)
+
+*Open ends:* the boss acts are assumed to reuse the zone theme, and the LFSR-noise + volume
+curve are approximations of the real chip.
 
 ---
 

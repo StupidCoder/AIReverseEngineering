@@ -64,6 +64,8 @@ type Act struct {
 	blkTable int
 	tileFile int
 	bgPal    int
+	spawnX   int // descriptor +13
+	spawnY   int // descriptor +14 - 1 (verified against the oracle's pristine spawn)
 }
 
 func w(rom []byte, o int) int { return int(rom[o]) | int(rom[o+1])<<8 }
@@ -82,6 +84,8 @@ func parseActs(rom []byte) []Act {
 			blkTable: blockBase + w(rom, d+19),
 			tileFile: tileBase + w(rom, d+21),
 			bgPal:    int(rom[d+29]),
+			spawnX:   int(rom[d+13]),
+			spawnY:   int(rom[d+14]) - 1,
 		})
 	}
 	return acts
@@ -268,11 +272,11 @@ func main() {
 			bt[b] = row
 		}
 
-		spawn := [2]int{0, 0}
+		// Sonic's spawn is not in the object table; the loader places him from the spawn
+		// pointer. It is stored in the descriptor as (+13, +14-1) = (blockX, blockY),
+		// verified block-exact against the oracle's pristine slot-0 capture (objprobe).
+		spawn := [2]int{a.spawnX, a.spawnY}
 		objs := objectTable(rom, a.num)
-		if len(objs) > 0 {
-			spawn = [2]int{objs[0].Bx, objs[0].By} // record 0 = Sonic spawn
-		}
 
 		af := ActFile{
 			Zone: a.zone, Act: a.num%3 + 1, Name: a.name, Atlas: atlas,

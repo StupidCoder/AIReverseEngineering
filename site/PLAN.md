@@ -203,6 +203,17 @@ as stubs describing what's coming, filled in later.
 - **Later — 3D.** three.js Elite ship-model viewer; Marble height-map terrain — reusing the
   data pipeline + shell + UI conventions.
 
+## Implementation notes (as built)
+
+The Sonic viewer was built **no-build** (plain ES modules + an import map → PixiJS v8 from a
+CDN) on **raw PixiJS** rather than Vite + `@pixi/tilemap`/`pixi-viewport`. Reasons: it runs by
+just serving `site/` (GitHub Pages serves the folder directly via a no-build Actions upload —
+no CI build, no `npm install`), and dropping the plugins removes version-compat risk. The
+tilemap is per-block **baked textures** (each distinct block index → one 32×32 canvas, one
+sprite per cell), which batches well and keeps zoom cheap; pan/zoom is a small custom camera.
+This can be swapped to Vite + the plugins later if desired. The data pipeline, JSON formats
+and milestones below are unchanged.
+
 ## Open / deferred
 
 - Exact GG animation timing per zone (rings are global; other zones may animate water/other —

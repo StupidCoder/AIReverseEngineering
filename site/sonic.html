@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sonic the Hedgehog (Game Gear) — level viewer</title>
+  <link rel="stylesheet" href="src/style.css" />
+  <script type="importmap">
+  { "imports": { "pixi.js": "https://esm.sh/pixi.js@8" } }
+  </script>
+</head>
+<body>
+  <header class="site">
+    <h1>AI Reverse Engineering</h1>
+    <nav><a href="index.html">Home</a><a href="sonic.html">Sonic (GG)</a></nav>
+  </header>
+
+  <div class="viewer-wrap">
+    <h2 style="margin:6px 0 12px">Sonic the Hedgehog (Game Gear) — level viewer</h2>
+    <div id="viewport" class="viewport">
+      <div id="hud" class="hud"></div>
+    </div>
+    <div class="controls">
+      <label>Act
+        <select id="act"></select>
+      </label>
+      <span class="sep"></span>
+      <label><input type="checkbox" id="collision" /> Collision shapes</label>
+      <label><input type="checkbox" id="objects" /> Objects</label>
+      <span class="hint">drag to pan · scroll to zoom</span>
+    </div>
+    <p class="legend">
+      The map is an actual tilemap rebuilt from the cartridge — each 32×32 block is baked
+      from the zone's tile atlas. <b>Collision shapes</b> overlays each block's surface
+      height-profile (red) and tints <b>non-solid</b> blocks blue (where Sonic falls through).
+      <b>Objects</b> marks enemies, items and Sonic's spawn. See the
+      <a href="https://github.com/StupidCoder/AIReverseEngineering/blob/main/Sonic%20(GG)/Sonic.md">write-up</a>
+      for how it was decoded.
+    </p>
+  </div>
+
+  <script type="module" src="src/sonic/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,58 @@
+:root {
+  --bg: #14181f;
+  --panel: #1d222b;
+  --line: #2c333f;
+  --fg: #e6ebf2;
+  --muted: #8a93a3;
+  --accent: #4aa3ff;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; height: 100%;
+  background: var(--bg); color: var(--fg);
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+header.site {
+  padding: 14px 20px; border-bottom: 1px solid var(--line);
+  display: flex; align-items: baseline; gap: 16px;
+}
+header.site h1 { font-size: 16px; margin: 0; font-weight: 650; }
+header.site nav { color: var(--muted); }
+header.site nav a { margin-right: 14px; }
+
+main { max-width: 1100px; margin: 0 auto; padding: 24px 20px; }
+.card {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 18px; margin-bottom: 18px;
+}
+.card h2 { margin: 0 0 6px; font-size: 15px; }
+.muted { color: var(--muted); }
+
+/* --- Sonic viewer --- */
+.viewer-wrap { max-width: 1100px; margin: 0 auto; padding: 16px 20px; }
+.viewport {
+  position: relative; width: 100%; aspect-ratio: 10 / 9;   /* Game Gear screen */
+  background: #000; border: 1px solid var(--line); border-radius: 8px;
+  overflow: hidden; touch-action: none; cursor: grab;
+}
+.viewport.dragging { cursor: grabbing; }
+.viewport canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+.hud {
+  position: absolute; left: 8px; bottom: 8px;
+  background: rgba(0,0,0,.55); color: #cfd6e0;
+  padding: 3px 8px; border-radius: 6px; font: 12px ui-monospace, monospace;
+  pointer-events: none;
+}
+.controls {
+  display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: center;
+  padding: 12px 14px; margin-top: 12px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+}
+.controls label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+.controls select { background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+.controls .sep { width: 1px; align-self: stretch; background: var(--line); }
+.controls .hint { color: var(--muted); margin-left: auto; }
+.legend { margin-top: 12px; color: var(--muted); font-size: 13px; }
+.legend b { color: var(--fg); font-weight: 600; }

@@ -263,6 +263,7 @@ export class LevelViewer {
 
     this._buildCollision(level);
     this._buildObjects(level);
+    this._setMusicForZone(level.zone);
     this._fitDefault(level);
     return level;
   }
@@ -296,6 +297,27 @@ export class LevelViewer {
     }
     g.fill({ color: 0xff2020, alpha: 0.8 });
     this.collisionLayer.addChild(g);
+  }
+
+  // --- music --------------------------------------------------------------
+  // Per-zone background music (baked from the PSG by extract/cmd/musicbake). One <audio>
+  // whose src follows the current act's zone; toggled by the Music checkbox.
+  _zoneTrack(zone) {
+    return ['greenhills', 'bridge', 'jungle', 'labyrinth', 'scrapbrain', 'skybase', 'special'][zone];
+  }
+  _setMusicForZone(zone) {
+    const src = DATA + 'music/' + this._zoneTrack(zone) + '.mp3';
+    if (!this.audio) {
+      this.audio = new Audio();
+      this.audio.loop = true;
+      this.audio.volume = 0.55;
+    }
+    if (this._musicSrc !== src) {
+      this._musicSrc = src;
+      this.audio.src = src;
+    }
+    if (this.musicOn) this.audio.play().catch(() => {});
+    else this.audio.pause();
   }
 
   // Sprites lifted from the running game (oracle): Sonic's spawn frame + a few enemies.
@@ -358,6 +380,10 @@ export class LevelViewer {
   }
 
   setLayer(name, on) {
+    if (name === 'music') {
+      this.musicOn = on;
+      if (this.level) this._setMusicForZone(this.level.zone);
+    }
     if (name === 'collision') this.collisionLayer.visible = on;
     if (name === 'objects') this.objectLayer.visible = on;
     if (name === 'animation') {

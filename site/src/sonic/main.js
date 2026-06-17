@@ -21,5 +21,6 @@ sel.addEventListener('change', () => viewer.loadAct(meta.acts[+sel.value]));
 document.getElementById('animation').addEventListener('change', (e) => viewer.setLayer('animation', e.target.checked));
 document.getElementById('collision').addEventListener('change', (e) => viewer.setLayer('collision', e.target.checked));
 document.getElementById('objects').addEventListener('change', (e) => viewer.setLayer('objects', e.target.checked));
+document.getElementById('music').addEventListener('change', (e) => viewer.setLayer('music', e.target.checked));
 
 await viewer.loadAct(meta.acts[0]);

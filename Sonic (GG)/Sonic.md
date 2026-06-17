@@ -1545,6 +1545,32 @@ special-stage objects).
 
 ---
 
+# Part VI — Sound
+
+The Game Gear's audio is the **SN76489 PSG** — three square-wave tone channels and one
+noise channel — programmed through a single write port, **`$7F`**. (There is no FM on the
+Game Gear; the music is square waves.) Each tone channel has a 10-bit period (pitch) and a
+4-bit attenuation (volume); the noise channel has a 3-bit control. The music driver
+reprograms these registers **once per video frame** to play the melody.
+
+Rather than reverse the driver and the music-data format, the music is captured the same
+oracle way as the sprites: the `gamegear` machine now models the PSG register state
+(`psg.go`, fed by `Out` port `$7F`), so booting an act runs the **real driver** and writes
+the real notes. **`extract/cmd/soundprobe`** snapshots the four channels each frame and
+synthesises the waveform — phase-continuous square oscillators for the tones, a 16-bit LFSR
+for the noise, mixed at 44.1 kHz — which confirms a recognisable tune (all three tone
+channels active, pitches tracking a melody). **`extract/cmd/musicbake`** does the same per
+zone and pipes the PCM through `ffmpeg` (`libmp3lame`) to a small MP3.
+
+Acts within a zone share the zone theme, so one track per zone (+ the special stage) is
+baked to `site/public/sonic/music/`, and the level viewer's **Music** checkbox plays the
+current act's track (looping), switching it when you change zones. *Open ends:* the clip is
+a fixed 30 s looped in the browser (no seamless loop-point detection yet), the boss acts are
+assumed to reuse the zone theme (not verified per-act), and the LFSR noise + volume curve
+are approximate — all refinements for a later pass.
+
+---
+
 # Appendix A — Toolchain and reproduction
 
 Static analysis only, with the Z80 toolchain in the shared `tools/` module:

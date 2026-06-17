@@ -125,6 +125,7 @@ type CapEntry struct {
 type Machine struct {
 	CPU *z80.CPU
 	VDP VDP
+	PSG PSG // SN76489 sound chip register state (fed by Out port $7F)
 
 	rom    []byte
 	nbanks int
@@ -269,6 +270,8 @@ func (m *Machine) Out(port uint16, v byte) {
 		m.VDP.writeData(v)
 	case 0xBF:
 		m.VDP.writeControl(v)
+	case 0x7F:
+		m.PSG.Write(v)
 	}
 }
 

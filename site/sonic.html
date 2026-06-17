@@ -30,6 +30,7 @@
       <label><input type="checkbox" id="animation" checked /> Animation</label>
       <label><input type="checkbox" id="collision" /> Collision shapes</label>
       <label><input type="checkbox" id="objects" /> Objects</label>
+      <label><input type="checkbox" id="music" /> Music</label>
       <span class="hint">drag to pan · scroll or pinch to zoom</span>
     </div>
     <p class="legend">
@@ -41,7 +42,9 @@
       spawn — Sonic and a couple of enemies (crab, beetle) are their real sprites, lifted from
       the running game; the rest are coloured boxes. In <b>Labyrinth</b> the flooded acts split at the water line: above it is the
       surface palette (with the cycle), below it the static cyan underwater palette — the
-      same raster swap the game does at that scanline. See the
+      same raster swap the game does at that scanline. <b>Music</b> plays the zone's
+      background tune — synthesized from the SN76489 (PSG) registers the real sound driver
+      writes while the game runs in the emulator, baked to MP3. See the
       <a href="https://github.com/StupidCoder/AIReverseEngineering/blob/main/Sonic%20(GG)/Sonic.md">write-up</a>
       for how it was decoded.
     </p>

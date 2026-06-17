@@ -251,7 +251,9 @@ export class MarbleViewer {
 
   // Build the Track-layer markers (the same overlays as the offline wire PNGs):
   // a coloured pin per single object (placement/ooze/dynamic region) and a
-  // coloured route polyline per creature path. Drawn on top (depthTest off).
+  // coloured route polyline per creature path. Depth-tested so the slopes occlude
+  // them, and given a high renderOrder so they draw after the depth-only fill
+  // (which writes depth but no colour) has populated the depth buffer.
   _buildMarkers(s, m) {
     const { present, wX, wZ, surfY, span } = m;
     const stem = Math.max(2, span * 0.045);
@@ -281,7 +283,7 @@ export class MarbleViewer {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-      const o = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true, depthTest: false }));
+      const o = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true }));
       o.renderOrder = 3;
       return o;
     };
@@ -291,7 +293,7 @@ export class MarbleViewer {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(headPos, 3));
       geo.setAttribute('color', new THREE.Float32BufferAttribute(headCol, 3));
-      const pts = new THREE.Points(geo, new THREE.PointsMaterial({ vertexColors: true, size: 6, sizeAttenuation: false, depthTest: false }));
+      const pts = new THREE.Points(geo, new THREE.PointsMaterial({ vertexColors: true, size: 6, sizeAttenuation: false }));
       pts.renderOrder = 4;
       g.add(pts);
     }

@@ -373,7 +373,7 @@ export class LevelViewer {
     this.world.scale.set(this.zoom);
     this._clampPan();
     this._updateTexFilter();
-    if (this.hud) this.hud.textContent = `${(this.zoom).toFixed(2)}x  ${this.levelW / BLOCK}x${this.levelH / BLOCK} blocks`;
+    if (this.hud) this.hud.textContent = `${this.levelW / BLOCK}x${this.levelH / BLOCK} blocks`;
   }
 
   // Crisp nearest-neighbour when magnifying (zoom >= 1), but linear + mipmaps when minifying

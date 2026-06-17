@@ -22,7 +22,14 @@ python3 -m http.server 8000
 - `sonic.html` — the Sonic level viewer.
 - `elite.html` — the Elite 3D ship viewer (three.js).
 - `fort.html` — the Fort Apocalypse map viewer (PixiJS).
-- `src/` — `style.css` and the viewer modules (`src/sonic/`, `src/elite/`, `src/fort/`).
+- `marble.html` — the Marble Madness course viewer (PixiJS).
+- `src/` — `style.css` and the viewer modules (`src/sonic/`, `src/elite/`, `src/fort/`, `src/marble/`).
+- `public/marble/` — per-course `<course>.png` + `meta.json`. Regenerate from the disk with:
+
+  ```sh
+  cd "Marble Madness (Amiga)/extract"
+  go run ./cmd/webexport
+  ```
 - `public/fort/` — per-level JSON (`level0/1.json`, `meta.json`) + `atlas-L0/1.png`.
   Regenerate (after extracting `FORT-fast-7000.prg` from the tape) with:
 

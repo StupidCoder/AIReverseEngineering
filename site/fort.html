@@ -40,9 +40,11 @@
       energy barriers flashing, the laser grids blinking, the rotating beacons, and the
       destructible-wall shimmer — the same character animation the C64 does (it has no palette
       hardware to cycle, so the “animation” is the character bitmaps changing). <b>Objects</b>
-      marks the spawn points the level builder reads from its tables: the player's Rocket Copter
-      (cyan), prisoners to rescue (yellow), tank homes (red), enemy-helicopter patrol points
-      (green), and on Level 1 the cavern teleport drops (white circles). See the
+      drops in the actual game objects, drawn from their real characters and seeded the way the
+      level builder does: 8 <b>prisoners</b> to rescue (chosen at random from the floor-with-rock
+      candidate cells), the 6 <b>tanks</b> at their fixed homes, and a scatter of <b>SPMs</b>
+      (self-propelled mines) over open cells. Because the game randomises them, toggling Objects
+      off and on places a fresh set each time. See the
       <a href="https://github.com/StupidCoder/AIReverseEngineering/blob/main/Fort%20Apocalypse%20(C64)/Fort_Apocalypse.md">write-up</a>
       for how it was decoded.
     </p>

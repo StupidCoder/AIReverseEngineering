@@ -7,7 +7,7 @@
 // way the game's IRQ rewrites a soft char in place. Two control-bar toggles
 // drive the soft-char animations and the object overlay.
 
-import { Application, Container, Sprite, Texture, Graphics, Text } from 'pixi.js';
+import { Application, Container, Sprite, Texture } from 'pixi.js';
 
 const CHAR = 8;            // character cell size (px)
 const ATLAS_COLS = 16;     // atlas is 16 chars wide
@@ -16,12 +16,18 @@ const NATIVE_W = 320;      // C64 screen width (40 chars) — 1:1 reference
 const ZOOM_STEP = Math.pow(1.15, 0.25);
 const WRAP_COPIES = 3;     // cylinder is drawn as 3 copies; min zoom shows ≤2 periods
 
-const OBJ = {              // marker colour + label per object type
-  player: { color: 0x3cb4ff, label: 'COPTER' },
-  prisoner: { color: 0xffe000, label: 'rescue' },
-  tank: { color: 0xff5b5b, label: 'tank' },
-  enemy: { color: 0x5be06b, label: 'heli' },
-};
+// SPMs spawn in the column band $32–$CD; buffer col = game col − 5.
+const SPM_MIN = 0x32 - 5, SPM_MAX = 0xCD - 5;
+
+// Fisher-Yates shuffle of a copy (leaves the source array untouched).
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 export class FortViewer {
   constructor(viewportEl, hudEl) {
@@ -35,6 +41,7 @@ export class FortViewer {
     this.zoom = 1; this.minZoom = 0.1; this.maxZoom = 12;
     this._texMode = 'nearest';
     this.animOn = true; this.animFrame = 0; this.animAccum = 0;
+    this.objectsOn = false;
     this.level = null;
   }
 
@@ -107,7 +114,9 @@ export class FortViewer {
     this.animFrame = 0; this.animAccum = 0;
     if (!this.animOn) this._resetAnim();
 
-    this._buildObjects(level);
+    this.level = level;
+    this.objectLayer.removeChildren();
+    if (this.objectsOn) this._placeObjects();
     this._fitDefault(level);
     return level;
   }
@@ -127,33 +136,69 @@ export class FortViewer {
     }
   }
 
-  // --- object markers -----------------------------------------------------
-  _buildObjects(level) {
+  // --- objects ------------------------------------------------------------
+  // Place the objects from their real characters, re-randomising each time, the
+  // way the level builder seeds them: 8 prisoners chosen from the floor-with-rock
+  // candidates, the 6 tanks at their fixed homes, and spmCount mines scattered
+  // over empty cells. Each is decided once, then drawn on all wrap copies.
+  _placeObjects() {
     this.objectLayer.removeChildren();
-    // Markers are drawn once per cylinder copy so they wrap with the map.
+    const level = this.level;
+    if (!level) return;
+
+    // [{ code, col, row }] cell placements, decided once then drawn per copy.
+    const place = [];
+    const rnd = Math.random;
+    // Prisoner: torso $49/$4A over legs ($3B/$3C right, $3D/$3E left), at (col,row-1..row).
+    for (const [c, r] of shuffle(level.prisoners || []).slice(0, 8)) {
+      const right = rnd() < 0.5;
+      place.push({ code: 0x49, col: c, row: r - 1 }, { code: 0x4A, col: c + 1, row: r - 1 });
+      place.push({ code: right ? 0x3B : 0x3D, col: c, row: r }, { code: right ? 0x3C : 0x3E, col: c + 1, row: r });
+    }
+    // Tank: body $6C $6D $6E with a turret ($6F left / $70 right) above the centre.
+    for (const [c, r] of level.tanks || []) {
+      place.push({ code: 0x6C, col: c, row: r }, { code: 0x6D, col: c + 1, row: r }, { code: 0x6E, col: c + 2, row: r });
+      place.push({ code: rnd() < 0.5 ? 0x6F : 0x70, col: c + 1, row: r - 1 });
+    }
+    // SPM: a 2-cell craft $5B $5C at random empty positions.
+    for (const [c, r] of this._spmPositions(level, level.spmCount || 13)) {
+      place.push({ code: 0x5B, col: c, row: r }, { code: 0x5C, col: c + 1, row: r });
+    }
+
     for (let copy = 0; copy < WRAP_COPIES; copy++) {
       const ox = copy * this.cyl;
-      const g = new Graphics();
-      for (const o of level.objects) {
-        const def = OBJ[o.type] || { color: 0xaaaaaa };
-        g.rect(ox + o.col * CHAR, o.row * CHAR, o.w * CHAR, o.h * CHAR).stroke({ width: 1, color: def.color });
-      }
-      for (const [cx, cy] of level.drops || []) {
-        g.circle(ox + cx * CHAR + (4 * CHAR) / 2, cy * CHAR + (3 * CHAR) / 2, 10).stroke({ width: 1, color: 0xffffff });
-      }
-      this.objectLayer.addChild(g);
-      for (const o of level.objects) {
-        const def = OBJ[o.type];
-        if (!def || !def.label || o.type !== 'player') continue;
-        const t = new Text({ text: def.label, style: { fontFamily: 'monospace', fontSize: 7, fill: def.color } });
-        t.x = ox + o.col * CHAR; t.y = o.row * CHAR - 9;
-        this.objectLayer.addChild(t);
+      for (const p of place) {
+        const tex = this.charTex[p.code];
+        if (!tex) continue;
+        const s = new Sprite(tex);
+        s.x = ox + p.col * CHAR; s.y = p.row * CHAR;
+        this.objectLayer.addChild(s);
       }
     }
   }
 
+  // SPM spawn: random positions whose two cells are both empty ($00), in the
+  // column band, on any row — the game's "re-roll until both cells are empty".
+  _spmPositions(level, n) {
+    const { width: W, height: H, cells } = level;
+    const out = [], used = new Set();
+    const hi = Math.min(SPM_MAX, W - 2);
+    for (let tries = 0; out.length < n && tries < n * 300; tries++) {
+      const c = SPM_MIN + Math.floor(Math.random() * (hi - SPM_MIN + 1));
+      const r = Math.floor(Math.random() * H);
+      const key = r * W + c;
+      if (used.has(key)) continue;
+      if (cells[r * W + c] === 0 && cells[r * W + c + 1] === 0) { used.add(key); out.push([c, r]); }
+    }
+    return out;
+  }
+
   setLayer(name, on) {
-    if (name === 'objects') this.objectLayer.visible = on;
+    if (name === 'objects') {
+      this.objectsOn = on;
+      this.objectLayer.visible = on;
+      if (on) this._placeObjects(); // new random placement each time it's shown
+    }
     if (name === 'animation') {
       this.animOn = on;
       if (!on) this._resetAnim();

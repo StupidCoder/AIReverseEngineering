@@ -20,31 +20,27 @@ import (
 	"stupidcoder.com/tools/c64/gfx"
 )
 
-// object marker types — colours/labels are applied by the viewer.
-type jsonObj struct {
-	Col  int    `json:"col"`
-	Row  int    `json:"row"`
-	W    int    `json:"w"`
-	H    int    `json:"h"`
-	Type string `json:"type"`
-}
-
 type jsonAnim struct {
 	Char   int   `json:"char"`
 	Period int   `json:"period"`
 	Frames []int `json:"frames"` // atlas tile index per step
 }
 
+// The viewer places objects itself (re-randomised each time the layer is shown):
+// it picks 8 of the prisoner candidates, scatters spmCount mines over empty cells,
+// and draws each object from its real characters. So we export the candidate /
+// home cells, not finished placements.
 type jsonLevel struct {
-	Level   int        `json:"level"`
-	Width   int        `json:"width"`
-	Height  int        `json:"height"`
-	Atlas   string     `json:"atlas"`
-	Cells   []int      `json:"cells"`
-	Spawn   [2]int     `json:"spawn"`
-	Objects []jsonObj  `json:"objects"`
-	Drops   [][2]int   `json:"drops"`
-	Anim    []jsonAnim `json:"anim"`
+	Level     int        `json:"level"`
+	Width     int        `json:"width"`
+	Height    int        `json:"height"`
+	Atlas     string     `json:"atlas"`
+	Cells     []int      `json:"cells"`
+	Spawn     [2]int     `json:"spawn"`
+	Anim      []jsonAnim `json:"anim"`
+	Prisoners [][2]int   `json:"prisoners"` // $90A4 candidate cells (col,row); pick 8
+	Tanks     [][2]int   `json:"tanks"`     // 6 fixed home cells (leftmost body cell)
+	SPMCount  int        `json:"spmCount"`  // self-propelled mines to scatter (difficulty)
 }
 
 type jsonMeta struct {
@@ -85,7 +81,7 @@ func run(prgPath, outDir string) error {
 			return err
 		}
 		atlasName := fmt.Sprintf("atlas-L%d.png", level)
-		jl := jsonLevel{Level: level, Atlas: atlasName, Drops: [][2]int{}}
+		jl := jsonLevel{Level: level, Atlas: atlasName}
 
 		// Atlas tiles: the 128 base chars at fixed indices 0..127, then any extra
 		// frame bitmaps the animations need, appended and de-duplicated.
@@ -131,30 +127,26 @@ func run(prgPath, outDir string) error {
 			}
 		}
 
-		// Objects in content-column coordinates, mirroring the gfxrender markers
-		// (footprints in characters).
+		// Object placement data in content-column coordinates. The viewer turns
+		// these into the real objects (prisoners pick 8 of the candidates, mines
+		// scatter over empty cells).
 		jl.Spawn = [2]int{lm.PlayerSpawn.Col, lm.PlayerSpawn.Row}
-		jl.Objects = append(jl.Objects, jsonObj{lm.PlayerSpawn.Col, lm.PlayerSpawn.Row, 4, 3, "player"})
+		jl.Prisoners, jl.Tanks = [][2]int{}, [][2]int{}
 		for _, p := range lm.PrisonerSpawns {
-			jl.Objects = append(jl.Objects, jsonObj{p.Col, p.Row - 1, 2, 2, "prisoner"})
+			jl.Prisoners = append(jl.Prisoners, [2]int{p.Col, p.Row})
 		}
 		for _, p := range lm.TankHomes {
-			jl.Objects = append(jl.Objects, jsonObj{p.Col, p.Row - 1, 3, 2, "tank"})
+			jl.Tanks = append(jl.Tanks, [2]int{p.Col, p.Row})
 		}
-		for _, p := range lm.EnemySpawns {
-			jl.Objects = append(jl.Objects, jsonObj{p.Col, p.Row, 4, 3, "enemy"})
-		}
-		for _, p := range lm.DropPoints {
-			jl.Drops = append(jl.Drops, [2]int{p.Col, p.Row})
-		}
+		jl.SPMCount = 13 // base difficulty (13 / 26 / 39 by variant)
 
 		file := fmt.Sprintf("level%d.json", level)
 		if err := writeJSON(filepath.Join(outDir, file), jl); err != nil {
 			return err
 		}
 		meta.Levels = append(meta.Levels, metaLevel{Name: names[level], File: file, Atlas: atlasName})
-		fmt.Printf("level %d: %dx%d cells, %d atlas tiles, %d objects, %d drops -> %s\n",
-			level, w, fortgfx.MapHeight, len(tiles), len(jl.Objects), len(jl.Drops), file)
+		fmt.Printf("level %d: %dx%d cells, %d atlas tiles; %d prisoner candidates, %d tanks, %d SPMs -> %s\n",
+			level, w, fortgfx.MapHeight, len(tiles), len(jl.Prisoners), len(jl.Tanks), jl.SPMCount, file)
 	}
 	return writeJSON(filepath.Join(outDir, "meta.json"), meta)
 }

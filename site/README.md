@@ -3,8 +3,8 @@
 Interactive companion website for the reverse-engineering write-ups (see [PLAN.md](PLAN.md)).
 
 It is a **no-build static site**: plain ES modules with an [import map](sonic.html) that pulls
-PixiJS (v8) from a CDN, so there is nothing to install or compile. The 3D pages (Elite ships,
-Marble terrain) will use three.js the same way, later.
+PixiJS (v8) from a CDN, so there is nothing to install or compile. The 3D pages use three.js
+the same way (Elite ships now; Marble terrain later).
 
 ## Run locally
 
@@ -20,7 +20,15 @@ python3 -m http.server 8000
 
 - `index.html` — landing page.
 - `sonic.html` — the Sonic level viewer.
-- `src/` — `style.css` and the viewer modules (`src/sonic/`).
+- `elite.html` — the Elite 3D ship viewer (three.js).
+- `src/` — `style.css` and the viewer modules (`src/sonic/`, `src/elite/`).
+- `public/elite/ships.json` — decoded ship blueprints (vertices, edges, face normals).
+  Regenerate from the extracted engine block with:
+
+  ```sh
+  cd "Elite (C64)/extract"
+  go run ./cmd/webexport
+  ```
 - `public/sonic/` — exported data: `meta.json`, `shapes.json`, the `atlas_*.png` tile
   atlases, and `act01.json … act18.json`. Regenerate from the ROM with:
 

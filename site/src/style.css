@@ -58,3 +58,35 @@ main { max-width: 1100px; margin: 0 auto; padding: 24px 20px; }
 .controls .hint { color: var(--muted); margin-left: auto; }
 .legend { margin-top: 12px; color: var(--muted); font-size: 13px; }
 .legend b { color: var(--fg); font-weight: 600; }
+
+/* --- Elite 3D ship viewer --- */
+.viewport-3d {
+  /* wider 3D stage, capped by viewport height so it always fits on screen */
+  aspect-ratio: 16 / 10;
+  width: min(100%, calc(64vh * 16 / 10));
+}
+/* the WebGL canvas is smooth, not pixel-art */
+.viewport-3d canvas { image-rendering: auto; }
+
+.ship-strip {
+  display: flex; gap: 10px; align-items: flex-start;
+  margin-top: 12px; padding: 10px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+}
+.thumb {
+  flex: 0 0 auto; width: 92px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 6px 4px; cursor: pointer;
+  background: #000; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 8px;
+  font: inherit; transition: border-color .12s, color .12s;
+}
+.thumb:hover { border-color: #46506a; color: var(--fg); }
+.thumb.active { border-color: var(--accent); color: var(--fg); }
+.thumb canvas { width: 80px; height: 80px; display: block; }
+.thumb-label {
+  font-size: 11px; line-height: 1.2; text-align: center;
+  max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}

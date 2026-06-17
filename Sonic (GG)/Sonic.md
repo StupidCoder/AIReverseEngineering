@@ -1229,6 +1229,37 @@ tiles). So a static render must load a ring frame to show them, exactly as for G
 rings. (There is no "place a cluster of rings" object — the ring fields are authored straight
 into the block map.)
 
+### Teleporter (`$13`) — and the hidden Scrap Brain maze
+
+Object type `$13` (handler bank 2 `$9B4A`) is an **invisible teleporter**: it draws no sprite
+(`IX+15/16 = 0`), just a 30×96-px contact box. On contact it converts its *own* block
+position to a `(blockX, blockY)` key, looks it up in a **5-entry table at `$9BAE`**, and writes
+the matched **destination scene** to `$D2D4`, sets `($D283) = 1` and `(IY+6) bit 4` — the very
+same "launch this scene next" mechanism the title screen's Start button uses (`scene_run
+$1414` loads `$D2D4` instead of `$D238` when that flag is set). So a teleporter's destination
+is **hardwired to where it sits**:
+
+| Teleporter block | → scene |
+|---|---|
+| `(124, 1)` | 20 |
+| `(124, 25)` | 21 |
+| `(1, 1)` | 25 |
+| `(1, 59)` | 24 |
+| `(20, 15)` | 26 |
+
+Mapping every placement against that table exposes something the act list hides: **Scrap Brain
+Act 2 is not one level but seven** — scene 13 plus six **sub-scenes 20–25** that never appear
+in the 18-act table and are reachable *only* through teleporters. They are wired into a maze
+with deliberate **loops** — e.g. scene 20's pad `(1,59)` → 24, and scene 24's pad `(124,1)`
+→ 20, so the wrong choice sends you in circles (the infamous Scrap Brain Act 2 maze). Several
+sub-scenes share a map source entered at a different spawn, so they *look* alike — which is the
+whole trick.
+
+The other teleporter is in **Sky Base Act 2**: the pad at `(20, 15)` warps to **scene 26**, a
+**7th pseudo-"zone" (`zone = 7`)** — a Scrap-Brain-styled interior (it reuses that tile set)
+holding a **goal sign and a Chaos Emerald** (`$06`). So the route to that emerald is a hidden
+teleporter room, outside the normal act flow entirely.
+
 ## 2. Movement and collision
 
 Sonic himself is just object type `$00`, dispatched like any other through `$24B2` to the

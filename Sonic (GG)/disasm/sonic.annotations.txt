@@ -271,3 +271,7 @@
 4632  music_cmd86  (bank3) command $86: push a repeat-counter frame on the channel's loop stack (IX+32/33).
 4647  music_cmd87  (bank3) command $87 <count> <addrLo addrHi>: repeat block - jump pointer to addr+base(IX+41/42, = song base) until the pushed counter decrements to 0, then pop + skip the 3 operand bytes. Nested via the IX+32/33 stack.
 43CE  music_voices  (bank3) instrument/voice table, 8 bytes per voice, indexed by the low nibble of a $71-$7E voice command (envelope + params copied to the channel work area).
+
+# --- TELEPORTER (Part V 1) ---
+9B4A  obj_teleporter  (bank2) object type $13 = INVISIBLE TELEPORTER (Scrap Brain / Sky Base). No sprite (IX+15/16=0); 30x96 contact box. On contact, converts its own block position to a (blockX,blockY) key and looks it up in the 5-entry table $9BAE -> destination scene, written to $D2D4 with $D283=1 + (IY+6) bit4 (the same launch-scene mechanism as the title Start button; scene_run $1414 loads $D2D4 instead of $D238). Table: (124,1)->20 (124,25)->21 (1,1)->25 (1,59)->24 (20,15)->26. This exposes that Scrap Brain Act 2 = scene 13 + hidden sub-scenes 20-25 (a teleporter maze with loops, e.g. 20<->24), and Sky Base Act 2's pad (20,15) -> scene 26 = a 7th pseudo-zone (zone 7, Scrap-Brain art) with a goal + Chaos Emerald.
+9BAE  teleporter_table  (bank2) 5 x (blockX, blockY, destScene) for the type-$13 teleporters.

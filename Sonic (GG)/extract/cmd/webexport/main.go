@@ -56,7 +56,7 @@ var objNames = map[byte]string{
 	0x0E: "bird", 0x0F: "moving platform", 0x10: "beetle", 0x12: "world 1 boss",
 	0x25: "capsule", 0x26: "fish", 0x2C: "world 3 boss", 0x2D: "porcupine",
 	0x48: "world 2 boss", 0x49: "world 4 boss", 0x4E: "seesaw",
-	0x50: "scroll lock", 0x51: "checkpoint",
+	0x50: "scroll lock", 0x51: "checkpoint", 0x13: "teleporter",
 	0x21: "bumper", 0x52: "continue", // special-stage objects ($52 = Continue powerup)
 	// (rings are not objects: they are baked into the block map as $79-$7B, like normal zones)
 }

@@ -7606,7 +7606,7 @@
 0602B8  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
 0602C8  .dc.b 00 00 00 00 00 00 00 00                         ; ........
 
-; --- vblank_isr  $0602D0 — Level-3 (vertical-blank) interrupt handler. Read INTREQR ($DFF01E); if the VERTB bit ($10) is set: bump the frame counter $603BA; if $603AE!=0 run palette_cycle; if the run flag $603B8 is set JSR $1BB24 (the per-frame game tick, in the relocated game). Then ack INTREQ and RTE. ---
+; --- vblank_isr  $0602D0 — Level-3 (vertical-blank) interrupt handler. Read INTREQR ($DFF01E); if the VERTB bit ($10) is set: bump the frame counter $603BA; if $603AE!=0 run palette_cycle; if the run flag $603B8 is set JSR $1BB24 (run the music/sound driver one frame — the $1BB00 overlay's sound_tick). Then ack INTREQ and RTE. ---
 0602D0  2F 00                         MOVE.l d0,-(a7)
 0602D2  30 39 00 DF F0 1E             MOVE.w $DFF01E.l,d0
 0602D8  3F 00                         MOVE.w d0,-(a7)

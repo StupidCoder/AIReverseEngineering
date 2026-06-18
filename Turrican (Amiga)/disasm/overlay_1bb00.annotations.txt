@@ -1,16 +1,21 @@
-# Turrican (Amiga) — $1BB00 game-code overlay annotations.
+# Turrican (Amiga) — $1BB00 overlay annotations: the MUSIC / SOUND DRIVER.
 # Consumed by codetrace68k -annotate; format: ADDR  name  description
 #   ADDR is hex; '#' starts a comment line.
 #
 # WHAT THIS IS
-# The resident program (Part III §3) doesn't contain the game logic — it streams
-# it off the floppy as an overlay. game_init's load_block_1BB00 reads the packed
-# block at ADF $26000 (length $C268) to $1BB00 and huff_decodes it ($5F000, the
-# same three-pass decoder as the $50008 main decruncher). The decoded $11964-byte
-# overlay loads at $1BB00 and is an AmigaDOS HUNK blob: a single HUNK_CODE whose
-# body (from $1BB20) opens with a BRA dispatch table — the overlay's public API,
-# which the resident init/ISR call at fixed addresses ($1BB24 game tick, etc.).
-# It is position-DEPENDENT (absolute $1Cxxxx addresses) and always loads at $1BB00.
+# game_init streams this overlay off the floppy (Part III §4): load_block_1BB00
+# reads the packed block at ADF $26000 (length $C268) to $1BB00 and huff_decodes
+# it ($5F000, the same three-pass decoder as the $50008 main decruncher). The
+# decoded $11964-byte overlay loads at $1BB00 and is an AmigaDOS HUNK blob: a
+# single HUNK_CODE whose body (from $1BB20) opens with a BRA dispatch table — the
+# driver's public API. The resident code calls it: game_init initialises it
+# ($1BB34/$48/$2C) and vblank_isr runs sound_tick ($1BB24) every frame.
+#
+# It is the game's MUSIC/SFX player. Evidence: update_voices processes three voice
+# slots; per-voice it runs a period LFO (vibrato), a pitch slide (portamento) and a
+# volume/envelope, writing AUDxPER ($6 of the channel block at voice.$160); and
+# audio_silence zeros the four AUDxVOL registers. It is loaded — not relocated —
+# at a fixed $1BB00, so the body's absolute $1Cxxxx addresses are baked to it.
 #
 # Regenerate overlay_1bb00.asm (run from the repo root):
 #   go run turrican/extract/cmd/block -off 0x26000 -len 0xC268 -base 0x1BB00 \
@@ -19,21 +24,28 @@
 #     -entry 0x1BB24,0x1BB2C,0x1BB34,0x1BB48,0x1BB30,0x1BB40,0x1BB4C,0x1BB5C,0x1BB60,0x1BB74 \
 #     -annotate "Turrican (Amiga)/disasm/overlay_1bb00.annotations.txt" \
 #     -o "Turrican (Amiga)/disasm/overlay_1bb00.asm" /tmp/block_1BB00.bin
-# Names are from observed behaviour. a6 in these routines is almost always the
-# central game-state struct at $1CC22 (a6-relative fields). $DFF000 = custom chip.
+# Names are from observed behaviour. a6 = player_state ($1CC22); a5 = a voice slot
+# in voice_table ($1CC7C). $DFF000 = custom chip; AUDx block: LC$0 LEN$4 PER$6 VOL$8.
 
-1BB00  overlay_hunk_header  AmigaDOS HUNK blob header ($000003F3); 0 lib names, 1 hunk, HUNK_CODE ($3E9) at $1BB18, hunk body from $1BB20. Loaded (not LoadSeg'd) at a fixed $1BB00, so the body's absolute addresses are baked to that base.
+1BB00  overlay_hunk_header  AmigaDOS HUNK blob header ($000003F3); 0 lib names, 1 hunk, HUNK_CODE ($3E9) at $1BB18, body from $1BB20. Loaded (not LoadSeg'd) at a fixed $1BB00, so the absolute addresses are baked to that base.
 
-1BB20  api_table            The overlay's public API: a table of BRA stubs the resident init/ISR jump to at fixed addresses. Each 4-byte slot is one entry point; unimplemented/no-op slots BRA audio_silence ($1CB0C).
-1BB24  api_game_tick        Per-frame entry (called from vblank_isr) -> game_tick.
-1BB2C  api_init_3C          -> $1CAD8: set state.$3C = sub_1CBB2(), clear the pause flag $4A.
-1BB34  api_init_state       -> $1CB62: init the game state from two data-table pointers (init passes d0=$1CFF4, d1=$20E90): store them at state.$0/$4, set $8=1 and $50=$40400000 (1-bit-exp float 3.0).
-1BB48  api_set_config       -> $1C9D8: store a config byte (init passes d0=$40) into state.$51/$52 and raise the $1CF38 flag.
+1BB20  api_table            The sound driver's public API: a table of BRA stubs the resident code jumps to at fixed addresses. Each 4-byte slot is one entry point; inactive slots BRA audio_silence ($1CB0C).
+1BB24  api_sound_tick       -> sound_tick: advance the player one frame (called from vblank_isr).
+1BB2C  api_play             -> $1CAD8: start playback — store the song index (d0) into player.$3C and clear the paused flag $4A.
+1BB34  api_init             -> $1CB62: initialise the player from two data pointers (game_init passes d0=$1CFF4 = song/sequence data, d1=$20E90 = instrument/sample data); store them at player.$0/$4, set $8=1 and the $50 fixed-point field to $40400000.
+1BB48  api_set_config       -> $1C9D8: store a config byte (game_init passes d0=$40 — master volume / channel mask) into player.$51/$52 and raise the $1CF38 flag.
 
-1BB78  game_tick            Per-frame game update. a6 = game_state ($1CC22); early-out (RTS) if the pause/disable flag $4A is set; else save all regs and, on the $3D mode flag, either run sub_1C868 or step the timers ($8/$2C/$2E) and call the per-frame worker $1C108.
+1BB78  sound_tick           One player frame. a6 = player_state; returns immediately if paused ($4A); else, on the $3D mode flag, either step the song sequencer ($1C868) or advance the per-frame timers ($8/$2C/$2E via $1BBC2) and synthesise the voices (update_voices).
+1BBC2  seq_step             Song/pattern sequencer step: counts down player.$2C (reloaded from voice_table.$6), and on expiry reads the next sequence commands via $1BC54, updating the active note/voice state.
+1C108  update_voices        Per-frame voice synthesis: runs update_voice for each of the three voice slots (a5 walks voice_table $1CC7C in $4 steps).
+1C118  update_voice         Update one voice: a4 = voice.$160 (its $DFF0Ax hardware channel block); counts down voice.$100, then applies voice_vibrato + voice_portamento + voice_envelope and the instrument step.
+1C646  voice_vibrato        Period LFO: accumulate voice.$80 into voice.$90, add the base period voice.$A0, and write the result to AUDxPER ($6(a4)); the $80 step is sign-toggled (EORI #$FF) for the triangle sweep.
+1C684  voice_portamento     Pitch slide: step the current period voice.$C0 toward the target voice.$C2 by the per-tick rate, writing AUDxPER.
+1C6D2  voice_envelope       Volume/envelope step: countdown voice.$71 (reload $70), walk the level voice.$60 toward the target voice.$72 by rate voice.$73.
 
-1CB0C  audio_silence        Stop sound: clear state.$2E and zero the four AUDxVOL registers ($DFF0A8/B8/C8/D8). This is the default api_table target for inactive slots.
+1CB0C  audio_silence        Stop all sound: clear player.$2E and zero the four AUDxVOL registers ($DFF0A8/B8/C8/D8). The default api_table target for inactive slots.
 
-# --- central state ---
-1CC22  game_state           The overlay's main state struct; nearly every routine does LEA $1CC22(pc),a6 and works a6-relative (fields seen: $0/$4 data ptrs, $8/$A/$2C counters, $2E/$3C/$3D/$3E/$44/$4A/$51/$52 flags, $50 float).
-1CF38  state_flag_1CF38     A secondary state word raised by api_set_config and cleared in game_tick.
+# --- state ---
+1CC22  player_state         Music driver state struct; routines do LEA $1CC22(pc),a6 and work a6-relative. Fields seen: $0/$4 song & sample data ptrs (from api_init), $8/$A/$2C/$3C song-position & timer counters, $2E/$3D/$3E/$44/$4A mode/pause flags, $50 fixed-point tempo, $51/$52 config.
+1CC7C  voice_table          Per-voice state array (a5); large stride, fields $60-$160 incl. $160 = pointer to the voice's $DFF0Ax hardware channel block, $80/$90/$A0 vibrato, $C0/$C2 portamento, $70-$73 envelope.
+1CF38  state_flag_1CF38     A flag word raised by api_set_config and cleared in sound_tick.

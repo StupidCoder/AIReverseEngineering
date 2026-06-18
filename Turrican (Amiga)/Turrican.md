@@ -505,16 +505,16 @@ What runs before the game proper takes over, all from `turrican.asm`:
   (`disk_read $604FA` / `disk_setup_sync $6056E`, `DSKSYNC = $4489`) that streams
   level data off the disk during play.
 
-## 4. The game-code overlay at `$1BB00`
+## 4. The streamed overlays, and the music driver at `$1BB00`
 
-The resident image holds no game logic — `game_init` streams it off the floppy.
-`load_block_1BB00` reads the packed block at **ADF `$26000`** (length `$C268`) to
-`$1BB00` and `huff_decode`s it; the numbers are self-consistent (`huff_decode`'s
-source window is `$1BB00…$27D68` = exactly `$C268` bytes). Because the in-game
-decoder is the *same three passes* as the `$50008` decruncher, the overlay can be
-recovered with the same Go code — `extract/cmd/block` reads the disk slice and
-calls `decrunch.DecrunchBlock` (which skips the 18-byte block header and runs
-Huffman → LZ77 → RLE):
+The resident image holds neither the game logic nor the sound code — `game_init`
+streams those off the floppy. `load_block_1BB00` reads the packed block at
+**ADF `$26000`** (length `$C268`) to `$1BB00` and `huff_decode`s it; the numbers
+are self-consistent (`huff_decode`'s source window is `$1BB00…$27D68` = exactly
+`$C268` bytes). Because the in-game decoder is the *same three passes* as the
+`$50008` decruncher, the overlay is recovered with the same Go code —
+`extract/cmd/block` reads the disk slice and calls `decrunch.DecrunchBlock` (which
+skips the 18-byte block header and runs Huffman → LZ77 → RLE):
 
 ```sh
 go run turrican/extract/cmd/block -off 0x26000 -len 0xC268 -base 0x1BB00 \
@@ -525,24 +525,30 @@ go run turrican/extract/cmd/block -off 0x26000 -len 0xC268 -base 0x1BB00 \
 The decoded overlay is an **AmigaDOS HUNK blob** (`$000003F3` header, one
 `HUNK_CODE` at `$1BB18`, body from `$1BB20`). It is loaded — not relocated — at a
 fixed `$1BB00`, so its absolute `$1Cxxxx` addresses are baked to that base. Its
-body opens with a **BRA dispatch table** (the overlay's public API); the resident
-init/ISR jump into it at fixed addresses:
+body opens with a **BRA dispatch table** — its public API, which the resident
+code jumps into at fixed addresses.
+
+This overlay is the **music / sound driver**. Its `vblank_isr` entry runs the
+player once per frame, and internally it processes three voices, each with a
+period LFO (vibrato), a pitch slide (portamento) and a volume envelope, writing
+the Amiga `AUDxPER`/`AUDxVOL` registers — while `audio_silence` zeros all four
+volumes. The API:
 
 | call | slot | does |
 |------|------|------|
-| `vblank_isr` | `$1BB24` → `game_tick $1BB78` | per-frame update; `a6` = the `$1CC22` game-state struct |
-| `game_init` | `$1BB2C` | set `state.$3C`, clear the pause flag |
-| `game_init` | `$1BB34` | init state from two data-table pointers (`$1CFF4`, `$20E90`) |
-| `game_init` | `$1BB48` | store a config byte (`$40`) |
+| `vblank_isr` | `$1BB24` → `sound_tick $1BB78` | advance the player one frame; `a6` = `player_state $1CC22`, `a5` walks `voice_table $1CC7C` |
+| `game_init` | `$1BB2C` | start playback (song index, clear pause) |
+| `game_init` | `$1BB34` | init the player from song + sample data pointers (`$1CFF4`, `$20E90`) |
+| `game_init` | `$1BB48` | set a config byte — master volume / channel mask (`$40`) |
 
-`game_tick` and friends work almost entirely `a6`-relative off the central
-**game-state struct at `$1CC22`**. The overlay is disassembled into its own pair,
-`disasm/overlay_1bb00.{asm,annotations.txt}`.
+It is disassembled into its own pair, `disasm/overlay_1bb00.{asm,annotations.txt}`
+(`player_state $1CC22`, `update_voices`, `voice_vibrato/portamento/envelope`).
+This matches the cabinet credit — the music is a **Chris Hülsbeck** score.
 
-> **Next.** Grow the overlay annotations from `game_tick` outward — the input
-> reading, object/enemy update and the level/graphics format (Parts IV–V) — and
-> identify the other streamed blocks (e.g. the `$30000`/`$50000` modules and the
-> `PP20` block) the init chain loads.
+> **Next.** The game logic proper is a *further* streamed module — the `$30000`
+> (`PowerPacker "PP20"`) and `$50000` loads `game_init` runs before the sound
+> driver. Decode those next (the same `cmd/block`/PowerPacker route), then the
+> level/graphics formats (Parts IV–V).
 
 # Part IV — Graphics and data formats
 

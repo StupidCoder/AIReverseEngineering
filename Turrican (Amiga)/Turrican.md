@@ -605,6 +605,45 @@ This matches the cabinet credit — the music is a **Chris Hülsbeck** score.
 > driver, the `$50000` loader-sound player, and the `$30000` OS-interface module
 > via the new `tools/amiga/powerpacker`).
 
+## 6. The game loop
+
+`game_start` falls into `level_setup` (`$D4C`), which clears the playfield with
+the blitter, installs the three triple-buffered display buffers
+(`$17A/$192/$1AA` = `$5BCE0/$67CE0/$73CE0`), primes the level state and runs a
+long chain of subsystem-init `BSR`s — then drops into `game_loop` (`$EBC`):
+
+```
+EBC  game_loop:
+        … blit_playfield ; blit_objects ; $2F56 …
+        MOVEA.l $1942,a0 ; JSR (a0)        ; the current game-MODE handler
+        … $1710 (x2) ; $3A56 ; $5576 ; $68AC ; $64B8 ; $1B94 ; $1C0C …
+        ST   $1E1                          ; raise the frame-sync flag
+        … $1850 ; $18BA ; $189E …
+   F08: TST.b $1E1 ; BNE F08               ; spin until the vblank ISR clears it
+        … exit checks ($26D/$15D) …
+        BRA  game_loop
+```
+
+Two things define the engine's shape:
+
+* **Mode dispatch.** `$1942` holds a pointer to the current game-mode/state
+  handler, called once per frame via `JSR (a0)`. Swapping it switches state
+  (title, play, …) without touching the surrounding pipeline — the classic
+  function-pointer state machine. The handlers are installed off the path traced
+  so far, and are the next thing to follow.
+* **Frame sync.** The loop raises `$1E1` and spins until the level-3 ISR (Part III
+  §3) clears it, locking the pipeline to the vertical blank.
+
+The fixed pipeline around the mode call is the renderer/updaters: `blit_playfield`
+and `blit_objects` (`$1BB4`/`$5E40`) are blitter copies (`BLTCON0 = $9F0`) that
+draw the playfield and object layers from the draw-list at `$1C2`, alongside a
+dozen further per-frame subsystems. This is disassembled (~118 routines so far)
+in `disasm/resident_core.{asm,annotations.txt}`.
+
+> **Next.** Follow the `$1942` mode handlers (title vs in-game) and the per-frame
+> subsystems toward input, the player and enemy objects, and the level/tile
+> format (Parts IV–V).
+
 # Part IV — Graphics and data formats
 
 > **Stub.** Tile maps, sprites/BOBs, the level encodings, fonts and audio

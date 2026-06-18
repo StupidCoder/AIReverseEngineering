@@ -16,12 +16,12 @@
 #   go run turrican/extract/cmd/decrunch -o /tmp/turrican.bin "Turrican (Amiga)/Turrican.adf"
 #   python3 -c "open('/tmp/lowseg.bin','wb').write(open('/tmp/turrican.bin','rb').read()[0x10:0x1B780])"
 #   go run stupidcoder.com/tools/cmd/codetrace68k -base 0x10 \
-#     -entry 0xCB4,0xD4C,0x1ABA,0x1AEC,0x1B14,0x1B38,0x35AE,0x438C,0x234C,0x7728,0x78CC,0x7EFC \
+#     -entry 0xCB4,0xD4C,0xEBC,0x1404,0x147E,0x1710,0x1850,0x189E,0x18BA,0x1B94,0x1BB4,0x1C0C,0x234C,0x2F56,0x35AE,0x3A56,0x438C,0x5576,0x5E40,0x64B8,0x68AC,0x7728,0x78CC,0x7EFC,0x1ABA,0x1AEC,0x1B14,0x1B38 \
 #     -annotate "Turrican (Amiga)/disasm/resident_core.annotations.txt" \
 #     -o "Turrican (Amiga)/disasm/resident_core.asm" /tmp/lowseg.bin
-# Coverage is partial — much of the per-frame logic is reached through object/state
-# dispatch tables not yet seeded. a6 is usually the $DFF000 custom-chip base.
-# Names are from observed behaviour.
+# Coverage is partial (~118 routines) — the per-frame pipeline is mapped, but the
+# game-mode handlers reached only through the $1942 pointer are not yet followed.
+# a6 is usually the $DFF000 custom-chip base. Names are from observed behaviour.
 
 10   cpu_vectors        68000 exception vector table (runtime $0-$FF; reset SSP/PC at $0/$4 set by game_entry, the rest filled during init). Not code.
 
@@ -29,7 +29,18 @@
 
 CB4  game_start         Real game start (entry_table slot 0). Supervisor mode, stack $89DC, a6=$DFF000; stash the trainer-option regs ($CAA/$CAC); init_early; JSR $30000 (the PP20 graphics/engine module); init_object_table, init_map_grid, init_54BC, setup_irq_display; then fall into main_loop.
 
-D4C  main_loop          Main loop / level setup. Drives the blitter (writes BLTSIZE $58(a6) and spins on BBUSY in DMACONR $2(a6)) to clear the playfield, primes level/game variables ($1938/$193A/$7AAF/$194B/$217/$284 …) and sets up the object/coordinate tables at $1A0E/$19DE.
+D4C  level_setup        Per-level setup (entered from game_start and on level change). Clears the playfield via the blitter (writes BLTSIZE $58(a6), spins on BBUSY in DMACONR $2(a6)); installs the three display buffers ($17A/$192/$1AA = $5BCE0/$67CE0/$73CE0, triple-buffered); primes level/game state ($1938 level no., $193A, $7AAF, $194B …); and runs a long chain of subsystem-init BSRs ($3258, $6E9C, init_54BC, $78B0, $7968, $147E, $16DE, $1A68, $43D8 …) before falling into game_loop.
+
+EBC  game_loop          The per-frame game loop. Each frame it runs a fixed render/update pipeline — blit_playfield, blit_objects, $2F56, then JSR (a0) with a0 = the current mode handler ($1942), then $1710 (x2), $3A56, $5576, $68AC, $64B8, $1B94, $1C0C, $1850/$18BA/$189E — then raises the frame-sync flag $1E1 and spins until the vblank ISR clears it (wait for vertical blank), and loops. Exits on $26D/$15D (to $1404 or the $F22 variant used when $15C is set).
+
+1942 mode_handler_ptr   Pointer to the current game-mode/state handler, called every frame by game_loop via JSR (a0). Swapping it changes state (title / play / etc.); it is installed by the mode routines (set off-trace).
+1E1  frame_sync_flag    Set at the end of each game_loop iteration; cleared by the vblank path. game_loop spins on it to lock to 50/60 Hz.
+17A  screen_buffers     The three display-buffer base pointers ($17A/$192/$1AA = $5BCE0/$67CE0/$73CE0) — triple-buffering for the scrolling playfield.
+1C2  draw_list_ptr      Pointer to the blitter draw-list structure consumed by blit_playfield / blit_objects.
+1938 level_number       Current level/world number (read during level_setup and by mode handlers).
+
+1BB4 blit_playfield     Blitter copy into a screen buffer: sets BLTCON0 $40(a6)=$9F0 (D = A, copy) and BLTAFWM/ALWM $44(a6)=-1, then blits the spans described by the draw-list at $1C2. One of the per-frame render steps.
+5E40 blit_objects       Sibling blit routine (same BLTCON0=$9F0 setup, a different list slot $10(a1) of the $1C2 structure) — draws the object/sprite layer.
 
 9D0  init_early         Early init: BSR chain ($8BE, $910, $AF2) then reads packed/interleaved data from the streamed region ($74002+) and deinterleaves it (AND #$55555555 — even/odd bitplane split).
 748A init_object_table  Zero-fill the object tables pointed to by $20A/$20E, laying out per-object slots on a $C0-byte stride.

@@ -85,6 +85,8 @@ type player struct {
 	songOver                       bool
 	loopedAt                       int // tick at which the song looped (-1 until then)
 	tick                           int
+	Trace                          [][8]int // per-tick [per0,vol0,per1,vol1,...] when tracing
+	tracing                        bool
 }
 
 func be16(b []byte, o int) int { return int(binary.BigEndian.Uint16(b[o:])) }
@@ -147,8 +149,8 @@ func (p *player) processTrack() {
 // itself (caller must not advance).
 func (p *player) trackCommand(sub, o int) bool {
 	switch sub {
-	case 4: // set speed + tempo (CIA): word2 = speed, word3 = tempo divisor
-		p.speed = be16(p.mdat, o+4)
+	case 4: // set CIA tick rate (word3); the row-speed stays the song tempo (verified
+		// against the real driver's work struct, which keeps $6=tempo=3)
 		if t := be16(p.mdat, o+6) & 0x1FF; t != 0 {
 			// CIA timer B reload = (0x1C00/t)<<8 ; tick rate = E_CLOCK / reload.
 			reload := (0x1C00 / t) << 8
@@ -195,6 +197,16 @@ func (p *player) stepTick() {
 		p.applyEffects(ch)
 		p.toPaula(ch)
 	}
+	if p.tracing {
+		var row [8]int
+		for ch := 0; ch < 4; ch++ {
+			if p.p[ch].playing {
+				row[ch*2] = p.p[ch].period
+				row[ch*2+1] = p.p[ch].vol
+			}
+		}
+		p.Trace = append(p.Trace, row)
+	}
 	p.tick++
 }
 
@@ -217,14 +229,12 @@ func (p *player) readPattern(ch int) {
 			}
 			continue
 		}
-		// A note row: note + macro number + detune. b0>=0xC0 is a "hold" (no
-		// retrigger); 0x80-0xBF retriggers with portamento; else a plain note.
+		// A note row: note (low 6 bits) + macro number + detune. Only b0>=0xBF is a
+		// portamento note; everything below (incl. the common 0x80-0xBE) is a plain
+		// note — the high bits are masked off (driver: ANDI #$3FFF then byte0&$3F).
 		v.patPos++
-		if b0 >= 0xC0 {
-			return
-		}
 		note := int(b0&0x3F) + int(v.transpose)
-		p.trigger(ch, note, int(b1), int(int8(b3)), b0 >= 0x80)
+		p.trigger(ch, note, int(b1), int(int8(b3)), b0 >= 0xBF)
 		return
 	}
 }
@@ -344,10 +354,11 @@ func (p *player) runMacro(ch int) {
 		case 0x19: // loop point -> a 2-byte silence at smpl[0]: a one-shot plays once
 			v.regStart = 0
 			v.regLen = 2
-		case 0x08, 0x09: // play note: period = table[note(+$11)] + detune; advance 1 tick
+		case 0x08, 0x09: // play note; advance 1 tick. $08 = byte1 is a SIGNED relative
+			// transpose added to the pattern note; $09 = byte1 is an absolute note.
 			base := int(b1)
 			if cmd == 0x08 {
-				base += v.note
+				base = int(int8(b1)) + v.note
 			}
 			v.basePer = p.noteToPeriod(base+v.addNote) + v.detune
 			if !v.portOn {
@@ -386,6 +397,14 @@ func (p *player) runMacro(ch int) {
 			v.regStart += w
 		case 0x12: // add to sample length
 			v.regLen += w * 2
+		case 0x18: // set loop point: advance the sample start by w bytes and shrink the
+			// length by w — the loop reg becomes the sustain portion (the note holds)
+			v.regStart += w
+			v.regLen -= w
+			if v.regLen < 2 {
+				v.regLen = 2
+			}
+		case 0x14: // wait for DMA / sustain marker — no-op (keep stepping)
 		default:
 			// 0x13-0x22 (loop/wave-shaper/etc.) — ignore, keep stepping
 		}

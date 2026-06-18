@@ -49,6 +49,8 @@ func main() {
 	out := flag.String("o", "rendered/music", "output directory")
 	render := flag.Int("render", -1, "render this sub-song to song<N>.wav (-1 = none)")
 	secs := flag.Int("secs", 60, "max seconds to render")
+	traceN := flag.Int("trace", 0, "print per-tick voice state for N ticks")
+	traceSong := flag.Int("tracesong", 0, "sub-song for -trace")
 	flag.Parse()
 	adfPath := flag.Arg(0)
 	if adfPath == "" {
@@ -84,6 +86,19 @@ func main() {
 			continue
 		}
 		fmt.Printf("  %2d: start=$%04X end=$%04X tempo=$%04X\n", i, s, e, t)
+	}
+
+	if *traceN > 0 {
+		pl := newPlayer(mdat, smpl)
+		pl.tracing = true
+		pl.start(*traceSong)
+		for i := 0; i < *traceN; i++ {
+			pl.stepTick()
+		}
+		for t, row := range pl.Trace {
+			fmt.Printf("%d %d %d %d %d %d %d %d %d\n", t, row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7])
+		}
+		return
 	}
 
 	if *render >= 0 {

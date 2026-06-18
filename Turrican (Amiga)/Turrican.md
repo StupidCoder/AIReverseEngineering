@@ -540,8 +540,25 @@ The engine doesn't ship complete in the resident image — `game_init` and
   there (raw, unpacked) and `JSR $50000`s it; it installs its own vblank handler
   and plays a sample on AUD0/1 (the disk-access sound) during loading;
 * **a PowerPacker module** at `$30000` — `game_init` `pp20_decrunch`s image
-  `$6C186…$703EA` there, and `game_start` `JSR $30000`s it (the graphics/engine
-  code; recovering it needs a Go PowerPacker reimplementation — TODO).
+  `$6C186…$703EA` there, and both `game_init` (`JSR $30002`) and `game_start`
+  (`JSR $30000`) call into it. It is the game's **OS-interface module**: it
+  `OldOpenLibrary`s `graphics.library` and `dos.library`, installs a `TRAP #0`
+  handler and saves/replaces CPU vectors — the engine's bridge to the OS for the
+  display and disk.
+
+  Its decruncher (`pp20_decrunch $6078C`) is the **standard PowerPacker "PP20"**
+  format, reimplemented as a reusable Go package
+  (`tools/amiga/powerpacker`) since PP20 is one of the most common Amiga
+  crunchers. The module is recovered and **verified byte-identical against the
+  FS-UAE oracle**:
+
+  ```sh
+  go run turrican/extract/cmd/decrunch -o /tmp/turrican.bin "Turrican (Amiga)/Turrican.adf"
+  # the PP20 block sits at image $6C186..$703EA = file offset $28906, length $42E4
+  go run stupidcoder.com/tools/amiga/cmd/ppdecrunch \
+    -off 0x28906 -len 0x42E4 -o /tmp/mod_30000.bin /tmp/turrican.bin
+  # decrunched 31272 bytes, md5 3c249c100bb1a00792e6fa92016e9900
+  ```
 
 ### The music driver at `$1BB00`
 
@@ -582,11 +599,11 @@ It is disassembled into its own pair, `disasm/overlay_1bb00.{asm,annotations.txt
 (`player_state $1CC22`, `update_voices`, `voice_vibrato/portamento/envelope`).
 This matches the cabinet credit — the music is a **Chris Hülsbeck** score.
 
-> **Next.** Two threads: (a) grow `resident_core` outward from `main_loop` by
-> seeding the object/state dispatch tables, toward the player, enemies and level
-> handling (Parts IV–V); and (b) recover the `$30000` PowerPacker module — the
-> graphics/engine code `game_start` calls — which needs a Go PowerPacker (`PP20`)
-> reimplementation.
+> **Next.** Grow `resident_core` outward from `main_loop` by seeding the
+> object/state dispatch tables, toward the player, enemies and level handling
+> (Parts IV–V). All three streamed modules are now recovered (the `$1BB00` sound
+> driver, the `$50000` loader-sound player, and the `$30000` OS-interface module
+> via the new `tools/amiga/powerpacker`).
 
 # Part IV — Graphics and data formats
 

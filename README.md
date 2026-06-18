@@ -180,6 +180,8 @@ per-platform subfolder (`c64/`, `amiga/`, …).
 | `amiga/iff` | Decode an IFF `FORM…ILBM` bitmap (planar BODY, ByteRun1/uncompressed, CMAP palette) into a Go image. |
 | `amiga/icon` | Decode a Workbench `.info` icon (DiskObject + planar Image structs) into images, using the standard Workbench palette. |
 | `amiga/cmd/amigapng` | Render an IFF ILBM or a `.info` icon to PNG (auto-detects the format). |
+| `amiga/powerpacker` | Decompress PowerPacker (`PP20`) data — one of the most common Amiga crunchers (games, demos, intros). Faithful reimplementation of the standard backward bit-reader decode loop. |
+| `amiga/cmd/ppdecrunch` | Decompress a `PP20` file, or a `PP20` block embedded at a `-off`/`-len` slice of a larger file. |
 | `gamegear/gamegear` | Sega Game Gear VDP graphics: the 4-bitplane tile, 12-bit CRAM palette and name-table decoders, plus a minimal `Machine` (8 KB RAM + Sega cartridge mapper + VDP ports) that drives the `z80` core as an *emulation oracle* — run a real ROM, then read back VRAM/CRAM to compose the exact screen the code drew. Usable by any Game Gear (and, for the tiles, Master System) game. |
 
 ## Building and running

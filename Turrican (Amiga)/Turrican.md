@@ -813,9 +813,19 @@ fully decoding each needs the corresponding engine routine disassembled.
   So a BOB's *dimensions* come from `+$A`, and its pixels + mask are at `+$0`/`+$4`
   into the BOB graphics. `draw_objects` (`$5E9C`) walks the active objects (`$20E`,
   up to `$5452 & 7` of them) drawing each, and queues every rectangle it touches so
-  `blit_obj_restore` (`$5E40`) can copy the saved background back next frame. The
-  remaining piece is the **descriptor table** (which frame each object/animation
-  uses) — a per-object-type lookup the spawn code fills.
+  `blit_obj_restore` (`$5E40`) can copy the saved background back next frame.
+
+  The **animation table** is `bob_frame_table` at `$4CCA`: a flat array of BOB
+  descriptor pointers. Each object type's draw routine (there are many, in
+  `$5642…$5B80`) does `LEA $4CCA,a5 ; ADDA.w d3,a5` to pick its frame group, then
+  `MOVEA.l $0(a5,d6.w),a0` to select the current frame (`d6`, usually toggled
+  `EORI.w #$4,d6` for a two-frame loop), then falls into `draw_object_bob`. So the
+  full chain is **object type → frame group (`d3`) → frame (`d6`) → 14-byte BOB
+  descriptor → bitmap + mask + size**. The descriptor records start at `$5156`
+  (stride `$E`); the player/shot bitmaps are resident (`~$12xxx`), world-enemy ones
+  point into the scene block. *Rendering* the BOB pixels still needs the exact
+  bitplane interleave worked out from the blitter source modulo (`BLTBMOD = -2`) —
+  the one remaining detail before the sprites can be drawn.
 
 * **Object behaviour.** Each scene descriptor's `+$20` field points at a small
   **table of object-AI handler routines** (world 0 scene 0: nine handlers from

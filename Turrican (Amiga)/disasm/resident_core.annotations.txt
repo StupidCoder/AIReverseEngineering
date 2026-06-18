@@ -68,15 +68,19 @@ C12  load_decoder       Load the huff_decode routine itself from ADF $25C00 ($40
 603A draw_object_bob    The BOB renderer (cookie-cut blit). Transforms the object position to screen space (x-$172+$40, y-$174-$1C0, both masked), rejects off-screen, looks up the destination word via a per-row screen-offset table (a1), and sets BLTCON0 = (x&15)<<12 | $FCA (cookie-cut: A=mask, B=bitmap, C/D=dest, minterm $CA) and BLTCON1 = the shift. It then reads the BOB DESCRIPTOR at a0 and runs the blit, and appends {dest, modulo, BLTSIZE} to the restore queue (a3) for blit_obj_restore.
 6202 draw_object_bob_alt  Alternate BOB path taken when the descriptor's $D flag is set (a wider/clipped or pre-shifted variant).
 
-# BOB descriptor layout (a0 in draw_object_bob):
+# BOB descriptor layout (a0 in draw_object_bob), 14 bytes:
 #   +$0  long  bitmap data ptr  -> BLTBPT (B = the pixel planes)
 #   +$4  long  mask ptr         -> BLTAPT (A = the 1-plane cookie-cut mask)
-#   +$8  word  modulo           -> BLTCMOD / BLTDMOD
+#   +$8  word  dest modulo      -> BLTCMOD / BLTDMOD  (screen stride - BOB width)
 #   +$A  word  BLTSIZE          = height<<6 | width-in-words  (the BOB's pixel size)
 #   +$C  byte  y adjust
 #   +$D  byte  flag (-> draw_object_bob_alt)
-# The bitmap+mask live in the world block's BOB graphics ($51F80 section + the area
-# after the maps); a descriptor per animation frame points into them.
+# Source (bitmap/mask) modulo BLTBMOD/BLTAMOD = $FFFE (-2), set once in draw_objects
+# (the cookie-cut shift reads width+1 words, so the data is one word narrower).
+
+# Per-object-type draw + the animation table:
+4CCA bob_frame_table    Array of BOB-descriptor pointers — the animation frames. The per-object-type draw routines do `LEA $4CCA,a5; ADDA.w d3,a5` (d3 selects the object's frame group) then `MOVEA.l $0(a5,d6.w),a0` to pick the current frame (d6, often toggled `EORI.w #$4,d6` for a 2-frame loop) before falling into draw_object_bob.
+5156 bob_descriptors    The BOB descriptor records (14 bytes each, see layout above) the frame table points at. These early ones (bitmaps resident at ~$12xxx-$13xxx) are small player/shot BOBs; world-enemy descriptors point into the scene block's BOB graphics. Many per-type draw routines live in $5642..$5B80 (each sets a0 from bob_frame_table and BSR/BRA draw_object_bob, some drawing several parts at sub-offsets for large/multi-part enemies).
 
 # --- resident sound driver (a 2nd instance of the $1BB00 overlay's player) ---
 # The engine carries its own copy of the same Chris Hülsbeck player as the $1BB00

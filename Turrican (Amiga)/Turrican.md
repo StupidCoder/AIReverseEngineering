@@ -858,14 +858,17 @@ The frame strides confirm it exactly: successive descriptors' bitmaps differ by
 Plane 3 is also the cookie-cut mask, so opaque pixels carry bit 3 (colours 8–15);
 colour 0 is transparent. The BOBs draw through the playfield's 16-colour palette.
 
-`extract/cmd/sprites` scans the resident engine for frame tables (runs of pointers
-that all resolve to a valid descriptor) and writes **one PNG sheet per sprite**,
-all its frames laid out in a grid:
+`extract/cmd/sprites` finds frame tables (runs of pointers that all resolve to a
+valid descriptor) and writes **one PNG sheet per sprite**, all its frames in a
+grid. It does this both for the resident engine (the shared weapon/effect sprites)
+and for **each of the five worlds' scene blocks** (that world's enemies, drawn in
+the world's own palette):
 
 ```sh
 go run turrican/extract/cmd/sprites -o rendered/sprites Turrican.adf
-# $04CCA: 35 frames -> sprite_04CCA.png   (the spinning weapon + its burst)
-# $02904: 8 frames, $0138C / $080E8 …     (explosions and effects)
+# sprite_04CCA.png        — the spinning weapon (resident, shared)
+# world0_sprite_1E23E.png — world 1's rotating eye, … (14 sprites)
+# world4_sprite_1DE36.png — world 5's red-eyed mech, …
 ```
 
 `$04CCA` is Turrican's signature **spinning energy weapon** — 32 frames of a full
@@ -873,14 +876,13 @@ rotation, then a three-frame burst:
 
 ![Turrican spinning-weapon sprite, all frames](rendered/sprites/sprite_04CCA.png)
 
-These resident tables hold the weapons and effects; the **player and the
-world-specific enemies** are loaded at run time into tables that are empty in the
-static image (their bitmaps point into the scene block), so pulling those needs
-the spawn/loader code that fills them — the next step.
+Each world yields its own enemy set (the rotating eyeball, saucers, turrets,
+mechs, …) — 45 sprite sheets across the five worlds plus the five shared resident
+ones, all in `rendered/sprites/`. The **player** and the enemies' *placement* are
+loaded/seeded at run time, so those still need the spawn/loader code.
 
-> **Next.** The spawn subsystem that fills the runtime object/frame tables (for the
-> player and per-world enemies) and the placement list, plus the collision check
-> that reads `$3C1C4`.
+> **Next.** The spawn subsystem that loads the player and seeds enemy placement,
+> plus the collision check that reads `$3C1C4`.
 
 # Appendix A — Toolchain and reproduction
 

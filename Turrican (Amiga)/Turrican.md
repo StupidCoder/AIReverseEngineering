@@ -744,9 +744,39 @@ recognisable Turrican worlds — the cave/planet surface, the machine/factory wo
 and so on — confirming the tile format, the palette and the per-world block layout
 end to end.
 
-> **Next.** The tile **map** (the `$3C1C4` 1-bit layer and the arrangement of tile
-> indices into the scrolling playfield), the sprite sheet at `$51F80`, and the
-> three per-world scene handlers (intro / play / outro) — Part V mechanics.
+## 5. The tile map
+
+Each **scene descriptor** (the `+$16` pointer table, Part III §6) describes one
+sub-map of the world. Its fields give the map directly:
+
+| descriptor | meaning |
+|------------|---------|
+| `+$00` | pointer to the map data |
+| `+$04` | map width in tiles (word) |
+| `+$06` | map height in tiles (word) |
+| `+$18` / `+$2E` | the scene's per-frame handlers |
+
+The map is a **column-major array of one byte per cell** (`map[col*height + row]`):
+a value `< nTiles` is a tile index, and a value `>= nTiles` is a **horizontally
+flipped** tile (index `value − 128`). World 0 has three scenes laid out back to
+back in the section — `137×51`, `153×51`, `115×51` — the chunks of Turrican's
+first world; other worlds are shaped very differently (world 2 scene 0 is a
+`12×269` vertical shaft). `extract/cmd/map` renders any of them:
+
+```sh
+go run turrican/extract/cmd/map -world 0 -scene 0 -o rendered/world0_map0.png Turrican.adf
+# world 0 scene 0: 137x51 tiles -> rendered/world0_map0.png
+```
+
+The output is the real playfield — world 1's opening with its floating platforms,
+the central waterfall, the red tower and the **"1989"** spelled out in the rock —
+recovered end to end from the disk image through the reimplemented decoder, the
+tile format and this map. The committed `rendered/world*_map*.png` cover every
+world.
+
+> **Next.** The `$3C1C4` collision layer and the object/enemy data that follows
+> the maps in the same section, the sprite sheet at `$51F80`, and the per-world
+> scene handlers — Part V mechanics.
 
 # Part V — Game mechanics
 

@@ -47,6 +47,8 @@ const (
 
 func main() {
 	out := flag.String("o", "rendered/music", "output directory")
+	render := flag.Int("render", -1, "render this sub-song to song<N>.wav (-1 = none)")
+	secs := flag.Int("secs", 60, "max seconds to render")
 	flag.Parse()
 	adfPath := flag.Arg(0)
 	if adfPath == "" {
@@ -83,6 +85,80 @@ func main() {
 		}
 		fmt.Printf("  %2d: start=$%04X end=$%04X tempo=$%04X\n", i, s, e, t)
 	}
+
+	if *render >= 0 {
+		const sr = 44100
+		pl := newPlayer(mdat, smpl)
+		pl.start(*render)
+		pcm := pl.render(sr, *secs)
+		name := fmt.Sprintf("song%d.wav", *render)
+		if err := writeWAV(filepath.Join(*out, name), pcm, sr); err != nil {
+			fail(err)
+		}
+		// signal stats
+		var sum, peak float64
+		for _, s := range pcm {
+			f := float64(s)
+			sum += f * f
+			if f < 0 {
+				f = -f
+			}
+			if f > peak {
+				peak = f
+			}
+		}
+		rms := 0.0
+		if len(pcm) > 0 {
+			rms = sqrt(sum / float64(len(pcm)))
+		}
+		fmt.Printf("rendered song %d: %d s @ %d Hz, tick=%.1f Hz -> %s (rms=%.3f peak=%.3f)\n",
+			*render, *secs, sr, pl.tickHz, name, rms, peak)
+	}
+}
+
+// writeWAV writes interleaved stereo float32 [-1,1] as 16-bit PCM WAV.
+func writeWAV(path string, pcm []float32, sr int) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	n := len(pcm)
+	dataLen := n * 2
+	hdr := make([]byte, 44)
+	copy(hdr[0:], "RIFF")
+	binary.LittleEndian.PutUint32(hdr[4:], uint32(36+dataLen))
+	copy(hdr[8:], "WAVEfmt ")
+	binary.LittleEndian.PutUint32(hdr[16:], 16)
+	binary.LittleEndian.PutUint16(hdr[20:], 1)              // PCM
+	binary.LittleEndian.PutUint16(hdr[22:], 2)              // stereo
+	binary.LittleEndian.PutUint32(hdr[24:], uint32(sr))     // rate
+	binary.LittleEndian.PutUint32(hdr[28:], uint32(sr*2*2)) // byte rate
+	binary.LittleEndian.PutUint16(hdr[32:], 4)              // block align
+	binary.LittleEndian.PutUint16(hdr[34:], 16)             // bits
+	copy(hdr[36:], "data")
+	binary.LittleEndian.PutUint32(hdr[40:], uint32(dataLen))
+	if _, err := f.Write(hdr); err != nil {
+		return err
+	}
+	buf := make([]byte, dataLen)
+	for i, s := range pcm {
+		v := int16(s * 32000)
+		binary.LittleEndian.PutUint16(buf[i*2:], uint16(v))
+	}
+	_, err = f.Write(buf)
+	return err
+}
+
+func sqrt(x float64) float64 {
+	if x <= 0 {
+		return 0
+	}
+	g := x
+	for i := 0; i < 40; i++ {
+		g = (g + x/g) / 2
+	}
+	return g
 }
 
 func fail(err error) {

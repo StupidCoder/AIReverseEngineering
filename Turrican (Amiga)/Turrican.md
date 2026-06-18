@@ -634,8 +634,9 @@ Two things define the engine's shape:
   pointer table (`$1B996`) to the active descriptor (`$193E`), and installs that
   descriptor's `+$18` field as the primary handler (`$1942`) and `+$2E` as a
   secondary handler (`$1946`) — each defaulting to a null `RTS` (`$16DC`) when
-  zero. The descriptors live just past the resident image, so they are populated
-  at run time; reading them out is the next step toward enumerating the states.
+  zero. The descriptors are not in the resident image — they are **streamed off
+  the disk per world** (Part IV), so the states (and their handler code) change
+  with the level.
 * **Frame sync.** The loop raises `$1E1` and spins until the level-3 ISR (Part III
   §3) clears it, locking the pipeline to the vertical blank.
 
@@ -651,15 +652,69 @@ instances the game runs music and sound effects independently; `level_setup`
 sets up this resident one through the `$1A2A8` API. All of this is disassembled
 (~128 routines so far) in `disasm/resident_core.{asm,annotations.txt}`.
 
-> **Next.** Dump the scene descriptors at run time (via the FS-UAE oracle, for
-> *guidance* — the addresses they point to are static engine code) to enumerate
-> the states and their handlers, then follow the in-game handler toward input,
-> the player and enemy objects, and the level/tile format (Parts IV–V).
+# Part IV — Disk streaming and the level format
 
-# Part IV — Graphics and data formats
+## 1. The disk streamer
 
-> **Stub.** Tile maps, sprites/BOBs, the level encodings, fonts and audio
-> (Turrican's music is a TFMX/“Chris Hülsbeck” player).
+The resident engine and its `$30000`/`$50000`/`$1BB00` modules are only the
+*loader and runtime*; the actual **worlds are streamed off the floppy** as the
+game runs. `load_level` (`$4A0`) does it: it reads the level number (`$1938`),
+looks up a per-world table, pulls the packed block off the disk into the buffer
+just past the resident image (`$1B780`), and decompresses it.
+
+The decompressor is the **same three-pass decoder yet again**. `load_scene_block`
+(`$BF4`) first calls `load_decoder` (`$C12`), which loads `huff_decode` *itself*
+from **ADF `$25C00`** (`$400` bytes) to `$74000` — the first longwords there are
+`48 E7 FF FE 43 F8 00 A4 …`, byte-identical to `$5F000` — then runs it at `$74000`
+to unpack the world block from `$1B780` into the scene buffer at `$1B980`.
+
+## 2. The world table and the scene blocks
+
+`load_level` indexes a table at **`$46A`** by `level << 3`: five `(ADF offset,
+packed length)` pairs, one per world. Each block decodes — with the very same Go
+decoder (`extract/cmd/block`, which skips the 18-byte header and runs
+Huffman → LZ77 → RLE) — to a fixed **`$3F700` bytes** loaded at `$1B980`:
+
+| world | ADF offset | packed | recovered |
+|------:|-----------:|-------:|----------:|
+| 0 | `$3F000` | `$1EAAC` | `$3F700` |
+| 1 | `$5DC00` | `$1FCB0` | `$3F700` |
+| 2 | `$7DA00` | `$1BEA0` | `$3F700` |
+| 3 | `$99A00` | `$24504` | `$3F700` |
+| 4 | `$BE000` | `$1DE2A` | `$3F700` |
+
+```sh
+# decode any world block straight off the disk (here world 0)
+go run turrican/extract/cmd/block -off 0x3F000 -len 0x1EAAC -base 0x1B980 \
+  -o /tmp/world0.bin "Turrican (Amiga)/Turrican.adf"
+```
+
+The block's own header even carries the load address (`$0001B980`) and the
+recovered length (`$0003F700`), matching the decode exactly.
+
+## 3. The scene descriptors, extracted statically
+
+A decoded world block *is* the `scene_manager` (Part III §6): it loads at `$1B980`,
+its `+$16` field is the **scene-descriptor pointer table**, and — crucially — the
+descriptors and their per-frame **handler code live inside the block**, so each
+world brings its own state logic. Reading world 0's table out of the decoded bytes
+gives three scenes:
+
+| scene | descriptor | `+$18` handler | `+$2E` handler |
+|------:|-----------:|---------------:|---------------:|
+| 0 | `$1B9A2` | `$1D0AC` | `$1D704` |
+| 1 | `$1B9D4` | `$1D15E` | `$1D704` |
+| 2 | `$1BA06` | `$1D28E` | `$1D704` |
+
+The `$1D0AC` handler disassembles as clean gameplay code (it reads a game variable
+at `$15A`, clamps it to `0…$1F` and indexes a jump table at `$1D29A`). So the
+scene state machine, its handlers and the level data are all recovered **purely
+by reimplementing the decoder** — the FS-UAE oracle was used only to confirm the
+boot reaches the streamer, never to read the data out.
+
+> **Next.** Decode the world block's structure beyond the scene table: the tile
+> map / parallax layers, the object/enemy spawn lists and the graphics, and the
+> three per-world scene handlers (level intro / play / outro) — Part V mechanics.
 
 # Part V — Game mechanics
 

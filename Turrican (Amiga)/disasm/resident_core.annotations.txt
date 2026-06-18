@@ -16,7 +16,7 @@
 #   go run turrican/extract/cmd/decrunch -o /tmp/turrican.bin "Turrican (Amiga)/Turrican.adf"
 #   python3 -c "open('/tmp/lowseg.bin','wb').write(open('/tmp/turrican.bin','rb').read()[0x10:0x1B780])"
 #   go run stupidcoder.com/tools/cmd/codetrace68k -base 0x10 \
-#     -entry 0xCB4,0xD4C,0xEBC,0x1404,0x147E,0x1710,0x1850,0x189E,0x18BA,0x1B94,0x1BB4,0x1C0C,0x234C,0x2F56,0x35AE,0x3A56,0x438C,0x5576,0x5E40,0x64B8,0x68AC,0x7728,0x78CC,0x7EFC,0x1ABA,0x1AEC,0x1B14,0x1B38,0x1A2F8,0x1A876,0x1A886,0x1B232 \
+#     -entry 0xCB4,0xD4C,0xEBC,0x1404,0x147E,0x1710,0x1850,0x189E,0x18BA,0x1B94,0x1BB4,0x1C0C,0x234C,0x2F56,0x35AE,0x3A56,0x438C,0x5576,0x5E40,0x64B8,0x68AC,0x7728,0x78CC,0x7EFC,0x1ABA,0x1AEC,0x1B14,0x1B38,0x1A2F8,0x1A876,0x1A886,0x1B232,0x4A0,0x71C,0xBF4,0xC12 \
 #     -annotate "Turrican (Amiga)/disasm/resident_core.annotations.txt" \
 #     -o "Turrican (Amiga)/disasm/resident_core.asm" /tmp/lowseg.bin
 # Coverage is partial (~128 routines) — the per-frame pipeline, scene state machine
@@ -42,7 +42,14 @@ EBC  game_loop          The per-frame game loop. Each frame it runs a fixed rend
 
 193A scene_id           Current scene/state index; select_scene maps it through the descriptor table to pick the active state.
 193E scene_descriptor   Pointer to the active scene descriptor (set by select_scene). Descriptor layout: +$8/+$C data, +$10 field, +$18 primary handler, +$1C field, +$2E secondary handler.
-1B980 scene_manager     Runtime scene-manager struct (lives just past the resident segment, so built/loaded at run time); +$16 is the scene-descriptor pointer table select_scene indexes.
+1B980 scene_manager     The current world's scene block, STREAMED FROM DISK into the buffer just past the resident segment (load_level). Layout: +$0 header, +$16 the scene-descriptor pointer table select_scene indexes; the descriptors and their per-frame handler code all live inside this block.
+
+# --- disk streaming / level loading ---
+46A  level_table        Per-world table indexed by level number ($1938 * 8): 5 entries of (ADF byte offset, packed length) for the 5 worlds' huff-compressed scene blocks — $3F000/$1EAAC, $5DC00/$1FCB0, $7DA00/$1BEA0, $99A00/$24504, $BE000/$1DE2A. Each decodes to $3F700 bytes at $1B980.
+4A0  load_level         Load the current world ($1938): look up level_table, BSR disk_load to read the packed block to $1B780, then load_scene_block huff-decodes it to scene_manager ($1B980).
+71C  disk_load          Disk load+decode primitive (d0 = ADF offset or block id $1C/$28/$30 -> $26000/$32400/$3DA00, d1 = length, d2 = dest). Reads the packed bytes off the floppy and huff-decodes them via the resident copy of huff_decode at $74000.
+BF4  load_scene_block   Bring in huff_decode (load_decoder) and run it ($74000) to decompress the packed scene block at $1B780 into $1B980..$5C000.
+C12  load_decoder       Load the huff_decode routine itself from ADF $25C00 ($400 bytes) to $74000 — the same three-pass decoder as $50008/$5F000, used for all the streamed level data.
 1E1  frame_sync_flag    Set at the end of each game_loop iteration; cleared by the vblank path. game_loop spins on it to lock to 50/60 Hz.
 17A  screen_buffers     The three display-buffer base pointers ($17A/$192/$1AA = $5BCE0/$67CE0/$73CE0) — triple-buffering for the scrolling playfield.
 1C2  draw_list_ptr      Pointer to the blitter draw-list structure consumed by blit_playfield / blit_objects.

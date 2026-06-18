@@ -104,15 +104,19 @@
 000434  .dc.b 49 4E 42 4F 57 20 41 52 54 53 20 21 21 FF D3 00 ; INBOW ARTS !!...
 000444  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
 000454  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 60 00 ; ..............`.
-000464  .dc.b 75 3C 60 00 05 EA 00 03 F0 00 00 01 EA AC 00 05 ; u<`.............
-000474  .dc.b DC 00 00 01 FC B0 00 07 DA 00 00 01 BE A0 00 09 ; ................
-000484  .dc.b 9A 00 00 02 45 04 00 0B E0 00 00 01 DE 2A 00 00 ; ....E........*..
-000494  .dc.b 00 9E                                           ; ..
+000464  .dc.b 75 3C 60 00 05 EA                               ; u<`...
+
+; --- level_table  $00046A — Per-world table indexed by level number ($1938 * 8): 5 entries of (ADF byte offset, packed length) for the 5 worlds' huff-compressed scene blocks — $3F000/$1EAAC, $5DC00/$1FCB0, $7DA00/$1BEA0, $99A00/$24504, $BE000/$1DE2A. Each decodes to $3F700 bytes at $1B980. (data) ---
+00046A  .dc.b 00 03 F0 00 00 01 EA AC 00 05 DC 00 00 01 FC B0 ; ................
+00047A  .dc.b 00 07 DA 00 00 01 BE A0 00 09 9A 00 00 02 45 04 ; ..............E.
+00048A  .dc.b 00 0B E0 00 00 01 DE 2A 00 00 00 9E             ; .......*....
 
 ; ==== sub_000496 (1 caller) ====
 000496  4A 38 02 52                   TST.b $252.w
 00049A  67 04                         BEQ $0004A0
 00049C  61 00 6C D6                   BSR $007174
+
+; --- load_level  $0004A0 — Load the current world ($1938): look up level_table, BSR disk_load to read the packed block to $1B780, then load_scene_block huff-decodes it to scene_manager ($1B980). ---
 0004A0  50 F8 19 4C                   ST $194C.w
 0004A4  61 00 00 DC                   BSR $000582
 0004A8  34 38 19 38                   MOVE.w $1938.w,d2
@@ -258,7 +262,7 @@
 000708  .dc.b 00 01 02 00 03 04 00 00 05 06 07 00 08 09 0A 00 ; ................
 000718  .dc.b 0B 0C 0D 00                                     ; ....
 
-; ==== sub_00071C (4 callers) ====
+; ==== disk_load  $00071C  (4 callers) — Disk load+decode primitive (d0 = ADF offset or block id $1C/$28/$30 -> $26000/$32400/$3DA00, d1 = length, d2 = dest). Reads the packed bytes off the floppy and huff-decodes them via the resident copy of huff_decode at $74000. ====
 00071C  0C 80 00 00 00 1C             CMPI.l #$1C,d0
 000722  66 2E                         BNE $000752
 000724  20 3C 00 02 60 00             MOVE.l #$26000,d0
@@ -544,7 +548,7 @@
 000BDA  .dc.b E2 89 08 C1 00 1F C2 82 80 81 08 29 00 00 FF FF ; ...........)....
 000BEA  .dc.b 67 04 08 80 00 1F 22 C0 4E 75                   ; g.....".Nu
 
-; ==== sub_000BF4 (1 caller) ====
+; ==== load_scene_block  $000BF4  (1 caller) — Bring in huff_decode (load_decoder) and run it ($74000) to decompress the packed scene block at $1B780 into $1B980..$5C000. ====
 000BF4  48 E7 E1 30                   MOVEM.l d0-d2/d7/a2-a3,-(a7)
 000BF8  61 18                         BSR $000C12
 000BFA  2E 09                         MOVE.l a1,d7
@@ -555,7 +559,7 @@
 000C0C  4E F8 00 C0                   JMP $C0.w
 000C10  .dc.b 4E 75                                           ; Nu
 
-; ==== sub_000C12 (2 callers) ====
+; ==== load_decoder  $000C12  (2 callers) — Load the huff_decode routine itself from ADF $25C00 ($400 bytes) to $74000 — the same three-pass decoder as $50008/$5F000, used for all the streamed level data. ====
 000C12  20 3C 00 02 5C 00             MOVE.l #$25C00,d0
 000C18  22 3C 00 00 04 00             MOVE.l #$400,d1
 000C1E  24 3C 00 07 40 00             MOVE.l #$74000,d2

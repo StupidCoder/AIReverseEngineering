@@ -122,7 +122,7 @@ AIReverseEngineering/
 │
 └── Turrican (Amiga)/
     ├── Turrican.adf             # raw disk image (pinned by MD5 in Image files)
-    ├── Turrican.md              # writeup (Parts I-II done; III in progress; IV-V stubbed)
+    ├── Turrican.md              # writeup (Parts I-IV; V stubbed) — loader, engine, disk-streamed levels
     ├── extract/                 # pure-Go 3-pass decoder; cmd/decrunch (main part), cmd/block (disk overlays)
     └── disasm/                  # annotated 68000 disasm: resident engine, in-place setup, $1BB00 sound driver
 ```

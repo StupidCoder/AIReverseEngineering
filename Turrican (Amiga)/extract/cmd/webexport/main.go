@@ -71,8 +71,9 @@ type jsonLevel struct {
 	Height     int         `json:"height"`
 	NTiles     int         `json:"ntiles"`
 	Atlas      string      `json:"atlas"`
-	Cells      []int       `json:"cells"` // row-major, raw map bytes (>=ntiles = flipped tile-128)
-	Spawn      point       `json:"spawn"` // player spawn, world pixels
+	Cells      []int       `json:"cells"`     // row-major, raw map bytes (>=ntiles = flipped tile-128)
+	Collision  []int       `json:"collision"` // per tile: 16 bytes (4x4 of 8x8-block solidity), index t*16+r*4+c
+	Spawn      point       `json:"spawn"`     // player spawn, world pixels
 	View       rect        `json:"view"`  // the Amiga on-screen viewport at the spawn, world pixels
 	ObjAtlas   string      `json:"objAtlas,omitempty"`
 	ObjSprites []objSprite `json:"objSprites,omitempty"`
@@ -136,6 +137,13 @@ func run(adfPath, outDir string) error {
 			return err
 		}
 
+		// Per-tile collision (16 bytes/tile = 4x4 of 8x8-block solidity).
+		collBytes, _ := game.TileCollision(w)
+		collision := make([]int, len(collBytes))
+		for i, b := range collBytes {
+			collision[i] = int(b)
+		}
+
 		scenes := game.Scenes(w)
 
 		// Collect every sprite the world's objects use, then pack each one's first
@@ -189,7 +197,7 @@ func run(adfPath, outDir string) error {
 			file := fmt.Sprintf("world%d_scene%d.json", w, sc.Index)
 			lvl := jsonLevel{
 				World: w, Scene: sc.Index, Width: sc.Width, Height: sc.Height,
-				NTiles: nTiles, Atlas: atlasName, Cells: cells,
+				NTiles: nTiles, Atlas: atlasName, Cells: cells, Collision: collision,
 				Spawn: point{sc.SpawnX, sc.SpawnY},
 				View:  rect{sc.CamX, sc.CamY, amigaViewW, amigaViewH},
 			}

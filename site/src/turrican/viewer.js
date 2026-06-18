@@ -31,8 +31,10 @@ export class TurricanViewer {
     this.world = new Container();
     this.tileLayer = new Container();
     this.objLayer = new Container();
-    this.markerLayer = new Container(); // player spawn marker
+    this.collisionLayer = new Container(); // solid-tile overlay
+    this.markerLayer = new Container();    // player spawn marker
     this.showObjects = true;
+    this.showCollision = false;
     this.zoom = 1;
     this.minZoom = 0.05;
     this.maxZoom = 8;
@@ -45,8 +47,9 @@ export class TurricanViewer {
     await this.app.init({ background: 0x101018, antialias: false, resizeTo: this.el });
     this.el.appendChild(this.app.canvas);
     this.world.addChild(this.tileLayer);
-    this.world.addChild(this.objLayer);    // objects draw on top of the tiles
-    this.world.addChild(this.markerLayer); // spawn marker on top of everything
+    this.world.addChild(this.objLayer);       // objects draw on top of the tiles
+    this.world.addChild(this.collisionLayer); // collision overlay above those
+    this.world.addChild(this.markerLayer);    // spawn marker on top of everything
     this.app.stage.addChild(this.world);
     this._wireCamera();
     return fetch(DATA + 'meta.json').then((r) => r.json());
@@ -127,6 +130,42 @@ export class TurricanViewer {
     }
     this.objLayer.visible = this.showObjects;
 
+    // Collision overlay: each tile's 4x4 grid of 8x8-block solidity (from the
+    // $3C1C4 table), expanded over the map via the cell tile indices (flipped tiles
+    // mirror their columns). Solid=red, special (hazard/water $7F/$D3)=blue. Built
+    // as per-row run-length rectangles to stay light.
+    this.collisionLayer.removeChildren();
+    if (level.collision) {
+      const coll = level.collision, bw = W * 4, bh = H * 4;
+      const g = new Graphics();
+      for (let br = 0; br < bh; br++) {
+        const row = (br / 4) | 0, sr = br % 4;
+        let runStart = 0, runVal = 0;
+        for (let bc = 0; bc <= bw; bc++) {
+          let v = 0;
+          if (bc < bw) {
+            const col = (bc / 4) | 0;
+            let cv = cells[row * W + col];
+            const flip = cv >= ntiles;
+            let t = flip ? cv - 128 : cv;
+            if (t < 0 || t >= ntiles) t = 0;
+            const sc = flip ? 3 - (bc % 4) : bc % 4;
+            v = coll[t * 16 + sr * 4 + sc];
+          }
+          if (v !== runVal) {
+            if (runVal !== 0) {
+              g.rect(runStart * 8, br * 8, (bc - runStart) * 8, 8)
+                .fill({ color: runVal === 1 ? 0xff3030 : 0x3399ff, alpha: 0.45 });
+            }
+            runStart = bc;
+            runVal = v;
+          }
+        }
+      }
+      this.collisionLayer.addChild(g);
+    }
+    this.collisionLayer.visible = this.showCollision;
+
     // Player spawn marker (a green crosshair ring at the spawn pixel).
     this.markerLayer.removeChildren();
     if (level.spawn) {
@@ -148,10 +187,16 @@ export class TurricanViewer {
     return level;
   }
 
-  // Toggle the enemy overlay.
+  // Toggle the object overlay.
   setObjects(on) {
     this.showObjects = on;
     this.objLayer.visible = on;
+  }
+
+  // Toggle the collision (solid-tile) overlay.
+  setCollision(on) {
+    this.showCollision = on;
+    this.collisionLayer.visible = on;
   }
 
   // --- camera (shared pattern with the Fort/Sonic viewers) ----------------

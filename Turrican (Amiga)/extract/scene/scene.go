@@ -104,6 +104,22 @@ func Load(adf []byte) (*Game, error) {
 // Block returns world w's scene block as a Space.
 func (g *Game) Block(w int) Space { return Space{Data: g.blocks[w], Base: BlockBase} }
 
+// TileCollision returns world w's per-tile collision table (block header +$04, the
+// $3C1C4 section) and the tile count. Each tile has 16 bytes = a 4x4 grid of
+// 8x8-block solidity (0 = passable, nonzero = solid), which select_scene's builder
+// ($2994) copies into the live collision buffer the player check ($35AE) reads.
+func (g *Game) TileCollision(w int) (data []byte, nTiles int) {
+	blk := g.Block(w)
+	nTiles = blk.be32(blk.be32(BlockBase)) / 4 // header+$00 -> tile table; [0] = table size
+	coll := blk.be32(BlockBase + 0x04)
+	o := coll - blk.Base
+	n := nTiles * 16
+	if o < 0 || o+n > len(blk.Data) {
+		return nil, nTiles
+	}
+	return blk.Data[o : o+n], nTiles
+}
+
 // Scenes resolves every scene of world w.
 func (g *Game) Scenes(w int) []Scene {
 	blk := g.Block(w)

@@ -774,9 +774,26 @@ recovered end to end from the disk image through the reimplemented decoder, the
 tile format and this map. The committed `rendered/world*_map*.png` cover every
 world.
 
-> **Next.** The `$3C1C4` collision layer and the object/enemy data that follows
-> the maps in the same section, the sprite sheet at `$51F80`, and the per-world
-> scene handlers — Part V mechanics.
+## 6. The collision map
+
+Solidity isn't per-tile or a parallel grid — it's a **per-tile-type collision shape**.
+The block header's `+$04` section (`$3C1C4`) is an array of **16 bytes per tile**: a
+**4×4 grid of 8×8-pixel-block solidity** (`0` = passable, `1` = solid, with a rare
+`$7F`/`$D3` for special blocks), so a 32×32 tile carries sub-tile collision. At scene
+load `select_scene` (`$160E`) calls the playfield builder (`$2994`) which, for each map
+tile, copies `section + tileIndex*16` into a screen-sized collision buffer (`$212`) as
+4 rows of 4 bytes; the player check (`$35AE`) then reads one byte at the player's
+position at 8-pixel granularity (`x/8` column, 48-byte row stride). h-flipped map cells
+mirror their 4 columns. Overlaying the decoded shapes on the map, the solid mask hugs
+the terrain surface exactly — sky and the decorative grass tips passable, ground solid:
+
+![World 1 collision over the map](rendered/world0_collision.png)
+
+`extract/scene`'s `TileCollision` reads this off the disk; `webexport` ships it per
+scene (the viewer's **Collision** toggle expands it over the tiles).
+
+> **Next.** The object/enemy data (Part V), the sprite sheet at `$51F80`, and the
+> per-world scene handlers.
 
 # Part V — Game mechanics
 

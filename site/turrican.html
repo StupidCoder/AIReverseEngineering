@@ -25,6 +25,7 @@
         <select id="level"></select>
       </label>
       <label><input type="checkbox" id="objects" checked /> Objects</label>
+      <label><input type="checkbox" id="collision" /> Collision</label>
       <span class="hint">drag to pan · scroll or pinch to zoom</span>
     </div>
     <p class="legend">
@@ -40,9 +41,11 @@
       <b>“1989”</b> spelled out in the rock. Tick <b>Objects</b> to overlay the scene's
       <b>object placements</b> — read straight off the disk from the spawner's own lists, each
       drawn with the first animation frame of the sprite its AI handler installs, at the
-      position the game seeds it. Each scene opens framed on the <b>Amiga's on-screen view at
-      the player spawn</b> (the green crosshair), the same start the game shows. Drag to pan,
-      scroll to zoom from the whole level to
+      position the game seeds it. Tick <b>Collision</b> to overlay the <b>solid map</b> —
+      Turrican stores a 4×4 grid of 8×8-pixel solidity bytes per tile, so the red mask follows
+      the terrain at sub-tile resolution (blue marks the rare special blocks). Each scene opens
+      framed on the <b>Amiga's on-screen view at the player spawn</b> (the green crosshair), the
+      same start the game shows. Drag to pan, scroll to zoom from the whole level to
       a single tile. See the
       <a href="https://github.com/StupidCoder/AIReverseEngineering/blob/main/Turrican%20(Amiga)/Turrican.md">write-up</a>
       (Part IV) for how it was decoded.

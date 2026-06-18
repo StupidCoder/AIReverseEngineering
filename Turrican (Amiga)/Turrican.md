@@ -878,10 +878,36 @@ rotation, then a three-frame burst:
 
 Each world yields its own enemy set (the rotating eyeball, saucers, turrets,
 mechs, …) — 45 sprite sheets across the five worlds plus the five shared resident
-ones, all in `rendered/sprites/`. The **player** and the enemies' *placement* are
-loaded/seeded at run time, so those still need the spawn/loader code.
+ones, all in `rendered/sprites/`.
 
-> **Next.** The spawn subsystem that loads the player and seeds enemy placement,
+## 3. The object system
+
+Active enemies and effects are a **doubly-linked list** (`object_list $236`) of
+58-byte nodes drawn from a 39-node pool at `$9184` (`obj_pool_init $1A68`); spare
+nodes sit on the free list `object_free $23A`. A spawn is `obj_alloc` (pop a free
+node) → fill its fields → `obj_link` (`$1AEC`, into the active list); a kill is
+`obj_unlink` (`$1B14`, back to the pool). Each node is:
+
+```
++$0 next   +$4 prev   +$C frame index   +$12 frame table (a bob_frame_table)
++$18 x     +$1A y     +$1C active        +$22 AI handler
+```
+
+Every frame, `object_update` (`$1B94`) walks the list and `JSR`s each node's AI
+handler (`+$22`), then `object_draw` (`$1C0C`) walks it again and cookie-cuts each
+node through its frame table (`+$12`) at frame (`+$C`) and position (`+$18/$1A`) —
+**this is exactly what puts the sprites of §2 on screen.** So the engine ↔ sprite
+link is complete: a spawn just sets a node's `+$12` to one of the frame tables the
+extractor reads.
+
+What's *not* yet pinned is the **placement** — which enemy is seeded where in a
+level. The spawns are issued by per-world scene code (in the scene block, around
+the scene handler `$1D0AC`), not from a flat list in the resident image, so
+recovering placements means following that per-world code (or capturing the live
+object list from the oracle, since node `+$18/$1A/+$12` is exactly position +
+sprite). That is the input an **object layer** in the level viewer would need.
+
+> **Next.** The per-world placement/spawn data (to drive a viewer object layer),
 > plus the collision check that reads `$3C1C4`.
 
 # Appendix A — Toolchain and reproduction

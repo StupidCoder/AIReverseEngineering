@@ -16,7 +16,7 @@
 #   go run turrican/extract/cmd/decrunch -o /tmp/turrican.bin "Turrican (Amiga)/Turrican.adf"
 #   python3 -c "open('/tmp/lowseg.bin','wb').write(open('/tmp/turrican.bin','rb').read()[0x10:0x1B780])"
 #   go run stupidcoder.com/tools/cmd/codetrace68k -base 0x10 \
-#     -entry 0xCB4,0xD4C,0xEBC,0x1404,0x147E,0x1710,0x1850,0x189E,0x18BA,0x1B94,0x1BB4,0x1C0C,0x234C,0x2F56,0x35AE,0x3A56,0x438C,0x5576,0x5E40,0x64B8,0x68AC,0x7728,0x78CC,0x7EFC,0x1ABA,0x1AEC,0x1B14,0x1B38,0x1A2F8,0x1A876,0x1A886,0x1B232,0x4A0,0x71C,0xBF4,0xC12,0x5E9C,0x5F22,0x603A,0x6202,0x63AE \
+#     -entry 0xCB4,0xD4C,0xEBC,0x1404,0x147E,0x1710,0x1850,0x189E,0x18BA,0x1B94,0x1BB4,0x1C0C,0x234C,0x2F56,0x35AE,0x3A56,0x438C,0x5576,0x5E40,0x64B8,0x68AC,0x7728,0x78CC,0x7EFC,0x1ABA,0x1AEC,0x1B14,0x1B38,0x1A2F8,0x1A876,0x1A886,0x1B232,0x4A0,0x71C,0xBF4,0xC12,0x5E9C,0x5F22,0x603A,0x6202,0x63AE,0x1A68,0x1AC8,0x1ABA,0x1AEC,0x1B14,0x1B94,0x1C0C \
 #     -annotate "Turrican (Amiga)/disasm/resident_core.annotations.txt" \
 #     -o "Turrican (Amiga)/disasm/resident_core.asm" /tmp/lowseg.bin
 # Coverage is partial (~128 routines) — the per-frame pipeline, scene state machine
@@ -77,6 +77,24 @@ C12  load_decoder       Load the huff_decode routine itself from ADF $25C00 ($40
 #   +$D  byte  flag (-> draw_object_bob_alt)
 # Source (bitmap/mask) modulo BLTBMOD/BLTAMOD = $FFFE (-2), set once in draw_objects
 # (the cookie-cut shift reads width+1 words, so the data is one word narrower).
+
+# --- the object system (enemies/effects as linked-list instances) ---
+# Active objects are a doubly-linked list ($236 head) of 58-byte nodes drawn from
+# a 39-node pool at $9184; freed nodes go on the $23A free list. Each frame
+# object_update runs every node's AI, then object_draw draws it through its frame
+# table. Object node fields: +$0 next, +$4 prev, +$C frame index, +$12 frame table
+# (a bob_frame_table), +$18 x, +$1A y, +$1C active flag, +$22 AI handler.
+1A68 obj_pool_init      Build the object pool: 39 nodes x $3A bytes at $9184 chained onto the free list $23A; clear the active list $236 and the count $14A. Called from level_setup.
+1AC8 obj_alloc          Pop a node off the free list ($23A): a5 = $23A, $23A = a5.next, clear its flags. Returns the node in a5.
+1ABA obj_alloc_checked  obj_alloc guarded by the count: if $14A > $26 (pool full) return the sentinel $23C6, else obj_alloc.
+1AEC obj_link           Link node a5 into the active list at $236 (doubly-linked, new head) and bump the count $14A.
+1B14 obj_unlink         Unlink node a5 from the active list and return it to the free list $23A; decrement $14A.
+1B94 object_update      Per-frame: walk the $236 active list and JSR each node's AI handler (+$22) — the enemy/effect logic that moves them, animates ($C frame index) and spawns/kills.
+1C0C object_draw        Per-frame: walk the $236 list and cookie-cut each node into the back buffer using its frame table (+$12) at frame (+$C) and position (+$18/$1A) — the same BOB blit as draw_object_bob. This is what puts the extracted sprites on screen.
+236  object_list        Head of the active-object doubly-linked list.
+23A  object_free        Head of the free-object list (the pool's spare nodes).
+9184 object_pool        The 39-node object pool (work RAM), built by obj_pool_init.
+14A  object_count       Number of active objects (capped at $26+1 = 39).
 
 # Per-object-type draw + the animation table:
 4CCA bob_frame_table    Array of BOB-descriptor pointers — the animation frames. The per-object-type draw routines do `LEA $4CCA,a5; ADDA.w d3,a5` (d3 selects the object's frame group) then `MOVEA.l $0(a5,d6.w),a0` to pick the current frame (d6, often toggled `EORI.w #$4,d6` for a 2-frame loop) before falling into draw_object_bob.

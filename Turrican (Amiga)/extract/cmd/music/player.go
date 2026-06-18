@@ -241,12 +241,21 @@ func (p *player) readPattern(ch int) {
 			}
 			continue
 		}
-		// A note row: note (low 6 bits) + macro number + detune. Only b0>=0xBF is a
-		// portamento note; everything below (incl. the common 0x80-0xBE) is a plain
-		// note — the high bits are masked off (driver: ANDI #$3FFF then byte0&$3F).
+		// A note row. b0 < 0xBF: a fresh note — retrigger the instrument macro. b0 >=
+		// 0xBF: a portamento/hold note — the driver ($1C808) changes the pitch WITHOUT
+		// restarting the macro or sample, so the voice sustains (drones, glides). The
+		// high note bits are masked off (driver: ANDI #$3FFF then byte0&$3F).
 		v.patPos++
 		note := int(b0&0x3F) + int(v.transpose)
-		p.trigger(ch, note, int(b1), int(int8(b3)), b0 >= 0xBF)
+		if b0 >= 0xBF {
+			v.note = note
+			v.basePer = p.noteToPeriod(note) + int(int8(b3))
+			if !v.portOn {
+				v.period = v.basePer
+			}
+		} else {
+			p.trigger(ch, note, int(b1), int(int8(b3)), false)
+		}
 		return
 	}
 }

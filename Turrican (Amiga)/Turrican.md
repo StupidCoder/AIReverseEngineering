@@ -427,8 +427,8 @@ work needs no emulator: a flat binary at a known load address.
 
 # Part III — Game program architecture
 
-> **Stub.** The 68000 program that the decruncher hands control to (`$5F500`).
-> This part grows as the decrunched image is disassembled and annotated.
+The decruncher hands control to `$5F500` in the flat `$43880` image. This part
+documents that program; it grows as the disassembly is annotated.
 
 ## 1. Disassembly and the `disasm/` annotation store
 
@@ -449,14 +449,64 @@ Regeneration (from the repo root):
 # decode the main part to a flat image (base $43880, entry $5F500)
 go run turrican/extract/cmd/decrunch -o /tmp/turrican.bin "Turrican (Amiga)/Turrican.adf"
 
-# recursive-descent trace from the game entry, applying the annotations
-go run stupidcoder.com/tools/cmd/codetrace68k -base 0x43880 -entry 0x5F500 \
+# recursive-descent trace from the game's in-place segment, applying the annotations
+go run stupidcoder.com/tools/cmd/codetrace68k -base 0x43880 \
+  -entry 0x5F500,0x60000,0x602D0 \
   -annotate "Turrican (Amiga)/disasm/turrican.annotations.txt" \
   -o "Turrican (Amiga)/disasm/turrican.asm" /tmp/turrican.bin
 ```
 
-> **Stub.** The 68000 startup at `$5F500`: interrupt/copper setup, the main loop,
-> and the memory map — documented here as the annotations grow.
+## 2. Two segments: the relocation at `$5F500`
+
+The flat image is not loaded where it runs. The very first thing `$5F500` does is
+split itself in two:
+
+```
+05F500  game_entry:
+        LEA  $43890,a0 ; LEA $10,a1
+        MOVE.l (a0)+,(a1)+ … until a0 = $5F000   ; copy $43890..$5F000 → $10
+        … fire-button option select, wait for fire …
+        BRA  $60000                              ; game_init
+```
+
+So the image has **two segments**:
+
+* **The game proper** — image `$43890…$5F000` — is copied down to **`$10…$1B780`**
+  and runs there (subtract `$43880`). Disassembling it correctly needs a *second*
+  pass based at `$10` (TODO); the in-place trace above does not follow the `JSR`s
+  into it.
+* **The setup / init / ISR + data** — image `$5F500…$77E00` — runs **in place**
+  (the image sits at `$43880`, so image address = run address). `turrican.asm`
+  covers this segment.
+
+## 3. The in-place setup segment
+
+What runs before the game proper takes over, all from `turrican.asm`:
+
+* **`game_entry` (`$5F500`)** — relocates the game proper (above); pokes the
+  reset/illegal vectors at `$8`/`$C`; reads the CIA-A fire buttons
+  (`$BFE001` bits 6/7) to pick **trainer/option** settings (poking game vars
+  `$E0E`/`$D04`); waits for a fire press+release; `BRA game_init`.
+* **`game_init` (`$60000`)** — the hardware bring-up: supervisor mode, stack at
+  `$602CC`, all INTENA/DMACON/INTREQ off, then it unpacks and runs several
+  sub-modules — `pp20_decrunch $6C186 → $30000` (a **PowerPacker "PP20"** block)
+  and `JSR $30002`, a raw block-copy to `$50000` and `JSR $50000`, and
+  `load_block_1BB00` — installs the level-3 (vblank) vector and enables the
+  display via `setup_display`. The two `NOP`s at **`$600CA`** are the TRSI
+  trainer hook (Part II §6), patched to `BSR` the 99-lives code at boot.
+* **`vblank_isr` (`$602D0`)** — the level-3 interrupt: checks the VERTB bit in
+  `INTREQR`, bumps a frame counter, runs `palette_cycle`, and `JSR $1BB24` (the
+  per-frame **game tick**, down in the relocated game).
+* **Decompressors / loader** — the game reuses the **same Huffman decoder** as the
+  `$50008` decruncher (`huff_decode $5F000`) to unpack graphics/level blocks at
+  runtime, alongside `pp20_decrunch` and a floppy **trackloader**
+  (`disk_read $604FA` / `disk_setup_sync $6056E`, `DSKSYNC = $4489`) that streams
+  level data off the disk during play.
+
+> **Next.** Disassemble the relocated game proper (`$10…$1B780`) in a second pass
+> based at `$10`, starting from the entry points the init chain calls
+> (`$1BB24` game tick, `$1BB2C/$34/$48` setup) — then the main loop, player and
+> level handling (Parts IV–V).
 
 # Part IV — Graphics and data formats
 

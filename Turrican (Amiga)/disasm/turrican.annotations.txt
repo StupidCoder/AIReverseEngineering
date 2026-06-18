@@ -1,0 +1,56 @@
+# Turrican (Amiga) — decrunched game image annotations.
+# Consumed by codetrace68k -annotate; format: ADDR  name  description
+#   ADDR is hex; '#' starts a comment line. A routine address gets a header
+#   banner, any other address an inline "--- name — desc ---" marker.
+#
+# Regenerate turrican.asm (run from the repo root):
+#   go run turrican/extract/cmd/decrunch -o /tmp/turrican.bin "Turrican (Amiga)/Turrican.adf"
+#   go run stupidcoder.com/tools/cmd/codetrace68k -base 0x43880 \
+#     -entry 0x5F500,0x60000,0x602D0 \
+#     -annotate "Turrican (Amiga)/disasm/turrican.annotations.txt" \
+#     -o "Turrican (Amiga)/disasm/turrican.asm" /tmp/turrican.bin
+#
+# THE IMAGE HAS TWO SEGMENTS (relocation model)
+# The $50008 decruncher (Part II §5) produces a flat $34580-byte image that loads
+# at $43880; entry is $5F500. That entry's first act is to copy the low-memory
+# game — image $43890..$5F000 — down to $10..$1B780 and run it there. So:
+#   * $43890..$5F000  is the GAME PROPER; it RUNS at $10..$1B780 (subtract $43880).
+#     Disassembling it correctly needs a SECOND pass based at $10 (TODO):
+#       codetrace68k -base 0x10 -skip 16 ... /tmp/turrican.bin  (entries below: $1BB24 etc.)
+#   * $5F500..$77E00  is the SETUP/INIT/ISR + data; it RUNS IN PLACE (image addr ==
+#     run addr, because the whole image sits at $43880). This file disassembles
+#     THAT segment correctly. JSRs into $10000..$1B780 (e.g. $1BB24) are calls into
+#     the relocated game and are not followed here.
+# Names are from observed behaviour, not external sources. $DFF000 = custom chip
+# base; $BFE001 = CIA-A port A (joystick fire buttons in bits 6/7).
+
+# --- in-place setup / init segment (runs at its image address) ---
+
+5F000  huff_decode       In-game Huffman decompressor — the SAME algorithm as the $50008 pass-1 decruncher (Part II §5), embedded for runtime use. a0=end of packed src, a3=output base, a2=output end, d7=src end; builds the $90 decode tables and the $A4 param block, copies the packed stream backward, then decodes. Used to unpack graphics/level blocks during play.
+5F400  depack_to_1BB00   Disk-load + unpack a block to $1BB00: BSR disk_read, set src=$1BB00/end=$27D68, dst window $1BB00..$2FA00, then BRA huff_decode.
+5F420  depack_to_30000   Unpack a block to $30000: src=$2FE00/end=$3B314, dst $30000..$5EA00, BRA huff_decode.
+
+5F500  game_entry        Decruncher hands control here ($AA = $5F500). (1) relocate the game proper: copy image $43890..$5F000 down to $10.. (LEA $43890/$10; MOVE.l until a0==$5F000). (2) poke the reset/illegal vectors at $8/$C. (3) trainer/option select: test CIA-A fire buttons ($BFE001 bit6/bit7) and conditionally poke game vars $E0E ($909) and $D04 ($600A). (4) wait for a fire press+release. (5) BRA game_init ($60000).
+
+60000  game_init         Main hardware init. Save the option longs (d0/d1) to $60784; SR=$2000 (supervisor); stack=$602CC; INTENA/DMACON/INTREQ all off. pp20_decrunch $6C186..$703EA -> $30000 and JSR $30002 (run it). setup_display. Block-copy $703EA..$77DF0 -> $50000 and JSR $50000. load_block_1BB00. Install level-3 (vblank) vector $6C -> vblank_isr, enable INTENA #$8010 (SET|VERTB). NOPs at $600CA are the trainer hook (patched to BSR the 99-lives code at boot — see Part II §6). Calls into the relocated game at $1BB34/$1BB48/$1BB2C to finish setup; the tail (from ~$600D2) re-inits the copper pointers and continues into the game proper (not yet fully traced).
+
+6010C  setup_display     Bring up the display + interrupt system: clear the active flag $603B8, set the active copper-list pointers ($603B0/$603B4 -> $6040C/$60188), install vblank vector $6C -> vblank_isr, COP1LC ($80) -> $603BC, DMACON #$8380 (SET|DMAEN|BPLEN|COPEN), INTENA #$C010 (SET|INTEN|VERTB).
+
+60188  copper_palette    Colour/copper data table (16-bit RGB entries used by the palette cycle).
+
+602D0  vblank_isr        Level-3 (vertical-blank) interrupt handler. Read INTREQR ($DFF01E); if the VERTB bit ($10) is set: bump the frame counter $603BA; if $603AE!=0 run palette_cycle; if the run flag $603B8 is set JSR $1BB24 (the per-frame game tick, in the relocated game). Then ack INTREQ and RTE.
+6031A  palette_cycle     Per-frame palette/colour animation. Counts down $603AC (reloaded from $603AD), decrements $603AE, and runs a 32-entry colour update over the copper lists at $603B0/$603B4.
+
+60498  load_block_1BB00  Set d0=$1C, d1=$C268, d2=$1BB00 and BRA depack_to_1BB00.
+604AA  load_block_30000  Set d0=$28, d1=$B514, d2=$2FE00; BSR disk_read; BRA depack_to_30000.
+604FA  disk_read         Trackloader: map a logical block id (d0 $1C/$28 -> $26000/$32400) to a disk position (JSR $60678; DIVU #$1600), set up disk DMA via disk_setup_sync, and read the data. The game streams level/graphics data off the floppy during play.
+6056E  disk_setup_sync   Program the disk hardware for a sync'd read: DSKSYNC ($DFF07E) = $4489 (standard Amiga sync word), ADKCON/DSKLEN setup via $DFF024+.
+
+6078C  pp20_decrunch     PowerPacker depacker. Verifies the "PP20" magic ($50503230) at (a0), then decrunches backward from the end pointer a1 into a2 (efficiency table + bit-reader, the standard PowerPacker scheme). a0=src start, a1=src end, a2=dst.
+
+# --- relocated game proper (runs at $10..$1B780; see TODO second pass) ---
+# These are the entry points the init chain calls into the low-memory game.
+1BB24  game_tick         Per-frame game update, called from vblank_isr each VERTB.
+1BB2C  game_sub_2C       Init/setup callback (called from game_init with d0=0).
+1BB34  game_sub_34       Init/setup callback (called from game_init with d0=$1CFF4, d1=$20E90).
+1BB48  game_sub_48       Init/setup callback (called from game_init with d0=$40).

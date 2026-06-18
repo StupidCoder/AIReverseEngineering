@@ -122,8 +122,9 @@ AIReverseEngineering/
 │
 └── Turrican (Amiga)/
     ├── Turrican.adf             # raw disk image (pinned by MD5 in Image files)
-    ├── Turrican.md              # writeup (Parts I-II done; III scaffolded; IV-V stubbed)
-    └── extract/                 # pure-Go decruncher (3-pass Huffman/LZ/RLE), cmd/decrunch
+    ├── Turrican.md              # writeup (Parts I-II done; III in progress; IV-V stubbed)
+    ├── extract/                 # pure-Go decruncher (3-pass Huffman/LZ/RLE), cmd/decrunch
+    └── disasm/                  # annotated 68000 disassembly of the decrunched game
 ```
 
 Per-game folder contract: `<Game>.<ext>` raw image, a markdown writeup of the

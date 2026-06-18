@@ -159,9 +159,14 @@ func (p *player) processTrack() {
 func (p *player) trackCommand(sub, o int) bool {
 	switch sub {
 	case 4: // word2 = row-speed (kept = song tempo, verified vs the real driver's work
-		// struct $6=3), word3 = CIA tempo. The driver's sound_tick is called from the
-		// 50 Hz vblank ISR, so that's the tick rate the captured ground truth used.
-		p.tickHz = 50.0
+		// struct $6=3); word3 sets the CIA timer B that drives sound_tick — that's the
+		// real tick rate (the music is CIA-timed, not vblank-timed).
+		if t := be16(p.mdat, o+6) & 0x1FF; t != 0 {
+			reload := (0x1C00 / t) << 8 // CIA timer B reload value
+			if reload > 0 {
+				p.tickHz = 709379.0 / float64(reload) // PAL E-clock / reload
+			}
+		}
 		return false
 	case 0: // loop song to the position in word2
 		p.trackPos = be16(p.mdat, o+2)

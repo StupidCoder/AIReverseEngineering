@@ -780,8 +780,42 @@ world.
 
 # Part V — Game mechanics
 
-> **Stub.** Player movement and the weapon system, enemies, the worlds and
-> level structure, scoring and progression.
+## 1. Objects, sprites and collision — the code-driven layers
+
+The tiles, palette and map (Part IV) fell out cleanly because they are
+*self-describing*: a directory of section pointers, offset tables, and width/height
+fields. The remaining level data — enemy graphics, where they spawn, and the
+collision layer — is **driven by code**, so the byte formats are only meaningful
+through the routines that read them. This section records what is *located* so far;
+fully decoding each needs the corresponding engine routine disassembled.
+
+* **Enemy / BOB graphics.** The scene block's `+$0C` section (`$51F80`, ~24 KB) and
+  the region right after the three maps in the `+$00`-area section are **bitplane
+  BOB graphics** — the byte histogram is dominated by mask edges (`$F8`, `$07`,
+  `$FC`, `$03`), the signature of planar sprite data rather than the PCM of the
+  adjacent TFMX samples. The exact shape table (per-BOB dimensions / offsets) is
+  set up by `blit_objects` and the object renderer; decoding it is the next step.
+
+* **Object behaviour.** Each scene descriptor's `+$20` field points at a small
+  **table of object-AI handler routines** (world 0 scene 0: nine handlers from
+  `$1BA58`), each updating an `a5`-relative object instance struct. The scene's own
+  per-frame handler (`$1D0AC`) drives the parallax background (camera x `$15A` →
+  a per-column table at `$1D29A`) and **scripted events** — e.g. it triggers a
+  sound (`JSR $1A2AC`) once the scroll reaches a set position. Enemy *placement* is
+  scroll-triggered by the resident engine's spawn subsystem, not a flat list in the
+  block.
+
+* **The `$3C1C4` layer.** The `+$04` section (4000 bytes, values `{0, 1, 127, 211}`
+  after a 16-byte lead-in, in a repeating `0 1 1 1` pattern) is a per-cell attribute
+  layer — most likely collision. It renders as a coherent platform silhouette at a
+  ~137-wide stride (scene 0's map width), but it is **not** a 1:1 solid/empty mask
+  over the tile map (correlating it against tile solidity is chance-level), so its
+  exact cell mapping awaits the collision-check routine.
+
+> **Next.** Disassemble the object renderer / spawn subsystem (`blit_objects` and
+> the per-frame pipeline) to pin the BOB shape table and the spawn-list format, and
+> the collision check that reads `$3C1C4` — then the player, weapons and enemies
+> proper.
 
 # Appendix A — Toolchain and reproduction
 

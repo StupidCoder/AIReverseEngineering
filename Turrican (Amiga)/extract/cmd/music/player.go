@@ -44,14 +44,16 @@ type voice struct {
 	note    int  // current note ($11)
 	addNote int  // per-channel note offset from $F5/portamento
 	detune  int  // macro period detune
-	// Paula target
-	smpStart  int // smpl offset of the sample
-	smpLen    int // length in bytes
+	// Paula "registers": the macro sets these; Paula reloads them when the current
+	// sample finishes (the loop). cmd $19 points them at a 2-byte silence so a
+	// one-shot plays once then loops silence (the note ends naturally).
+	regStart  int // smpl offset ($B0 / AUDxLC)
+	regLen    int // length in bytes ($D0*2 / AUDxLEN)
 	basePer   int // base period ($A0)
 	period    int // current period after effects
 	vol       int // volume 0..64 ($60)
 	dma       bool
-	retrigger bool // a fresh DMA start was requested this tick
+	retrigger bool // a fresh DMA start (cmd $01) was requested this tick
 	// effects
 	vibOn                                  bool
 	vibDepth, vibSpeed, vibPos, vibSign    int
@@ -62,12 +64,13 @@ type voice struct {
 }
 
 type paulaCh struct {
-	data      []int8 // sample bytes (signed)
-	start, ln int    // current sample window into data
-	period    int
-	vol       int
-	pos       float64 // fractional read position within [start,start+ln)
-	playing   bool
+	data               []int8  // sample bank (signed)
+	curStart, curLen   int     // the sample window currently playing
+	loopStart, loopLen int     // reloaded into cur when cur finishes (Paula's loop)
+	period             int
+	vol                int
+	pos                float64 // fractional read position within [curStart,curStart+curLen)
+	playing            bool
 }
 
 type player struct {
@@ -320,14 +323,13 @@ func (p *player) runMacro(ch int) {
 		case 0x00: // DMA off + reset effects
 			v.dma = false
 			v.vibOn, v.envOn = false, false
-		case 0x01: // DMA on
+		case 0x01: // DMA on — (re)start the current registers as the playing sample
 			v.dma = true
 			v.retrigger = true
 		case 0x02: // set sample start = smpl + offset24
-			v.smpStart = off
-			v.retrigger = true
+			v.regStart = off
 		case 0x03: // set sample length (words)
-			v.smpLen = w * 2
+			v.regLen = w * 2
 		case 0x04: // wait w ticks
 			v.macWait = w
 			stop = true
@@ -336,9 +338,12 @@ func (p *player) runMacro(ch int) {
 		case 0x06: // set new macro (instrument)
 			v.macro = be32(p.mdat, macTable+(int(b1)&0x7F)*4)
 			v.macPos = 0
-		case 0x07: // stop voice
-			v.keyOn = false
+		case 0x07: // stop the MACRO (the voice keeps playing its current loop)
+			v.macro = 0
 			stop = true
+		case 0x19: // loop point -> a 2-byte silence at smpl[0]: a one-shot plays once
+			v.regStart = 0
+			v.regLen = 2
 		case 0x08, 0x09: // play note: period = table[note(+$11)] + detune; advance 1 tick
 			base := int(b1)
 			if cmd == 0x08 {
@@ -378,9 +383,9 @@ func (p *player) runMacro(ch int) {
 		case 0x10: // reset effects
 			v.vibOn, v.envOn, v.portOn = false, false, false
 		case 0x11: // add to sample start
-			v.smpStart += w
+			v.regStart += w
 		case 0x12: // add to sample length
-			v.smpLen += w * 2
+			v.regLen += w * 2
 		default:
 			// 0x13-0x22 (loop/wave-shaper/etc.) — ignore, keep stepping
 		}
@@ -437,24 +442,34 @@ func (p *player) applyEffects(ch int) {
 	}
 }
 
-// toPaula pushes the voice's current state onto its Paula channel.
+// toPaula pushes the voice's registers onto its Paula channel. The voice keeps
+// playing across macro-end; sound stops only when the sample becomes the silent
+// loop (set by cmd $19) or DMA is left off.
 func (p *player) toPaula(ch int) {
 	v := &p.v[ch]
 	pc := &p.p[ch]
-	if !v.dma || !v.keyOn || v.basePer == 0 {
-		pc.playing = false
-		return
-	}
-	if v.retrigger {
-		pc.start = v.smpStart
-		pc.ln = v.smpLen
-		if pc.start+pc.ln > len(p.smpl) {
-			pc.ln = len(p.smpl) - pc.start
+	pc.data = p.smpl
+	clamp := func(s, l int) (int, int) {
+		if s < 0 {
+			s = 0
 		}
-		pc.data = p.smpl
+		if s+l > len(p.smpl) {
+			l = len(p.smpl) - s
+		}
+		if l < 0 {
+			l = 0
+		}
+		return s, l
+	}
+	pc.loopStart, pc.loopLen = clamp(v.regStart, v.regLen)
+	if v.retrigger {
+		pc.curStart, pc.curLen = pc.loopStart, pc.loopLen
 		pc.pos = 0
-		pc.playing = pc.ln > 0
+		pc.playing = v.dma && pc.curLen > 0
 		v.retrigger = false
+	}
+	if !v.dma {
+		pc.playing = false
 	}
 	pc.period = v.period
 	if pc.period < 100 {
@@ -479,14 +494,16 @@ func (p *player) render(sampleRate, nSeconds int) []float32 {
 		var l, r float64
 		for ch := 0; ch < 4; ch++ {
 			pc := &p.p[ch]
-			if !pc.playing || pc.ln <= 0 {
+			if !pc.playing || pc.curLen <= 0 {
 				continue
 			}
-			s := float64(pc.data[pc.start+int(pc.pos)]) / 128.0 * float64(pc.vol) / 64.0
+			s := float64(pc.data[pc.curStart+int(pc.pos)]) / 128.0 * float64(pc.vol) / 64.0
 			step := float64(paulaClock) / float64(pc.period) / float64(sampleRate)
 			pc.pos += step
-			for int(pc.pos) >= pc.ln {
-				pc.pos -= float64(pc.ln)
+			// When the current sample finishes, Paula reloads the (loop) registers.
+			for pc.curLen > 0 && int(pc.pos) >= pc.curLen {
+				pc.pos -= float64(pc.curLen)
+				pc.curStart, pc.curLen = pc.loopStart, pc.loopLen
 			}
 			if ch == 0 || ch == 3 {
 				l += s

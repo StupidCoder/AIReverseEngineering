@@ -13,7 +13,7 @@
 // into the world's object atlas (objSprites gives each sprite's rect, objects the
 // per-object position + sprite index).
 
-import { Application, Container, Rectangle, Sprite, Texture } from 'pixi.js';
+import { Application, Container, Graphics, Rectangle, Sprite, Texture } from 'pixi.js';
 
 const TILE = 32;
 const ATLAS_COLS = 16;
@@ -29,6 +29,7 @@ export class TurricanViewer {
     this.world = new Container();
     this.tileLayer = new Container();
     this.objLayer = new Container();
+    this.markerLayer = new Container(); // player spawn marker
     this.showObjects = true;
     this.zoom = 1;
     this.minZoom = 0.05;
@@ -42,7 +43,8 @@ export class TurricanViewer {
     await this.app.init({ background: 0x101018, antialias: false, resizeTo: this.el });
     this.el.appendChild(this.app.canvas);
     this.world.addChild(this.tileLayer);
-    this.world.addChild(this.objLayer); // enemies draw on top of the tiles
+    this.world.addChild(this.objLayer);    // objects draw on top of the tiles
+    this.world.addChild(this.markerLayer); // spawn marker on top of everything
     this.app.stage.addChild(this.world);
     this._wireCamera();
     return fetch(DATA + 'meta.json').then((r) => r.json());
@@ -123,9 +125,24 @@ export class TurricanViewer {
     }
     this.objLayer.visible = this.showObjects;
 
+    // Player spawn marker (a green crosshair ring at the spawn pixel).
+    this.markerLayer.removeChildren();
+    if (level.spawn) {
+      const { x, y } = level.spawn;
+      const r = 13;
+      const g = new Graphics();
+      g.circle(x, y, r).stroke({ width: 3, color: 0x33ff66 });
+      g.moveTo(x - r - 7, y).lineTo(x + r + 7, y)
+        .moveTo(x, y - r - 7).lineTo(x, y + r + 7).stroke({ width: 2, color: 0x33ff66 });
+      g.circle(x, y, 2.5).fill(0x33ff66);
+      this.markerLayer.addChild(g);
+    }
+
     this.levelW = W * TILE;
     this.levelH = H * TILE;
-    this._fitDefault();
+    // Default camera: frame the Amiga on-screen view at the spawn (re-done on every
+    // scene load), while still allowing zoom-out to the whole level.
+    this._fitView(level.view);
     return level;
   }
 
@@ -136,14 +153,19 @@ export class TurricanViewer {
   }
 
   // --- camera (shared pattern with the Fort/Sonic viewers) ----------------
-  _fitDefault() {
+  // Frame the Amiga on-screen viewport (world-pixel rect `view`) centred on the
+  // spawn, at 1:1-ish zoom; zoom-out still reaches the whole level.
+  _fitView(view) {
     const W = this.app.screen.width, H = this.app.screen.height;
-    const fit = Math.min(W / this.levelW, H / this.levelH);
-    this.minZoom = fit * 0.9;
-    this.maxZoom = (W / NATIVE_W) * 4;
-    this.zoom = Math.max(fit, this.minZoom);
-    // Centre the level.
-    this.world.position.set((W - this.levelW * this.zoom) / 2, (H - this.levelH * this.zoom) / 2);
+    const fitAll = Math.min(W / this.levelW, H / this.levelH);
+    const v = view || { x: 0, y: 0, w: this.levelW, h: this.levelH };
+    const z = Math.min(W / v.w, H / v.h); // contain the visible area in the viewport
+    this.minZoom = Math.min(fitAll * 0.9, z);
+    this.maxZoom = Math.max((W / NATIVE_W) * 4, z);
+    this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, z));
+    // Centre the view rect in the viewport.
+    const cx = v.x + v.w / 2, cy = v.y + v.h / 2;
+    this.world.position.set(W / 2 - cx * this.zoom, H / 2 - cy * this.zoom);
     this._apply();
   }
   _screenPt(cx, cy) {

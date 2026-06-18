@@ -62,11 +62,17 @@ type Object struct {
 	Resident bool // sprite lives in resident space (vs the scene block)
 }
 
-// Scene is one scene's geometry and objects.
+// Scene is one scene's geometry, spawn and objects.
 type Scene struct {
 	World, Index  int
 	Width, Height int // in 32-px tiles
-	Objects       []Object
+	// CamX/CamY: the initial camera viewport top-left in world pixels (descriptor
+	// +$08/+$0A tiles, ×32). SpawnX/SpawnY: the player's spawn in world pixels —
+	// the camera top-left plus the on-screen offset the descriptor stores at +$0C/+$0E
+	// (which select_scene installs to $45A4 -> the player position $104/$106).
+	CamX, CamY     int
+	SpawnX, SpawnY int
+	Objects        []Object
 }
 
 // Game holds the decoded resident image and per-world scene blocks.
@@ -116,6 +122,8 @@ func (g *Game) Scenes(w int) []Scene {
 			World: w, Index: s,
 			Width: blk.be16(desc + 0x04), Height: blk.be16(desc + 0x06),
 		}
+		sc.CamX, sc.CamY = blk.be16(desc+0x08)*32, blk.be16(desc+0x0A)*32
+		sc.SpawnX, sc.SpawnY = sc.CamX+blk.be16(desc+0x0C), sc.CamY+blk.be16(desc+0x0E)
 		sc.Objects = g.objects(w, blk, hi, desc, sc.Width, sc.Height)
 		out = append(out, sc)
 	}

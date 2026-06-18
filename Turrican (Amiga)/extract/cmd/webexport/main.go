@@ -51,6 +51,17 @@ type objInst struct {
 	S int `json:"s"` // index into the scene's objSprites
 }
 
+type point struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+}
+type rect struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+	W int `json:"w"`
+	H int `json:"h"`
+}
+
 type jsonLevel struct {
 	World      int         `json:"world"`
 	Scene      int         `json:"scene"`
@@ -59,10 +70,15 @@ type jsonLevel struct {
 	NTiles     int         `json:"ntiles"`
 	Atlas      string      `json:"atlas"`
 	Cells      []int       `json:"cells"` // row-major, raw map bytes (>=ntiles = flipped tile-128)
+	Spawn      point       `json:"spawn"` // player spawn, world pixels
+	View       rect        `json:"view"`  // the Amiga on-screen viewport at the spawn, world pixels
 	ObjAtlas   string      `json:"objAtlas,omitempty"`
 	ObjSprites []objSprite `json:"objSprites,omitempty"`
 	Objects    []objInst   `json:"objects,omitempty"`
 }
+
+// amigaView is Turrican's visible playfield in pixels (one screen).
+const amigaViewW, amigaViewH = 320, 256
 
 type metaLevel struct {
 	Name  string `json:"name"`
@@ -172,6 +188,8 @@ func run(adfPath, outDir string) error {
 			lvl := jsonLevel{
 				World: w, Scene: sc.Index, Width: sc.Width, Height: sc.Height,
 				NTiles: nTiles, Atlas: atlasName, Cells: cells,
+				Spawn: point{sc.SpawnX, sc.SpawnY},
+				View:  rect{sc.CamX, sc.CamY, amigaViewW, amigaViewH},
 			}
 			if len(objects) > 0 {
 				lvl.ObjAtlas = objAtlasName

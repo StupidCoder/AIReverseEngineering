@@ -33,7 +33,15 @@ D4C  level_setup        Per-level setup (entered from game_start and on level ch
 
 EBC  game_loop          The per-frame game loop. Each frame it runs a fixed render/update pipeline — blit_playfield, blit_objects, $2F56, then JSR (a0) with a0 = the current mode handler ($1942), then $1710 (x2), $3A56, $5576, $68AC, $64B8, $1B94, $1C0C, $1850/$18BA/$189E — then raises the frame-sync flag $1E1 and spins until the vblank ISR clears it (wait for vertical blank), and loops. Exits on $26D/$15D (to $1404 or the $F22 variant used when $15C is set).
 
-1942 mode_handler_ptr   Pointer to the current game-mode/state handler, called every frame by game_loop via JSR (a0). Swapping it changes state (title / play / etc.); it is installed by the mode routines (set off-trace).
+1942 mode_handler_ptr   Pointer to the current game-mode/state handler, called every frame by game_loop via JSR (a0). Swapping it changes state (title / play / etc.); installed by select_scene from the active scene descriptor's +$18 field.
+1946 mode_handler2_ptr  Secondary per-frame handler, installed by select_scene from the descriptor's +$2E field (defaults to null_handler).
+
+160E select_scene       The state-machine core. Reads the scene id $193A, indexes the scene-descriptor pointer table at $1B980+$16 (a4 = table[id*4]), publishes it as the current descriptor $193E, and installs the descriptor's fields: +$8/+$C data ptrs -> $45AA/$45A4, +$10 -> $1932, +$1C -> $7B0C, +$18 -> mode_handler_ptr ($1942), +$2E -> mode_handler2_ptr ($1946). First entry per scene also runs the descriptor's setup ($194A guards it). Handlers default to null_handler when a field is 0.
+16DC null_handler       Empty per-frame handler (just RTS); the default mode when a scene descriptor leaves a handler slot 0.
+
+193A scene_id           Current scene/state index; select_scene maps it through the descriptor table to pick the active state.
+193E scene_descriptor   Pointer to the active scene descriptor (set by select_scene). Descriptor layout: +$8/+$C data, +$10 field, +$18 primary handler, +$1C field, +$2E secondary handler.
+1B980 scene_manager     Runtime scene-manager struct (lives just past the resident segment, so built/loaded at run time); +$16 is the scene-descriptor pointer table select_scene indexes.
 1E1  frame_sync_flag    Set at the end of each game_loop iteration; cleared by the vblank path. game_loop spins on it to lock to 50/60 Hz.
 17A  screen_buffers     The three display-buffer base pointers ($17A/$192/$1AA = $5BCE0/$67CE0/$73CE0) — triple-buffering for the scrolling playfield.
 1C2  draw_list_ptr      Pointer to the blitter draw-list structure consumed by blit_playfield / blit_objects.

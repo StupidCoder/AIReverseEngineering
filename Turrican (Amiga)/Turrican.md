@@ -629,8 +629,13 @@ Two things define the engine's shape:
 * **Mode dispatch.** `$1942` holds a pointer to the current game-mode/state
   handler, called once per frame via `JSR (a0)`. Swapping it switches state
   (title, play, …) without touching the surrounding pipeline — the classic
-  function-pointer state machine. The handlers are installed off the path traced
-  so far, and are the next thing to follow.
+  function-pointer state machine. It is driven by a small **scene system**:
+  `select_scene` (`$160E`) reads a scene id (`$193A`), indexes a descriptor
+  pointer table (`$1B996`) to the active descriptor (`$193E`), and installs that
+  descriptor's `+$18` field as the primary handler (`$1942`) and `+$2E` as a
+  secondary handler (`$1946`) — each defaulting to a null `RTS` (`$16DC`) when
+  zero. The descriptors live just past the resident image, so they are populated
+  at run time; reading them out is the next step toward enumerating the states.
 * **Frame sync.** The loop raises `$1E1` and spins until the level-3 ISR (Part III
   §3) clears it, locking the pipeline to the vertical blank.
 
@@ -640,9 +645,10 @@ draw the playfield and object layers from the draw-list at `$1C2`, alongside a
 dozen further per-frame subsystems. This is disassembled (~118 routines so far)
 in `disasm/resident_core.{asm,annotations.txt}`.
 
-> **Next.** Follow the `$1942` mode handlers (title vs in-game) and the per-frame
-> subsystems toward input, the player and enemy objects, and the level/tile
-> format (Parts IV–V).
+> **Next.** Dump the scene descriptors at run time (via the FS-UAE oracle, for
+> *guidance* — the addresses they point to are static engine code) to enumerate
+> the states and their handlers, then follow the in-game handler toward input,
+> the player and enemy objects, and the level/tile format (Parts IV–V).
 
 # Part IV — Graphics and data formats
 

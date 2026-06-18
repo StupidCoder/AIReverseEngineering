@@ -279,11 +279,13 @@ entry addresses (`$5F500`, `$5F700`, `$600CA`) place the decrunched program in
 roughly `$400`…`$60000+` of chip RAM.
 
 That decrunched image — the actual Turrican program — is what Part III
-disassembles. Recovering it from the disk means running the `$50008` decruncher:
-either by re-implementing the backward byte-dispatch decoder in Go (the
-preferred "declarative" route, as for Marble Madness's `c/zzz`), or by capturing
-`$400`…`$60000` live after `$5F500` with the FS-UAE/GDB oracle
-(`tools/amiga/fsuae-debug`). That capture is the first task of Part III.
+disassembles. It is recovered by **re-implementing the `$50008` backward
+byte-dispatch decoder in Go** (the "declarative" route, as for Marble Madness's
+`c/zzz`), run on the crunched main part read straight from the disk; the FS-UAE/
+GDB oracle (`tools/amiga/fsuae-debug`) is used only to *guide* the
+reimplementation (single-stepping the handlers) and to *verify* it (diffing the
+Go output against the emulator's). Producing that Go decruncher is the first
+task of Part III.
 
 # Part III — Game program architecture
 
@@ -322,5 +324,5 @@ go run stupidcoder.com/tools/cmd/dis68k -skip 0x2c08 -base 0x50008 "$A"   # decr
 ```
 
 The `$50008` decruncher's input is the crunched main part at disk `$2C00`
-(`$22C98` bytes, blocks 22–301); running it (Go re-implementation or FS-UAE
-capture) yields the decrunched program disassembled in Part III.
+(`$22C98` bytes, blocks 22–301); a Go re-implementation of it (verified against
+the FS-UAE oracle) yields the decrunched program disassembled in Part III.

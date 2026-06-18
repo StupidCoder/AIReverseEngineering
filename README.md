@@ -39,9 +39,9 @@ To do:
     * Kick off project by writing ADF extractor, disassembler and emulator for 86k code
 * Turrican (Amiga)
     * Parts I-II done (custom non-DOS boot disk; TRSI crack loader + backward
-      byte-dispatch decruncher). Next (Part III): recover the decrunched program
-      — reimplement the `$50008` decruncher in Go (or capture it via FS-UAE) and
-      disassemble the actual game
+      byte-dispatch decruncher). Next (Part III): reimplement the `$50008`
+      decruncher in Go (oracle only to guide/verify, not to scrape) and
+      disassemble the decrunched game
 * Tools
     * Disassembler should be better at segmenting functions; currently jumps within a function are treated as separate sub-routines; try to document parameters of sub-routines (which registers are used?)
 

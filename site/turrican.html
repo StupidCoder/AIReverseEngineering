@@ -24,6 +24,7 @@
       <label>Scene
         <select id="level"></select>
       </label>
+      <label><input type="checkbox" id="objects" checked /> Enemies</label>
       <span class="hint">drag to pan · scroll or pinch to zoom</span>
     </div>
     <p class="legend">
@@ -36,7 +37,10 @@
       cell as a real tile through the world's palette — so this is the same image the Amiga's
       blitter assembles, not a screenshot. Pick a scene to jump between the worlds; the first is
       the opening of World 1, with its floating platforms, the waterfall, the red tower and the
-      <b>“1989”</b> spelled out in the rock. Drag to pan, scroll to zoom from the whole level to
+      <b>“1989”</b> spelled out in the rock. Tick <b>Enemies</b> to overlay the scene's
+      <b>enemy placements</b> — read straight off the disk from the spawner's own lists, each
+      drawn with the first animation frame of the sprite its AI handler installs, at the exact
+      position the game seeds it. Drag to pan, scroll to zoom from the whole level to
       a single tile. See the
       <a href="https://github.com/StupidCoder/AIReverseEngineering/blob/main/Turrican%20(Amiga)/Turrican.md">write-up</a>
       (Part IV) for how it was decoded.

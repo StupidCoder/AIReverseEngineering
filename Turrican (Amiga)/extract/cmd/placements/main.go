@@ -102,18 +102,25 @@ func main() {
 			width, height := be16(desc+0x04), be16(desc+0x06)
 			grid := be32(desc + 0x28)
 
-			// The grid is an array of pointers into the sorted entry stream; its
-			// min/max bound the stream.
+			// The grid is an array of pointers into the sorted entry stream that
+			// begins immediately after it, so a grid entry always lives below the
+			// lowest address it points to: scan while the cursor stays below the
+			// minimum pointer seen. This pins the stream extent on narrow/tall scenes
+			// (a fixed window runs off the small grid into unrelated data).
 			lo, hi := 0, 0
-			for a := grid; a < grid+0x600 && a < blockHi-4; a += 4 {
+			for a := grid; a < blockHi-4; a += 4 {
+				if lo != 0 && a >= lo {
+					break
+				}
 				p := be32(a)
-				if p >= blockBase && p < blockHi {
-					if lo == 0 || p < lo {
-						lo = p
-					}
-					if p > hi {
-						hi = p
-					}
+				if p < blockBase || p >= blockHi {
+					break
+				}
+				if lo == 0 || p < lo {
+					lo = p
+				}
+				if p > hi {
+					hi = p
 				}
 			}
 			if lo == 0 {

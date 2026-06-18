@@ -17,4 +17,7 @@ meta.levels.forEach((l, i) => {
 });
 sel.addEventListener('change', () => viewer.loadLevel(meta.levels[+sel.value]));
 
+const objToggle = document.getElementById('objects');
+objToggle.addEventListener('change', () => viewer.setObjects(objToggle.checked));
+
 await viewer.loadLevel(meta.levels[0]);

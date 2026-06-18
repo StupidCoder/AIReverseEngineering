@@ -6,6 +6,12 @@
 // world's tile count is a tile index, and a value >= it is a horizontally flipped
 // tile (index value-128). The map is one sprite per cell, drag to pan, scroll to
 // zoom from the whole level down to a single tile.
+//
+// An optional object layer overlays the scene's enemies: each placement (read off
+// the disk by the scroll-triggered spawner's lists) is drawn at its pixel position
+// using the first animation frame of the sprite its AI handler installs — packed
+// into the world's object atlas (objSprites gives each sprite's rect, objects the
+// per-enemy position + sprite index).
 
 import { Application, Container, Rectangle, Sprite, Texture } from 'pixi.js';
 
@@ -22,10 +28,13 @@ export class TurricanViewer {
     this.app = new Application();
     this.world = new Container();
     this.tileLayer = new Container();
+    this.objLayer = new Container();
+    this.showObjects = true;
     this.zoom = 1;
     this.minZoom = 0.05;
     this.maxZoom = 8;
     this.atlasTex = new Map(); // atlas name -> { source, tiles: Texture[] }
+    this.objSrc = new Map();   // object-atlas name -> TextureSource
     this.level = null;
   }
 
@@ -33,6 +42,7 @@ export class TurricanViewer {
     await this.app.init({ background: 0x101018, antialias: false, resizeTo: this.el });
     this.el.appendChild(this.app.canvas);
     this.world.addChild(this.tileLayer);
+    this.world.addChild(this.objLayer); // enemies draw on top of the tiles
     this.app.stage.addChild(this.world);
     this._wireCamera();
     return fetch(DATA + 'meta.json').then((r) => r.json());
@@ -64,6 +74,15 @@ export class TurricanViewer {
     return entry;
   }
 
+  // Load an object atlas's TextureSource (cached, nearest-filtered).
+  async _objAtlasSource(name) {
+    if (this.objSrc.has(name)) return this.objSrc.get(name);
+    const tex = Texture.from(await this._loadImage(DATA + name));
+    tex.source.scaleMode = 'nearest';
+    this.objSrc.set(name, tex.source);
+    return tex.source;
+  }
+
   async loadLevel(metaLevel) {
     const level = await fetch(DATA + metaLevel.file).then((r) => r.json());
     this.level = level;
@@ -88,10 +107,32 @@ export class TurricanViewer {
         this.tileLayer.addChild(s);
       }
     }
+    // Object layer: one sprite per enemy placement, first animation frame.
+    this.objLayer.removeChildren();
+    if (level.objAtlas && level.objects?.length) {
+      const src = await this._objAtlasSource(level.objAtlas);
+      const frames = level.objSprites.map(
+        (r) => new Texture({ source: src, frame: new Rectangle(r.x, r.y, r.w, r.h) }),
+      );
+      for (const o of level.objects) {
+        const s = new Sprite(frames[o.s]);
+        s.x = o.x;
+        s.y = o.y;
+        this.objLayer.addChild(s);
+      }
+    }
+    this.objLayer.visible = this.showObjects;
+
     this.levelW = W * TILE;
     this.levelH = H * TILE;
     this._fitDefault();
     return level;
+  }
+
+  // Toggle the enemy overlay.
+  setObjects(on) {
+    this.showObjects = on;
+    this.objLayer.visible = on;
   }
 
   // --- camera (shared pattern with the Fort/Sonic viewers) ----------------
@@ -127,7 +168,10 @@ export class TurricanViewer {
   _apply() {
     this.world.scale.set(this.zoom);
     this._clampPan();
-    if (this.hud && this.level) this.hud.textContent = `${this.level.width}×${this.level.height} tiles`;
+    if (this.hud && this.level) {
+      const n = this.level.objects?.length || 0;
+      this.hud.textContent = `${this.level.width}×${this.level.height} tiles` + (n ? ` · ${n} enemies` : '');
+    }
   }
   _wireCamera() {
     const c = this.el;

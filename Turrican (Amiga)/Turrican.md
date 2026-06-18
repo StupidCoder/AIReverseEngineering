@@ -471,13 +471,15 @@ split itself in two:
 
 So the image has **two segments**:
 
-* **The game proper** — image `$43890…$5F000` — is copied down to **`$10…$1B780`**
-  and runs there (subtract `$43880`). Disassembling it correctly needs a *second*
-  pass based at `$10` (TODO); the in-place trace above does not follow the `JSR`s
-  into it.
+* **Work RAM** — image `$43890…$5F000` — copied down to **`$10…$1B780`**. This is
+  *not* code: it starts zeroed (the vector table, buffers, the screen/state area)
+  and is just the running game's scratch memory.
 * **The setup / init / ISR + data** — image `$5F500…$77E00` — runs **in place**
   (the image sits at `$43880`, so image address = run address). `turrican.asm`
   covers this segment.
+
+The actual game logic is in *neither* — it is an overlay streamed off the floppy
+(§4).
 
 ## 3. The in-place setup segment
 
@@ -496,17 +498,51 @@ What runs before the game proper takes over, all from `turrican.asm`:
   trainer hook (Part II §6), patched to `BSR` the 99-lives code at boot.
 * **`vblank_isr` (`$602D0`)** — the level-3 interrupt: checks the VERTB bit in
   `INTREQR`, bumps a frame counter, runs `palette_cycle`, and `JSR $1BB24` (the
-  per-frame **game tick**, down in the relocated game).
+  per-frame **game tick**, in the overlay — §4).
 * **Decompressors / loader** — the game reuses the **same Huffman decoder** as the
   `$50008` decruncher (`huff_decode $5F000`) to unpack graphics/level blocks at
   runtime, alongside `pp20_decrunch` and a floppy **trackloader**
   (`disk_read $604FA` / `disk_setup_sync $6056E`, `DSKSYNC = $4489`) that streams
   level data off the disk during play.
 
-> **Next.** Disassemble the relocated game proper (`$10…$1B780`) in a second pass
-> based at `$10`, starting from the entry points the init chain calls
-> (`$1BB24` game tick, `$1BB2C/$34/$48` setup) — then the main loop, player and
-> level handling (Parts IV–V).
+## 4. The game-code overlay at `$1BB00`
+
+The resident image holds no game logic — `game_init` streams it off the floppy.
+`load_block_1BB00` reads the packed block at **ADF `$26000`** (length `$C268`) to
+`$1BB00` and `huff_decode`s it; the numbers are self-consistent (`huff_decode`'s
+source window is `$1BB00…$27D68` = exactly `$C268` bytes). Because the in-game
+decoder is the *same three passes* as the `$50008` decruncher, the overlay can be
+recovered with the same Go code — `extract/cmd/block` reads the disk slice and
+calls `decrunch.DecrunchBlock` (which skips the 18-byte block header and runs
+Huffman → LZ77 → RLE):
+
+```sh
+go run turrican/extract/cmd/block -off 0x26000 -len 0xC268 -base 0x1BB00 \
+  -o /tmp/block_1BB00.bin "Turrican (Amiga)/Turrican.adf"
+# base $1BB00, size $11964 (72036 bytes), ends $2D464
+```
+
+The decoded overlay is an **AmigaDOS HUNK blob** (`$000003F3` header, one
+`HUNK_CODE` at `$1BB18`, body from `$1BB20`). It is loaded — not relocated — at a
+fixed `$1BB00`, so its absolute `$1Cxxxx` addresses are baked to that base. Its
+body opens with a **BRA dispatch table** (the overlay's public API); the resident
+init/ISR jump into it at fixed addresses:
+
+| call | slot | does |
+|------|------|------|
+| `vblank_isr` | `$1BB24` → `game_tick $1BB78` | per-frame update; `a6` = the `$1CC22` game-state struct |
+| `game_init` | `$1BB2C` | set `state.$3C`, clear the pause flag |
+| `game_init` | `$1BB34` | init state from two data-table pointers (`$1CFF4`, `$20E90`) |
+| `game_init` | `$1BB48` | store a config byte (`$40`) |
+
+`game_tick` and friends work almost entirely `a6`-relative off the central
+**game-state struct at `$1CC22`**. The overlay is disassembled into its own pair,
+`disasm/overlay_1bb00.{asm,annotations.txt}`.
+
+> **Next.** Grow the overlay annotations from `game_tick` outward — the input
+> reading, object/enemy update and the level/graphics format (Parts IV–V) — and
+> identify the other streamed blocks (e.g. the `$30000`/`$50000` modules and the
+> `PP20` block) the init chain loads.
 
 # Part IV — Graphics and data formats
 

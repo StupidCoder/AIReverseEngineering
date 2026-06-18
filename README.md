@@ -123,8 +123,8 @@ AIReverseEngineering/
 └── Turrican (Amiga)/
     ├── Turrican.adf             # raw disk image (pinned by MD5 in Image files)
     ├── Turrican.md              # writeup (Parts I-II done; III in progress; IV-V stubbed)
-    ├── extract/                 # pure-Go decruncher (3-pass Huffman/LZ/RLE), cmd/decrunch
-    └── disasm/                  # annotated 68000 disassembly of the decrunched game
+    ├── extract/                 # pure-Go 3-pass decoder; cmd/decrunch (main part), cmd/block (disk overlays)
+    └── disasm/                  # annotated 68000 disassembly (resident image + $1BB00 game overlay)
 ```
 
 Per-game folder contract: `<Game>.<ext>` raw image, a markdown writeup of the

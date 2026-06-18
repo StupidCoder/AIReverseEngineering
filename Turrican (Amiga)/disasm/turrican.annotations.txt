@@ -12,15 +12,17 @@
 #
 # THE IMAGE HAS TWO SEGMENTS (relocation model)
 # The $50008 decruncher (Part II §5) produces a flat $34580-byte image that loads
-# at $43880; entry is $5F500. That entry's first act is to copy the low-memory
-# game — image $43890..$5F000 — down to $10..$1B780 and run it there. So:
-#   * $43890..$5F000  is the GAME PROPER; it RUNS at $10..$1B780 (subtract $43880).
-#     Disassembling it correctly needs a SECOND pass based at $10 (TODO):
-#       codetrace68k -base 0x10 -skip 16 ... /tmp/turrican.bin  (entries below: $1BB24 etc.)
+# at $43880; entry is $5F500. That entry's first act is to copy image $43890..$5F000
+# down to $10..$1B780. So:
+#   * $43890..$5F000  copies to $10..$1B780 — this is the game's WORK RAM (it starts
+#     zeroed: vector table, buffers, the screen/state area), NOT code. Nothing to
+#     disassemble there.
 #   * $5F500..$77E00  is the SETUP/INIT/ISR + data; it RUNS IN PLACE (image addr ==
-#     run addr, because the whole image sits at $43880). This file disassembles
-#     THAT segment correctly. JSRs into $10000..$1B780 (e.g. $1BB24) are calls into
-#     the relocated game and are not followed here.
+#     run addr, because the whole image sits at $43880). This file disassembles it.
+# The actual GAME LOGIC is not in this image at all — it is an overlay streamed off
+# the floppy: load_block_1BB00 reads ADF $26000 ($C268 bytes) to $1BB00 and
+# huff_decodes it. The routines the init/ISR call ($1BB24/$2C/$34/$48) are the
+# overlay's API table; see disasm/overlay_1bb00.{asm,annotations.txt}.
 # Names are from observed behaviour, not external sources. $DFF000 = custom chip
 # base; $BFE001 = CIA-A port A (joystick fire buttons in bits 6/7).
 
@@ -48,9 +50,10 @@
 
 6078C  pp20_decrunch     PowerPacker depacker. Verifies the "PP20" magic ($50503230) at (a0), then decrunches backward from the end pointer a1 into a2 (efficiency table + bit-reader, the standard PowerPacker scheme). a0=src start, a1=src end, a2=dst.
 
-# --- relocated game proper (runs at $10..$1B780; see TODO second pass) ---
-# These are the entry points the init chain calls into the low-memory game.
-1BB24  game_tick         Per-frame game update, called from vblank_isr each VERTB.
-1BB2C  game_sub_2C       Init/setup callback (called from game_init with d0=0).
-1BB34  game_sub_34       Init/setup callback (called from game_init with d0=$1CFF4, d1=$20E90).
-1BB48  game_sub_48       Init/setup callback (called from game_init with d0=$40).
+# --- the $1BB00 disk overlay's API (see disasm/overlay_1bb00) ---
+# These are NOT in this image; they are the BRA dispatch table at the head of the
+# overlay loaded to $1BB00. Listed here because the resident code calls them:
+1BB24  api_game_tick     Overlay: per-frame game tick (called from vblank_isr each VERTB).
+1BB2C  api_init_3C       Overlay: init callback (game_init calls it; sets state.$3C, clears pause).
+1BB34  api_init_state    Overlay: init the game state from two data-table ptrs (game_init passes d0=$1CFF4, d1=$20E90).
+1BB48  api_set_config    Overlay: store a config byte (game_init passes d0=$40).

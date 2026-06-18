@@ -54,8 +54,30 @@ func Decrunch(blob []byte) (*Result, error) {
 		return nil, fmt.Errorf("decrunch: packedLen $%X exceeds blob ($%X)", packedLen, len(blob))
 	}
 
-	stream := blob[0x39E:packedLen]
+	img, err := passes(blob[0x39E:packedLen])
+	if err != nil {
+		return nil, err
+	}
+	return &Result{Data: img, Base: base, Entry: entry}, nil
+}
 
+// DecrunchBlock decodes an in-game data block — one loaded from the floppy and
+// unpacked at runtime by huff_decode ($5F000), the same three-pass decoder as
+// the $50008 main decruncher. Such a block begins with an 18-byte header (a word,
+// 4 skipped bytes, then three longs that $5F000 stores into the $A4 parameter
+// block) followed by the identical packed stream. The decoded bytes load at the
+// block's runtime base (e.g. the $1BB00 game-code overlay = ADF[$26000:+$C268]).
+func DecrunchBlock(block []byte) ([]byte, error) {
+	const headerLen = 18
+	if len(block) < headerLen {
+		return nil, fmt.Errorf("decrunch: block too small (%d bytes)", len(block))
+	}
+	return passes(block[headerLen:])
+}
+
+// passes runs the three decode stages (Huffman -> LZ77 -> RLE) over a packed
+// stream whose head is the Huffman pass header.
+func passes(stream []byte) ([]byte, error) {
 	huff, err := huffman(stream)
 	if err != nil {
 		return nil, fmt.Errorf("huffman pass: %w", err)
@@ -68,7 +90,7 @@ func Decrunch(blob []byte) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("rle pass: %w", err)
 	}
-	return &Result{Data: img, Base: base, Entry: entry}, nil
+	return img, nil
 }
 
 // --- pass 1: Huffman ($502C2) ------------------------------------------------

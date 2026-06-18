@@ -1,0 +1,39 @@
+# Turrican (Amiga) — $1BB00 game-code overlay annotations.
+# Consumed by codetrace68k -annotate; format: ADDR  name  description
+#   ADDR is hex; '#' starts a comment line.
+#
+# WHAT THIS IS
+# The resident program (Part III §3) doesn't contain the game logic — it streams
+# it off the floppy as an overlay. game_init's load_block_1BB00 reads the packed
+# block at ADF $26000 (length $C268) to $1BB00 and huff_decodes it ($5F000, the
+# same three-pass decoder as the $50008 main decruncher). The decoded $11964-byte
+# overlay loads at $1BB00 and is an AmigaDOS HUNK blob: a single HUNK_CODE whose
+# body (from $1BB20) opens with a BRA dispatch table — the overlay's public API,
+# which the resident init/ISR call at fixed addresses ($1BB24 game tick, etc.).
+# It is position-DEPENDENT (absolute $1Cxxxx addresses) and always loads at $1BB00.
+#
+# Regenerate overlay_1bb00.asm (run from the repo root):
+#   go run turrican/extract/cmd/block -off 0x26000 -len 0xC268 -base 0x1BB00 \
+#     -o /tmp/block_1BB00.bin "Turrican (Amiga)/Turrican.adf"
+#   go run stupidcoder.com/tools/cmd/codetrace68k -base 0x1BB00 \
+#     -entry 0x1BB24,0x1BB2C,0x1BB34,0x1BB48,0x1BB30,0x1BB40,0x1BB4C,0x1BB5C,0x1BB60,0x1BB74 \
+#     -annotate "Turrican (Amiga)/disasm/overlay_1bb00.annotations.txt" \
+#     -o "Turrican (Amiga)/disasm/overlay_1bb00.asm" /tmp/block_1BB00.bin
+# Names are from observed behaviour. a6 in these routines is almost always the
+# central game-state struct at $1CC22 (a6-relative fields). $DFF000 = custom chip.
+
+1BB00  overlay_hunk_header  AmigaDOS HUNK blob header ($000003F3); 0 lib names, 1 hunk, HUNK_CODE ($3E9) at $1BB18, hunk body from $1BB20. Loaded (not LoadSeg'd) at a fixed $1BB00, so the body's absolute addresses are baked to that base.
+
+1BB20  api_table            The overlay's public API: a table of BRA stubs the resident init/ISR jump to at fixed addresses. Each 4-byte slot is one entry point; unimplemented/no-op slots BRA audio_silence ($1CB0C).
+1BB24  api_game_tick        Per-frame entry (called from vblank_isr) -> game_tick.
+1BB2C  api_init_3C          -> $1CAD8: set state.$3C = sub_1CBB2(), clear the pause flag $4A.
+1BB34  api_init_state       -> $1CB62: init the game state from two data-table pointers (init passes d0=$1CFF4, d1=$20E90): store them at state.$0/$4, set $8=1 and $50=$40400000 (1-bit-exp float 3.0).
+1BB48  api_set_config       -> $1C9D8: store a config byte (init passes d0=$40) into state.$51/$52 and raise the $1CF38 flag.
+
+1BB78  game_tick            Per-frame game update. a6 = game_state ($1CC22); early-out (RTS) if the pause/disable flag $4A is set; else save all regs and, on the $3D mode flag, either run sub_1C868 or step the timers ($8/$2C/$2E) and call the per-frame worker $1C108.
+
+1CB0C  audio_silence        Stop sound: clear state.$2E and zero the four AUDxVOL registers ($DFF0A8/B8/C8/D8). This is the default api_table target for inactive slots.
+
+# --- central state ---
+1CC22  game_state           The overlay's main state struct; nearly every routine does LEA $1CC22(pc),a6 and works a6-relative (fields seen: $0/$4 data ptrs, $8/$A/$2C counters, $2E/$3C/$3D/$3E/$44/$4A/$51/$52 flags, $50 float).
+1CF38  state_flag_1CF38     A secondary state word raised by api_set_config and cleared in game_tick.

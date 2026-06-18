@@ -7087,8 +7087,8 @@
 05F068  22 78 00 B6                   MOVEA.l $B6.w,a1
 05F06C  24 78 00 A6                   MOVEA.l $A6.w,a2
 05F070  61 16                         BSR $05F088
-05F072  4C DF                         .dc.w $4CDF
-05F074  .dc.b 7F FF 4E 75                                     ; ..Nu
+05F072  4C DF 7F FF                   MOVEM.l (a7)+,d0-d7/a0-a6
+05F076  4E 75                         RTS
 
 ; ==== sub_05F078 (2 callers) ====
 05F078  22 78 00 B6                   MOVEA.l $B6.w,a1
@@ -7561,8 +7561,10 @@
 0600DE  23 FC 00 06 04 0C 00 06 03 B0 MOVE.l #$6040C,$603B0.l
 0600E8  23 FC 00 06 01 88 00 06 03 B4 MOVE.l #$60188,$603B4.l
 0600F2  13 FC 00 02 00 06 03 AD       MOVE.b #$2,$603AD.l
-0600FA  4C FA                         .dc.w $4CFA
-0600FC  .dc.b 03 00 06 86 30 3A 06 80 45 FA 02 A8 4E F8 01 00 ; ....0:..E...N...
+0600FA  4C FA 03 00 06 86             MOVEM.l $060784(pc),a0-a1
+060100  30 3A 06 80                   MOVE.w $060782(pc),d0
+060104  45 FA 02 A8                   LEA $0603AE(pc),a2
+060108  4E F8 01 00                   JMP $100.w
 
 ; ==== setup_display  $06010C  (1 caller) — Bring up the display + interrupt system: clear the active flag $603B8, set the active copper-list pointers ($603B0/$603B4 -> $6040C/$60188), install vblank vector $6C -> vblank_isr, COP1LC ($80) -> $603BC, DMACON #$8380 (SET|DMAEN|BPLEN|COPEN), INTENA #$C010 (SET|INTEN|VERTB). ====
 06010C  51 F9 00 06 03 B8             SF $603B8.l
@@ -7620,8 +7622,7 @@
 0602F8  4A 39 00 06 03 B8             TST.b $603B8.l
 0602FE  67 06                         BEQ $060306
 060300  4E B9 00 01 BB 24             JSR $1BB24.l
-060306  4C DF                         .dc.w $4CDF
-060308  .dc.b 3F 7E                                           ; ?~
+060306  4C DF 3F 7E                   MOVEM.l (a7)+,d1-d6/a0-a5
 06030A  30 1F                         MOVE.w (a7)+,d0
 06030C  02 40 7F FF                   ANDI.w #$7FFF,d0
 060310  33 C0 00 DF F0 9C             MOVE.w d0,$DFF09C.l
@@ -7723,11 +7724,23 @@
 06052C  48 E7 C1 08                   MOVEM.l d0-d1/d7/a4,-(a7)
 060530  4E B9 00 06 06 BE             JSR $606BE.l
 060536  61 36                         BSR $06056E
-060538  4C DF                         .dc.w $4CDF
-06053A  .dc.b 10 83 4D FA 00 F6 4D F6 70 00 2A 5E 3C 3C 01 FF ; ..M...M.p.*^<<..
-06054A  .dc.b 18 DD 53 81 67 12 51 CE FF F8 BD FC 00 06 06 60 ; ..S.g.Q........`
-06055A  .dc.b 65 E8 52 40 7E 00 60 CA 4E B9 00 06 06 94 4C DF ; e.R@~.`.N.....L.
-06056A  .dc.b 7F FF 4E 75                                     ; ..Nu
+060538  4C DF 10 83                   MOVEM.l (a7)+,d0-d1/d7/a4
+06053C  4D FA 00 F6                   LEA $060634(pc),a6
+060540  4D F6 70 00                   LEA $0(a6,d7.w),a6
+060544  2A 5E                         MOVEA.l (a6)+,a5
+060546  3C 3C 01 FF                   MOVE.w #$1FF,d6
+06054A  18 DD                         MOVE.b (a5)+,(a4)+
+06054C  53 81                         SUBQ.l #1,d1
+06054E  67 12                         BEQ $060562
+060550  51 CE FF F8                   DBRA d6,$06054A
+060554  BD FC 00 06 06 60             CMPA.l #$60660,a6
+06055A  65 E8                         BCS $060544
+06055C  52 40                         ADDQ.w #1,d0
+06055E  7E 00                         MOVEQ #$0,d7
+060560  60 CA                         BRA $06052C
+060562  4E B9 00 06 06 94             JSR $60694.l
+060568  4C DF 7F FF                   MOVEM.l (a7)+,d0-d7/a0-a6
+06056C  4E 75                         RTS
 
 ; ==== disk_setup_sync  $06056E  (1 caller) — Program the disk hardware for a sync'd read: DSKSYNC ($DFF07E) = $4489 (standard Amiga sync word), ADKCON/DSKLEN setup via $DFF024+. ====
 06056E  4D F9 00 DF F0 24             LEA $DFF024.l,a6
@@ -7807,8 +7820,15 @@
 06068C  61 00 00 E6                   BSR $060774
 060690  61 20                         BSR $0606B2
 060692  4E 75                         RTS
-060694  .dc.b 13 FC 00 FF 00 BF D1 00 4E 71 4E 71 13 FC 00 F7 ; ........NqNq....
-0606A4  .dc.b 00 BF D1 00 61 00 00 CA 61 00 00 C6 4E 75       ; ....a...a...Nu
+
+; ==== sub_060694 (1 caller) ====
+060694  13 FC 00 FF 00 BF D1 00       MOVE.b #$FF,$BFD100.l
+06069C  4E 71                         NOP
+06069E  4E 71                         NOP
+0606A0  13 FC 00 F7 00 BF D1 00       MOVE.b #$F7,$BFD100.l
+0606A8  61 00 00 CA                   BSR $060774
+0606AC  61 00 00 C6                   BSR $060774
+0606B0  4E 75                         RTS
 
 ; ==== sub_0606B2 (4 callers) ====
 0606B2  08 39 00 05 00 BF E0 01       BTST.b #$5,$BFE001.l
@@ -7846,8 +7866,8 @@
 06070E  61 A2                         BSR $0606B2
 060710  53 41                         SUBQ.w #1,d1
 060712  66 F6                         BNE $06070A
-060714  4C DF                         .dc.w $4CDF
-060716  .dc.b 00 03 4E 75                                     ; ..Nu
+060714  4C DF 00 03                   MOVEM.l (a7)+,d0-d1
+060718  4E 75                         RTS
 
 ; ==== sub_06071A (1 caller) ====
 06071A  08 39 00 04 00 BF E0 01       BTST.b #$4,$BFE001.l
@@ -7877,7 +7897,7 @@
 06076A  08 F9 00 00 00 BF D1 00       BSET.b #$0,$BFD100.l
 060772  4E 75                         RTS
 
-; ==== sub_060774 (4 callers) ====
+; ==== sub_060774 (6 callers) ====
 060774  3F 00                         MOVE.w d0,-(a7)
 060776  30 3C 40 00                   MOVE.w #$4000,d0
 06077A  51 C8 FF FE                   DBRA d0,$06077A

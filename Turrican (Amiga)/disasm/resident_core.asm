@@ -27,8 +27,9 @@
 0000EC  0C 58 44 89                   CMPI.w #$4489,(a0)+
 0000F0  66 F0                         BNE $0000E2
 0000F2  60 00 07 3C                   BRA $000830
-0000F6  4C DF                         .dc.w $4CDF
-0000F8  .dc.b 0C 87 4E 75 00 00 00 00                         ; ..Nu....
+0000F6  4C DF 0C 87                   MOVEM.l (a7)+,d0-d2/d7/a2-a3
+0000FA  4E 75                         RTS
+0000FC  .dc.b 00 00 00 00                                     ; ....
 
 ; --- entry_table  $000100 — The engine's internal entry vectors — a table of BRA stubs. game_init's JMP $100 falls through slot 0 to game_start; other slots ($108..$138) are engine sub-entries ($1ABA/$1AEC/$1B14/$1B38/$35AE/$438C/$234C/$7728/$78CC/$7EFC). (data) ---
 000100  .dc.b 60 00 0B B2 00 00 00 00                         ; `.......
@@ -122,11 +123,19 @@
 0004A8  34 38 19 38                   MOVE.w $1938.w,d2
 0004AC  E7 4A                         LSL.w #3,d2
 0004AE  41 FA FF BA                   LEA $00046A(pc),a0
-0004B2  4C F0                         .dc.w $4CF0
-0004B4  .dc.b 00 03 20 00 24 3C 00 01 B7 80 2F 01 61 00 02 5A ; .. .$<..../.a..Z
-0004C4  .dc.b 22 1F 41 F9 00 01 B7 80 43 F0 18 00 45 F9 00 01 ; ".A.....C...E...
-0004D4  .dc.b B9 80 61 00 07 1C 6B CC 61 00 01 34 51 F8 19 4C ; ..a...k.a..4Q..L
-0004E4  .dc.b 4E 75                                           ; Nu
+0004B2  4C F0 00 03 20 00             MOVEM.l $0(a0,d2.w),d0-d1
+0004B8  24 3C 00 01 B7 80             MOVE.l #$1B780,d2
+0004BE  2F 01                         MOVE.l d1,-(a7)
+0004C0  61 00 02 5A                   BSR $00071C
+0004C4  22 1F                         MOVE.l (a7)+,d1
+0004C6  41 F9 00 01 B7 80             LEA $1B780.l,a0
+0004CC  43 F0 18 00                   LEA $0(a0,d1.l),a1
+0004D0  45 F9 00 01 B9 80             LEA $1B980.l,a2
+0004D6  61 00 07 1C                   BSR $000BF4
+0004DA  6B CC                         BMI $0004A8
+0004DC  61 00 01 34                   BSR $000612
+0004E0  51 F8 19 4C                   SF $194C.w
+0004E4  4E 75                         RTS
 
 ; ==== sub_0004E6 (1 caller) ====
 0004E6  21 FC 00 00 72 F4 02 3E       MOVE.l #$72F4,$23E.w
@@ -194,7 +203,7 @@
 00060A  4E B9 00 01 A2 AC             JSR $1A2AC.l
 000610  4E 75                         RTS
 
-; ==== sub_000612 (1 caller) ====
+; ==== sub_000612 (2 callers) ====
 000612  20 3C 00 02 00 00             MOVE.l #$20000,d0
 000618  4E B9 00 01 A2 C8             JSR $1A2C8.l
 00061E  4E B9 00 01 A2 CC             JSR $1A2CC.l
@@ -262,16 +271,22 @@
 000708  .dc.b 00 01 02 00 03 04 00 00 05 06 07 00 08 09 0A 00 ; ................
 000718  .dc.b 0B 0C 0D 00                                     ; ....
 
-; ==== disk_load  $00071C  (4 callers) — Disk load+decode primitive (d0 = ADF offset or block id $1C/$28/$30 -> $26000/$32400/$3DA00, d1 = length, d2 = dest). Reads the packed bytes off the floppy and huff-decodes them via the resident copy of huff_decode at $74000. ====
+; ==== disk_load  $00071C  (5 callers) — Disk load+decode primitive (d0 = ADF offset or block id $1C/$28/$30 -> $26000/$32400/$3DA00, d1 = length, d2 = dest). Reads the packed bytes off the floppy and huff-decodes them via the resident copy of huff_decode at $74000. ====
 00071C  0C 80 00 00 00 1C             CMPI.l #$1C,d0
 000722  66 2E                         BNE $000752
 000724  20 3C 00 02 60 00             MOVE.l #$26000,d0
 00072A  61 26                         BSR $000752
 00072C  48 E7 60 B0                   MOVEM.l d1-d2/a0/a2-a3,-(a7)
 000730  61 00 04 E0                   BSR $000C12
-000734  4C DF                         .dc.w $4CDF
-000736  .dc.b 00 06 20 42 26 42 2E 02 DE 81 24 7C 00 02 FA 00 ; .. B&B....$|....
-000746  .dc.b 4E B9 00 07 40 00 4C DF 0D 00 4E 75             ; N...@.L...Nu
+000734  4C DF 00 06                   MOVEM.l (a7)+,d1-d2
+000738  20 42                         MOVEA.l d2,a0
+00073A  26 42                         MOVEA.l d2,a3
+00073C  2E 02                         MOVE.l d2,d7
+00073E  DE 81                         ADD.l d1,d7
+000740  24 7C 00 02 FA 00             MOVEA.l #$2FA00,a2
+000746  4E B9 00 07 40 00             JSR $74000.l
+00074C  4C DF 0D 00                   MOVEM.l (a7)+,a0/a2-a3
+000750  4E 75                         RTS
 
 ; ==== sub_000752 (1 caller) ====
 000752  48 E7 FF FE                   MOVEM.l d0-d7/a0-a6,-(a7)
@@ -292,8 +307,8 @@
 000788  48 E7 C1 08                   MOVEM.l d0-d1/d7/a4,-(a7)
 00078C  4E B8 09 10                   JSR $910.w
 000790  61 38                         BSR $0007CA
-000792  4C DF                         .dc.w $4CDF
-000794  .dc.b 10 83 61 00 04 92                               ; ..a...
+000792  4C DF 10 83                   MOVEM.l (a7)+,d0-d1/d7/a4
+000796  61 00 04 92                   BSR $000C2A
 00079A  4D FA 00 F4                   LEA $000890(pc),a6
 00079E  4D F6 70 00                   LEA $0(a6,d7.w),a6
 0007A2  2A 5E                         MOVEA.l (a6)+,a5
@@ -308,8 +323,8 @@
 0007BC  7E 00                         MOVEQ #$0,d7
 0007BE  60 C2                         BRA $000782
 0007C0  4E B8 08 DE                   JSR $8DE.w
-0007C4  4C DF                         .dc.w $4CDF
-0007C6  .dc.b 7F FF 4E 75                                     ; ..Nu
+0007C4  4C DF 7F FF                   MOVEM.l (a7)+,d0-d7/a0-a6
+0007C8  4E 75                         RTS
 
 ; ==== sub_0007CA (1 caller) ====
 0007CA  4D F9 00 DF F0 24             LEA $DFF024.l,a6
@@ -431,8 +446,8 @@
 00095E  61 A4                         BSR $000904
 000960  53 41                         SUBQ.w #1,d1
 000962  66 F6                         BNE $00095A
-000964  4C DF                         .dc.w $4CDF
-000966  .dc.b 00 03 4E 75                                     ; ..Nu
+000964  4C DF 00 03                   MOVEM.l (a7)+,d0-d1
+000968  4E 75                         RTS
 
 ; ==== sub_00096A (1 caller) ====
 00096A  08 39 00 04 00 BF E0 01       BTST.b #$4,$BFE001.l
@@ -548,7 +563,7 @@
 000BDA  .dc.b E2 89 08 C1 00 1F C2 82 80 81 08 29 00 00 FF FF ; ...........)....
 000BEA  .dc.b 67 04 08 80 00 1F 22 C0 4E 75                   ; g.....".Nu
 
-; ==== load_scene_block  $000BF4  (1 caller) — Bring in huff_decode (load_decoder) and run it ($74000) to decompress the packed scene block at $1B780 into $1B980..$5C000. ====
+; ==== load_scene_block  $000BF4  (2 callers) — Bring in huff_decode (load_decoder) and run it ($74000) to decompress the packed scene block at $1B780 into $1B980..$5C000. ====
 000BF4  48 E7 E1 30                   MOVEM.l d0-d2/d7/a2-a3,-(a7)
 000BF8  61 18                         BSR $000C12
 000BFA  2E 09                         MOVE.l a1,d7
@@ -565,10 +580,31 @@
 000C1E  24 3C 00 07 40 00             MOVE.l #$74000,d2
 000C24  61 00 FA F6                   BSR $00071C
 000C28  4E 75                         RTS
-000C2A  .dc.b 4A B8 0C AC 67 38 2C 78 0C AC 4A 56 6B 0A B0 56 ; J...g8,x..JVk..V
-000C3A  .dc.b 67 2C 4D EE 16 02 60 F2 76 FF BD F8 0C B0 66 06 ; g,M...`.v.....f.
-000C4A  .dc.b 76 00 2C 78 0C AC 3C C0 4B FA FC 3C 7A 0A 78 7F ; v.,x..<.K..<z.x.
-000C5A  .dc.b 26 5D 2C DB 51 CC FF FC 51 CD FF F4 87 56       ; &],.Q...Q....V
+
+; ==== sub_000C2A (1 caller) ====
+000C2A  4A B8 0C AC                   TST.l $CAC.w
+000C2E  67 38                         BEQ $000C68
+000C30  2C 78 0C AC                   MOVEA.l $CAC.w,a6
+000C34  4A 56                         TST.w (a6)
+000C36  6B 0A                         BMI $000C42
+000C38  B0 56                         CMP.w (a6),d0
+000C3A  67 2C                         BEQ $000C68
+000C3C  4D EE 16 02                   LEA $1602(a6),a6
+000C40  60 F2                         BRA $000C34
+000C42  76 FF                         MOVEQ #$FF,d3
+000C44  BD F8 0C B0                   CMPA.l $CB0.w,a6
+000C48  66 06                         BNE $000C50
+000C4A  76 00                         MOVEQ #$0,d3
+000C4C  2C 78 0C AC                   MOVEA.l $CAC.w,a6
+000C50  3C C0                         MOVE.w d0,(a6)+
+000C52  4B FA FC 3C                   LEA $000890(pc),a5
+000C56  7A 0A                         MOVEQ #$A,d5
+000C58  78 7F                         MOVEQ #$7F,d4
+000C5A  26 5D                         MOVEA.l (a5)+,a3
+000C5C  2C DB                         MOVE.l (a3)+,(a6)+
+000C5E  51 CC FF FC                   DBRA d4,$000C5C
+000C62  51 CD FF F4                   DBRA d5,$000C58
+000C66  87 56                         OR.w d3,(a6)
 000C68  4E 75                         RTS
 
 ; ==== sub_000C6A (1 caller) ====
@@ -657,12 +693,22 @@
 000DA8  42 78 02 84                   CLR.w $284.w
 000DAC  41 F8 1A 0E                   LEA $1A0E.w,a0
 000DB0  43 F9 00 00 19 DE             LEA $19DE.l,a1
-000DB6  4C D0                         .dc.w $4CD0
-000DB8  .dc.b 00 FF 48 D1 00 FF 4C A8 00 FF 00 20 48 A9 00 FF ; ..H...L.... H...
-000DC8  .dc.b 00 20 41 F8 19 8E 61 00 64 8E 21 FC 00 05 BC E0 ; . A...a.d.!.....
-000DD8  .dc.b 01 7A 21 FC 00 06 7C E0 01 92 21 FC 00 07 3C E0 ; .z!...|...!...<.
-000DE8  .dc.b 01 AA 42 B8 01 72 31 FC FF E0 01 BE 42 78 01 C0 ; ..B..r1.....Bx..
-000DF8  .dc.b 50 F8 70 6A 41 F8 01 76 61 00 24 56 61 00 60 96 ; P.pjA..va.$Va.`.
+000DB6  4C D0 00 FF                   MOVEM.l (a0),d0-d7
+000DBA  48 D1 00 FF                   MOVEM.l d0-d7,(a1)
+000DBE  4C A8 00 FF 00 20             MOVEM.w $20(a0),d0-d7
+000DC4  48 A9 00 FF 00 20             MOVEM.w d0-d7,$20(a1)
+000DCA  41 F8 19 8E                   LEA $198E.w,a0
+000DCE  61 00 64 8E                   BSR $00725E
+000DD2  21 FC 00 05 BC E0 01 7A       MOVE.l #$5BCE0,$17A.w
+000DDA  21 FC 00 06 7C E0 01 92       MOVE.l #$67CE0,$192.w
+000DE2  21 FC 00 07 3C E0 01 AA       MOVE.l #$73CE0,$1AA.w
+000DEA  42 B8 01 72                   CLR.l $172.w
+000DEE  31 FC FF E0 01 BE             MOVE.w #$FFE0,$1BE.w
+000DF4  42 78 01 C0                   CLR.w $1C0.w
+000DF8  50 F8 70 6A                   ST $706A.w
+000DFC  41 F8 01 76                   LEA $176.w,a0
+000E00  61 00 24 56                   BSR $003258
+000E04  61 00 60 96                   BSR $006E9C
 000E08  61 00 46 B2                   BSR $0054BC
 000E0C  31 FC 00 03 7A B0             MOVE.w #$3,$7AB0.w
 000E12  42 B8 7B 10                   CLR.l $7B10.w
@@ -881,10 +927,15 @@
 00118A  66 F8                         BNE $001184
 00118C  41 F8 1A 0E                   LEA $1A0E.w,a0
 001190  43 F9 00 00 19 DE             LEA $19DE.l,a1
-001196  4C D0                         .dc.w $4CD0
-001198  .dc.b 00 FF 48 D1 00 FF 4C A8 00 FF 00 20 48 A9 00 FF ; ..H...L.... H...
-0011A8  .dc.b 00 20 41 F8 19 CE 61 00 60 AE 61 00 03 4A 70 FF ; . A...a.`.a..Jp.
-0011B8  .dc.b 4E 75                                           ; Nu
+001196  4C D0 00 FF                   MOVEM.l (a0),d0-d7
+00119A  48 D1 00 FF                   MOVEM.l d0-d7,(a1)
+00119E  4C A8 00 FF 00 20             MOVEM.w $20(a0),d0-d7
+0011A4  48 A9 00 FF 00 20             MOVEM.w d0-d7,$20(a1)
+0011AA  41 F8 19 CE                   LEA $19CE.w,a0
+0011AE  61 00 60 AE                   BSR $00725E
+0011B2  61 00 03 4A                   BSR $0014FE
+0011B6  70 FF                         MOVEQ #$FF,d0
+0011B8  4E 75                         RTS
 
 ; ==== sub_0011BA (3 callers) ====
 0011BA  4A 38 01 5C                   TST.b $15C.w
@@ -1014,7 +1065,7 @@
 0014FA  6A DE                         BPL $0014DA
 0014FC  4E 75                         RTS
 
-; ==== sub_0014FE (3 callers) ====
+; ==== sub_0014FE (4 callers) ====
 0014FE  4A 38 19 4C                   TST.b $194C.w
 001502  66 00 00 DA                   BNE $0015DE
 001506  20 38 01 C2                   MOVE.l $1C2.w,d0
@@ -1111,15 +1162,37 @@
 001650  4E B9 00 01 A2 B4             JSR $1A2B4.l
 001656  50 F8 70 67                   ST $7067.w
 00165A  31 EC 00 2C 19 3C             MOVE.w $2C(a4),$193C.w
-001660  4C B8                         .dc.w $4CB8
-001662  .dc.b 00 03 45 AA D0 40 D0 40 D2 41 D2 41 48 B8 00 03 ; ..E..@.@.A.AH...
-001672  .dc.b 01 58 20 2C 00 14 67 0E 20 40 4E 90 47 F9 00 01 ; .X ,..g. @N.G...
-001682  .dc.b B9 80 28 78 19 3E 20 2C 00 2E 66 06 20 3C 00 00 ; ..(x.> ,..f. <..
-001692  .dc.b 16 DC 21 C0 19 46 4C B8 00 03 45 AA 4C AC 00 0C ; ..!..FL...E.L...
-0016A2  .dc.b 00 04 20 6B 00 00 22 6C 00 00 24 6B 00 04 61 00 ; .. k.."l..$k..a.
-0016B2  .dc.b 12 E2 28 78 19 3E 23 EC 00 10 00 00 19 32 21 EC ; ..(x.>#......2!.
-0016C2  .dc.b 00 1C 7B 0C 20 2C 00 18 66 06 20 3C 00 00 16 DC ; ..{. ,..f. <....
-0016D2  .dc.b 21 C0 19 42 70 00 60 00 61 AA                   ; !..Bp.`.a.
+001660  4C B8 00 03 45 AA             MOVEM.w $45AA.w,d0-d1
+001666  D0 40                         ADD.w d0,d0
+001668  D0 40                         ADD.w d0,d0
+00166A  D2 41                         ADD.w d1,d1
+00166C  D2 41                         ADD.w d1,d1
+00166E  48 B8 00 03 01 58             MOVEM.w d0-d1,$158.w
+001674  20 2C 00 14                   MOVE.l $14(a4),d0
+001678  67 0E                         BEQ $001688
+00167A  20 40                         MOVEA.l d0,a0
+00167C  4E 90                         JSR (a0)
+00167E  47 F9 00 01 B9 80             LEA $1B980.l,a3
+001684  28 78 19 3E                   MOVEA.l $193E.w,a4
+001688  20 2C 00 2E                   MOVE.l $2E(a4),d0
+00168C  66 06                         BNE $001694
+00168E  20 3C 00 00 16 DC             MOVE.l #$16DC,d0
+001694  21 C0 19 46                   MOVE.l d0,$1946.w
+001698  4C B8 00 03 45 AA             MOVEM.w $45AA.w,d0-d1
+00169E  4C AC 00 0C 00 04             MOVEM.w $4(a4),d2-d3
+0016A4  20 6B 00 00                   MOVEA.l $0(a3),a0
+0016A8  22 6C 00 00                   MOVEA.l $0(a4),a1
+0016AC  24 6B 00 04                   MOVEA.l $4(a3),a2
+0016B0  61 00 12 E2                   BSR $002994
+0016B4  28 78 19 3E                   MOVEA.l $193E.w,a4
+0016B8  23 EC 00 10 00 00 19 32       MOVE.l $10(a4),$1932.l
+0016C0  21 EC 00 1C 7B 0C             MOVE.l $1C(a4),$7B0C.w
+0016C6  20 2C 00 18                   MOVE.l $18(a4),d0
+0016CA  66 06                         BNE $0016D2
+0016CC  20 3C 00 00 16 DC             MOVE.l #$16DC,d0
+0016D2  21 C0 19 42                   MOVE.l d0,$1942.w
+0016D6  70 00                         MOVEQ #$0,d0
+0016D8  60 00 61 AA                   BRA $007884
 
 ; --- null_handler  $0016DC — Empty per-frame handler (just RTS); the default mode when a scene descriptor leaves a handler slot 0. (data) ---
 0016DC  .dc.b 4E 75                                           ; Nu
@@ -1127,33 +1200,121 @@
 ; ==== sub_0016DE (1 caller) ====
 0016DE  47 F9 00 01 B9 80             LEA $1B980.l,a3
 0016E4  20 6B 00 08                   MOVEA.l $8(a3),a0
-0016E8  4C D0                         .dc.w $4CD0
-0016EA  .dc.b 00 FF 48 F8 00 FF 19 CE 51 F8 19 4A 4A 38 02 52 ; ..H.....Q..JJ8.R
-0016FA  .dc.b 67 04 60 00 5A 76 4E 75 58 78 19 36 B4 7C 00 20 ; g.`.ZvNuXx.6.|. 
-00170A  .dc.b 6D 04 42 78 19 36                               ; m.Bx.6
+0016E8  4C D0 00 FF                   MOVEM.l (a0),d0-d7
+0016EC  48 F8 00 FF 19 CE             MOVEM.l d0-d7,$19CE.w
+0016F2  51 F8 19 4A                   SF $194A.w
+0016F6  4A 38 02 52                   TST.b $252.w
+0016FA  67 04                         BEQ $001700
+0016FC  60 00 5A 76                   BRA $007174
+001700  4E 75                         RTS
+001702  58 78 19 36                   ADDQ.w #4,$1936.w
+001706  B4 7C 00 20                   CMP.w #$20,d2
+00170A  6D 04                         BLT $001710
+00170C  42 78 19 36                   CLR.w $1936.w
 
 ; ==== sub_001710 (2 callers) ====
-001710  4C B8                         .dc.w $4CB8
-001712  .dc.b 00 03 01 F6 E6 48 E6 49 48 B8 00 03 19 2E 2A 78 ; .....H.IH.....*x
-001722  .dc.b 19 3E 28 6D 00 24 2A 6D 00 28 34 38 19 36 41 F8 ; .>(m.$*m.(48.6A.
-001732  .dc.b 19 0A D0 70 20 00 6B C8 D2 70 20 02 6B C2 4A 38 ; ...p .k..p .k.J8
-001742  .dc.b 02 52 67 02 42 40 B0 78 19 32 6E B4 B2 78 19 34 ; .Rg.B@.x.2n..x.4
-001752  .dc.b 6E AE 58 78 19 36 B4 7C 00 20 6D 04 42 78 19 36 ; n.Xx.6.|. m.Bx.6
-001762  .dc.b D2 41 DA F4 10 00 D0 40 D0 40 DA C0 28 55 4C B8 ; .A.....@.@..(UL.
-001772  .dc.b 00 03 01 F6 D0 40 D0 40 D2 41 D2 41 4C B8 00 0C ; .....@.@.A.AL...
-001782  .dc.b 01 72 E6 4A E6 4B D0 42 D2 43 34 00 36 01 D4 7C ; .r.J.K.B.C4.6..|
-001792  .dc.b 00 2C D6 7C 00 1C 59 41 6A 02 72 00 38 14 67 00 ; .,.|..YAj.r.8.g.
-0017A2  .dc.b 00 A6 B8 7C 00 D3 67 00 00 A4 B0 6C 00 02 6E 00 ; ...|..g....l..n.
-0017B2  .dc.b 00 96 B2 6C 00 04 6E 00 00 8E B4 6C 00 02 6D 00 ; ...l..n....l..m.
-0017C2  .dc.b 00 86 B6 6C 00 04 6D 00 00 7E 18 14 48 84 B8 7C ; ...l..m..~..H..|
-0017D2  .dc.b 00 03 6C 08 47 F8 1A 60 53 44 60 0A 26 78 19 3E ; ..l.G..`SD`.&x.>
-0017E2  .dc.b 26 6B 00 20 57 44 C8 7C 00 0F D8 44 D8 44 D6 C4 ; &k. WD.|...D.D..
-0017F2  .dc.b 2A 13 67 50 48 A7 F0 00 61 00 02 BE 4C AC 00 03 ; *.gPH...a...L...
-001802  .dc.b 00 02 4C B8 00 0C 01 F6 52 42 D4 42 D4 42 D6 43 ; ..L.....RB.B.B.C
-001812  .dc.b D6 43 90 42 92 43 E7 48 E7 49 4C B8 00 0C 01 72 ; .C.B.C.H.IL....r
-001822  .dc.b D0 42 D2 43 48 AD 00 03 00 18 1B 6C 00 01 00 1E ; .B.CH......l....
-001832  .dc.b 2B 53 00 22 61 00 02 B4 4C 9F 00 0F 3B 54 00 28 ; +S."a...L...;T.(
-001842  .dc.b 2B 4C 00 2A 42 54 5C 4C 60 00 FF 52 4E 75       ; +L.*BT\L`..RNu
+001710  4C B8 00 03 01 F6             MOVEM.w $1F6.w,d0-d1
+001716  E6 48                         LSR.w #3,d0
+001718  E6 49                         LSR.w #3,d1
+00171A  48 B8 00 03 19 2E             MOVEM.w d0-d1,$192E.w
+001720  2A 78 19 3E                   MOVEA.l $193E.w,a5
+001724  28 6D 00 24                   MOVEA.l $24(a5),a4
+001728  2A 6D 00 28                   MOVEA.l $28(a5),a5
+00172C  34 38 19 36                   MOVE.w $1936.w,d2
+001730  41 F8 19 0A                   LEA $190A.w,a0
+001734  D0 70 20 00                   ADD.w $0(a0,d2.w),d0
+001738  6B C8                         BMI $001702
+00173A  D2 70 20 02                   ADD.w $2(a0,d2.w),d1
+00173E  6B C2                         BMI $001702
+001740  4A 38 02 52                   TST.b $252.w
+001744  67 02                         BEQ $001748
+001746  42 40                         CLR.w d0
+001748  B0 78 19 32                   CMP.w $1932.w,d0
+00174C  6E B4                         BGT $001702
+00174E  B2 78 19 34                   CMP.w $1934.w,d1
+001752  6E AE                         BGT $001702
+001754  58 78 19 36                   ADDQ.w #4,$1936.w
+001758  B4 7C 00 20                   CMP.w #$20,d2
+00175C  6D 04                         BLT $001762
+00175E  42 78 19 36                   CLR.w $1936.w
+001762  D2 41                         ADD.w d1,d1
+001764  DA F4 10 00                   ADDA.w $0(a4,d1.w),a5
+001768  D0 40                         ADD.w d0,d0
+00176A  D0 40                         ADD.w d0,d0
+00176C  DA C0                         ADDA.w d0,a5
+00176E  28 55                         MOVEA.l (a5),a4
+001770  4C B8 00 03 01 F6             MOVEM.w $1F6.w,d0-d1
+001776  D0 40                         ADD.w d0,d0
+001778  D0 40                         ADD.w d0,d0
+00177A  D2 41                         ADD.w d1,d1
+00177C  D2 41                         ADD.w d1,d1
+00177E  4C B8 00 0C 01 72             MOVEM.w $172.w,d2-d3
+001784  E6 4A                         LSR.w #3,d2
+001786  E6 4B                         LSR.w #3,d3
+001788  D0 42                         ADD.w d2,d0
+00178A  D2 43                         ADD.w d3,d1
+00178C  34 00                         MOVE.w d0,d2
+00178E  36 01                         MOVE.w d1,d3
+001790  D4 7C 00 2C                   ADD.w #$2C,d2
+001794  D6 7C 00 1C                   ADD.w #$1C,d3
+001798  59 41                         SUBQ.w #4,d1
+00179A  6A 02                         BPL $00179E
+00179C  72 00                         MOVEQ #$0,d1
+00179E  38 14                         MOVE.w (a4),d4
+0017A0  67 00 00 A6                   BEQ $001848
+0017A4  B8 7C 00 D3                   CMP.w #$D3,d4
+0017A8  67 00 00 A4                   BEQ $00184E
+0017AC  B0 6C 00 02                   CMP.w $2(a4),d0
+0017B0  6E 00 00 96                   BGT $001848
+0017B4  B2 6C 00 04                   CMP.w $4(a4),d1
+0017B8  6E 00 00 8E                   BGT $001848
+0017BC  B4 6C 00 02                   CMP.w $2(a4),d2
+0017C0  6D 00 00 86                   BLT $001848
+0017C4  B6 6C 00 04                   CMP.w $4(a4),d3
+0017C8  6D 00 00 7E                   BLT $001848
+0017CC  18 14                         MOVE.b (a4),d4
+0017CE  48 84                         EXT.W d4
+0017D0  B8 7C 00 03                   CMP.w #$3,d4
+0017D4  6C 08                         BGE $0017DE
+0017D6  47 F8 1A 60                   LEA $1A60.w,a3
+0017DA  53 44                         SUBQ.w #1,d4
+0017DC  60 0A                         BRA $0017E8
+0017DE  26 78 19 3E                   MOVEA.l $193E.w,a3
+0017E2  26 6B 00 20                   MOVEA.l $20(a3),a3
+0017E6  57 44                         SUBQ.w #3,d4
+0017E8  C8 7C 00 0F                   AND.w #$F,d4
+0017EC  D8 44                         ADD.w d4,d4
+0017EE  D8 44                         ADD.w d4,d4
+0017F0  D6 C4                         ADDA.w d4,a3
+0017F2  2A 13                         MOVE.l (a3),d5
+0017F4  67 50                         BEQ $001846
+0017F6  48 A7 F0 00                   MOVEM.w d0-d3,-(a7)
+0017FA  61 00 02 BE                   BSR $001ABA
+0017FE  4C AC 00 03 00 02             MOVEM.w $2(a4),d0-d1
+001804  4C B8 00 0C 01 F6             MOVEM.w $1F6.w,d2-d3
+00180A  52 42                         ADDQ.w #1,d2
+00180C  D4 42                         ADD.w d2,d2
+00180E  D4 42                         ADD.w d2,d2
+001810  D6 43                         ADD.w d3,d3
+001812  D6 43                         ADD.w d3,d3
+001814  90 42                         SUB.w d2,d0
+001816  92 43                         SUB.w d3,d1
+001818  E7 48                         LSL.w #3,d0
+00181A  E7 49                         LSL.w #3,d1
+00181C  4C B8 00 0C 01 72             MOVEM.w $172.w,d2-d3
+001822  D0 42                         ADD.w d2,d0
+001824  D2 43                         ADD.w d3,d1
+001826  48 AD 00 03 00 18             MOVEM.w d0-d1,$18(a5)
+00182C  1B 6C 00 01 00 1E             MOVE.b $1(a4),$1E(a5)
+001832  2B 53 00 22                   MOVE.l (a3),$22(a5)
+001836  61 00 02 B4                   BSR $001AEC
+00183A  4C 9F 00 0F                   MOVEM.w (a7)+,d0-d3
+00183E  3B 54 00 28                   MOVE.w (a4),$28(a5)
+001842  2B 4C 00 2A                   MOVE.l a4,$2A(a5)
+001846  42 54                         CLR.w (a4)
+001848  5C 4C                         ADDQ.w #6,a4
+00184A  60 00 FF 52                   BRA $00179E
+00184E  4E 75                         RTS
 
 ; ==== sub_001850 (2 callers) ====
 001850  0C 38 00 63 02 16             CMPI.b #$63,$216.w
@@ -1267,7 +1428,7 @@
 001AB4  42 38 28 F0                   CLR.b $28F0.w
 001AB8  4E 75                         RTS
 
-; ==== sub_001ABA (3 callers) ====
+; ==== sub_001ABA (4 callers) ====
 001ABA  0C 78 00 26 01 4A             CMPI.w #$26,$14A.w
 001AC0  6F 06                         BLE $001AC8
 001AC2  4B F8 23 C6                   LEA $23C6.w,a5
@@ -1282,7 +1443,7 @@
 001AE6  42 6D 00 28                   CLR.w $28(a5)
 001AEA  4E 75                         RTS
 
-; ==== sub_001AEC (2 callers) ====
+; ==== sub_001AEC (4 callers) ====
 001AEC  43 F8 23 C6                   LEA $23C6.w,a1
 001AF0  BB C9                         CMPA.l a1,a5
 001AF2  66 02                         BNE $001AF6
@@ -1311,11 +1472,27 @@
 001B44  4B F8 23 C6                   LEA $23C6.w,a5
 001B48  51 ED 00 1C                   SF $1C(a5)
 001B4C  4E 75                         RTS
-001B4E  .dc.b 22 6D 00 04 24 6D 00 00 23 4A 00 00 25 49 00 04 ; "m..$m..#J..%I..
-001B5E  .dc.b 2B 78 02 3A 00 00 42 AD 00 04 21 CD 02 3A 53 78 ; +x.:..B...!..:Sx
-001B6E  .dc.b 01 4A 30 2D 00 28 67 06 22 6D 00 2A 32 80 4E 75 ; .J0-.(g."m.*2.Nu
-001B7E  .dc.b 41 F8 23 C6 21 6D 00 00 00 00 61 C4 4B F8 23 C6 ; A.#.!m....a.K.#.
-001B8E  .dc.b 51 ED 00 1C 4E 75                               ; Q...Nu
+
+; ==== sub_001B4E (1 caller) ====
+001B4E  22 6D 00 04                   MOVEA.l $4(a5),a1
+001B52  24 6D 00 00                   MOVEA.l $0(a5),a2
+001B56  23 4A 00 00                   MOVE.l a2,$0(a1)
+001B5A  25 49 00 04                   MOVE.l a1,$4(a2)
+001B5E  2B 78 02 3A 00 00             MOVE.l $23A.w,$0(a5)
+001B64  42 AD 00 04                   CLR.l $4(a5)
+001B68  21 CD 02 3A                   MOVE.l a5,$23A.w
+001B6C  53 78 01 4A                   SUBQ.w #1,$14A.w
+001B70  30 2D 00 28                   MOVE.w $28(a5),d0
+001B74  67 06                         BEQ $001B7C
+001B76  22 6D 00 2A                   MOVEA.l $2A(a5),a1
+001B7A  32 80                         MOVE.w d0,(a1)
+001B7C  4E 75                         RTS
+001B7E  41 F8 23 C6                   LEA $23C6.w,a0
+001B82  21 6D 00 00 00 00             MOVE.l $0(a5),$0(a0)
+001B88  61 C4                         BSR $001B4E
+001B8A  4B F8 23 C6                   LEA $23C6.w,a5
+001B8E  51 ED 00 1C                   SF $1C(a5)
+001B92  4E 75                         RTS
 
 ; ==== sub_001B94 (4 callers) ====
 001B94  4A B8 02 36                   TST.l $236.w
@@ -1344,9 +1521,15 @@
 001BDE  2D 42 00 54                   MOVE.l d2,$54(a6)
 001BE2  D4 80                         ADD.l d0,d2
 001BE4  2D 42 00 50                   MOVE.l d2,$50(a6)
-001BE8  4C 9A                         .dc.w $4C9A
-001BEA  .dc.b 00 0C 94 41 3D 42 00 64 3D 42 00 66 D6 43 D6 43 ; ...A=B.d=B.f.C.C
-001BFA  .dc.b E4 0B 3D 43 00 58 60 D4                         ; ..=C.X`.
+001BE8  4C 9A 00 0C                   MOVEM.w (a2)+,d2-d3
+001BEC  94 41                         SUB.w d1,d2
+001BEE  3D 42 00 64                   MOVE.w d2,$64(a6)
+001BF2  3D 42 00 66                   MOVE.w d2,$66(a6)
+001BF6  D6 43                         ADD.w d3,d3
+001BF8  D6 43                         ADD.w d3,d3
+001BFA  E4 0B                         LSR.b #2,d3
+001BFC  3D 43 00 58                   MOVE.w d3,$58(a6)
+001C00  60 D4                         BRA $001BD6
 001C02  24 69 00 00                   MOVEA.l $0(a1),a2
 001C06  42 6A 00 04                   CLR.w $4(a2)
 001C0A  4E 75                         RTS
@@ -1851,21 +2034,29 @@
 00233E  42 6B 00 04                   CLR.w $4(a3)
 002342  2D 7C FF FE FF FE 00 62       MOVE.l #$FFFEFFFE,$62(a6)
 00234A  4E 75                         RTS
-00234C  4C AD                         .dc.w $4CAD
-00234E  .dc.b 00 0C 00 18 D4 40 D6 41 94 78 01 20 96 78 01 22 ; .....@.A.x. .x."
-00235E  .dc.b 48 AD 00 0C 00 18 3B 7C 00 07 00 0C 50 ED 00 1F ; H.....;|....P...
-00236E  .dc.b 2B 7C 00 00 23 84 00 22 2B 7C 00 00 29 04 00 12 ; +|..#.."+|..)...
-00237E  .dc.b 50 ED 00 1C 4E 75 4C AD 00 03 00 18 90 78 01 20 ; P...NuL......x. 
-00238E  .dc.b 6B 00 F7 A8 92 78 01 22 6B 00 F7 A0 B0 7C 01 50 ; k....x."k....|.P
-00239E  .dc.b 6C 00 F7 98 B2 7C 00 D4 6C 00 F7 90 48 AD 00 03 ; l....|..l...H...
-0023AE  .dc.b 00 18 10 2D 00 1F C0 7C 00 01 91 6D 00 0C 6B 00 ; ...-...|...m..k.
-0023BE  .dc.b F7 7A 53 2D 00 1F 4E 75 00 00 00 00 00 00 00 00 ; .zS-..Nu........
-0023CE  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-0023DE  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-0023EE  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-0023FE  .dc.b 00 00 50 F8 01 5C 21 C8 28 5E 48 B8 00 03 01 66 ; ..P..\!.(^H....f
-00240E  .dc.b 42 B8 28 64 42 B8 28 68 51 F8 28 62 42 38 01 C6 ; B.(dB.(hQ.(bB8..
-00241E  .dc.b 4E 75 50 F8 28 62 4E 75                         ; NuP.(bNu
+00234C  4C AD 00 0C 00 18             MOVEM.w $18(a5),d2-d3
+002352  D4 40                         ADD.w d0,d2
+002354  D6 41                         ADD.w d1,d3
+002356  94 78 01 20                   SUB.w $120.w,d2
+00235A  96 78 01 22                   SUB.w $122.w,d3
+00235E  48 AD 00 0C 00 18             MOVEM.w d2-d3,$18(a5)
+002364  3B 7C 00 07 00 0C             MOVE.w #$7,$C(a5)
+00236A  50 ED 00 1F                   ST $1F(a5)
+00236E  2B 7C 00 00 23 84 00 22       MOVE.l #$2384,$22(a5)
+002376  2B 7C 00 00 29 04 00 12       MOVE.l #$2904,$12(a5)
+00237E  50 ED 00 1C                   ST $1C(a5)
+002382  4E 75                         RTS
+002384  .dc.b 4C AD 00 03 00 18 90 78 01 20 6B 00 F7 A8 92 78 ; L......x. k....x
+002394  .dc.b 01 22 6B 00 F7 A0 B0 7C 01 50 6C 00 F7 98 B2 7C ; ."k....|.Pl....|
+0023A4  .dc.b 00 D4 6C 00 F7 90 48 AD 00 03 00 18 10 2D 00 1F ; ..l...H......-..
+0023B4  .dc.b C0 7C 00 01 91 6D 00 0C 6B 00 F7 7A 53 2D 00 1F ; .|...m..k..zS-..
+0023C4  .dc.b 4E 75 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; Nu..............
+0023D4  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+0023E4  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+0023F4  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 50 F8 01 5C ; ............P..\
+002404  .dc.b 21 C8 28 5E 48 B8 00 03 01 66 42 B8 28 64 42 B8 ; !.(^H....fB.(dB.
+002414  .dc.b 28 68 51 F8 28 62 42 38 01 C6 4E 75 50 F8 28 62 ; (hQ.(bB8..NuP.(b
+002424  .dc.b 4E 75                                           ; Nu
 002426  51 F8 01 5C                   SF $15C.w
 00242A  3D 7C 09 F0 00 40             MOVE.w #$9F0,$40(a6)
 002430  42 6E 00 42                   CLR.w $42(a6)
@@ -2220,51 +2411,194 @@
 00295E  .dc.b 1F E8 00 01 21 68 00 BA 08 03 20 00 00 01 21 E8 ; ....!h.... ...!.
 00296E  .dc.b 00 01 23 68 00 BA 08 03 20 00 00 01 23 E8 00 01 ; ..#h.... ...#...
 00297E  .dc.b 25 68 00 BA 08 03 20 00 00 01 25 E8 00 01 27 68 ; %h.... ...%...'h
-00298E  .dc.b 00 BA 08 03 20 00 21 C8 35 D8 21 C9 02 2A 21 CA ; .... .!.5.!..*!.
-00299E  .dc.b 35 DC 48 B8 00 03 01 F6 48 B8 00 0C 35 E0 4A 50 ; 5.H.....H...5.JP
-0029AE  .dc.b 66 04 61 00 4A C6 24 78 02 2E 78 00 3A 02 54 45 ; f.a.J.$x..x.:.TE
-0029BE  .dc.b 34 C4 D8 43 51 CD FF FA 42 9A 42 9A 28 00 E5 4C ; 4..CQ...B.B.(..L
-0029CE  .dc.b 2A 04 DA BC 00 05 B6 C0 21 C5 02 12 D8 BC 00 05 ; *.......!.......
-0029DE  .dc.b BC E0 21 C4 01 7A 21 C4 01 7E D8 BC 00 00 C0 00 ; ..!..z!..~......
-0029EE  .dc.b 21 C4 01 92 21 C4 01 96 D8 BC 00 00 C0 00 21 C4 ; !...!.........!.
-0029FE  .dc.b 01 AA 21 C4 01 AE 3D 7C 09 F0 00 40 42 6E 00 42 ; ..!...=|...@Bn.B
-002A0E  .dc.b 2D 7C FF FF FF FF 00 44 42 6E 00 64 3D 7C 00 2C ; -|.....DBn.d=|.,
-002A1E  .dc.b 00 66 24 78 02 2E D0 40 D2 72 00 00 D2 C1 20 38 ; .f$x...@.r.... 8
-002A2E  .dc.b 01 AA 32 3C 20 02 34 03 51 42 24 79 00 00 02 12 ; ..2< .4.QB$y....
-002A3E  .dc.b 26 79 00 00 35 DC 78 0B 7A 07 28 4A 2D 40 00 54 ; &y..5.x.z.(J-@.T
-002A4E  .dc.b 76 00 16 19 D6 43 D6 43 2D 70 30 00 00 50 3D 41 ; v....C.C-p0..P=A
-002A5E  .dc.b 00 58 D6 43 D6 43 4B F3 30 00 28 9D 29 5D 00 30 ; .X.C.CK.0.(.)].0
-002A6E  .dc.b 29 5D 00 60 29 5D 00 90 D8 FC 00 C0 08 2E 00 0E ; )].`)]..........
-002A7E  .dc.b 00 02 66 F8 51 CD FF CA D2 C2 58 80 58 8A 51 CC ; ..f.Q.....X.X.Q.
-002A8E  .dc.b FF B8 42 38 02 77 42 38 02 28 31 FC 00 00 01 72 ; ..B8.wB8.(1....r
-002A9E  .dc.b 31 FC 00 00 01 74 31 FC FF E0 01 BE 42 78 01 20 ; 1....t1.....Bx. 
-002AAE  .dc.b 42 78 01 22 42 78 35 EC 42 78 35 EE 42 78 35 F2 ; Bx."Bx5.Bx5.Bx5.
-002ABE  .dc.b 4C B8 00 03 01 F6 52 40 52 41 4C B8 00 0C 01 72 ; L.....R@RAL....r
-002ACE  .dc.b E6 4A E6 4B D0 40 D0 40 D2 41 D2 41 90 42 92 43 ; .J.K.@.@.A.A.B.C
-002ADE  .dc.b 48 B8 00 03 01 58 61 00 4B 1E 41 F8 01 76 61 00 ; H....Xa.K.A..va.
-002AEE  .dc.b 07 6A 41 F8 01 8E 61 00 07 62 51 F8 70 6A 61 00 ; .jA...a..bQ.pja.
-002AFE  .dc.b 43 7E 61 00 4A B0 61 00 43 76 42 6E 00 66 2D 78 ; C~a.J.a.CvBn.f-x
-002B0E  .dc.b 01 AA 00 50 2D 78 01 92 00 54 3D 7C 80 30 00 58 ; ...P-x...T=|.0.X
-002B1E  .dc.b 08 2E 00 0E 00 02 66 F8 20 38 01 AA 22 38 01 7A ; ......f. 8.."8.z
-002B2E  .dc.b 48 EE 00 03 00 50 3D 7C 10 30 00 58 08 2E 00 0E ; H....P=|.0.X....
-002B3E  .dc.b 00 02 66 F8 24 00 26 01 D4 BC 00 00 9F 00 D6 BC ; ..f.$.&.........
-002B4E  .dc.b 00 00 9F 00 48 EE 00 0C 00 50 3D 7C 16 30 00 58 ; ....H....P=|.0.X
-002B5E  .dc.b 08 2E 00 0E 00 02 66 F8 D0 BC 00 00 17 FC D2 BC ; ......f.........
-002B6E  .dc.b 00 00 17 FC 48 EE 00 03 00 50 3D 7C 00 28 00 64 ; ....H....P=|.(.d
-002B7E  .dc.b 3D 7C 00 28 00 66 3D 7C B5 04 00 58 41 F8 35 F8 ; =|.(.f=|...XA.5.
-002B8E  .dc.b 42 68 00 00 41 F8 36 0E 42 68 00 00 41 F8 37 80 ; Bh..A.6.Bh..A.7.
-002B9E  .dc.b 43 F8 37 B4 70 00 72 0B 30 18 C0 F8 35 E2 30 C0 ; C.7.p.r.0...5.0.
-002BAE  .dc.b 30 19 C0 F8 35 E2 32 C0 51 C9 FF EE 4C B8 00 03 ; 0...5.2.Q...L...
-002BBE  .dc.b 35 E0 90 7C 00 0B 92 7C 00 08 48 B8 00 03 35 E4 ; 5..|...|..H...5.
-002BCE  .dc.b 4C B8 00 03 01 F6 EB 48 EB 49 48 B8 00 03 35 E8 ; L......H.IH...5.
-002BDE  .dc.b 70 0A 2F 38 01 F6 2F 38 01 AA 2F 38 02 12 06 78 ; p./8../8../8...x
-002BEE  .dc.b 00 0A 01 F6 06 B8 00 00 00 28 01 AA 06 B8 00 00 ; .........(......
-002BFE  .dc.b 00 28 02 12 3F 00 4C B8 00 03 01 F6 4C B8 00 0C ; .(..?.L.....L...
-002C0E  .dc.b 01 F6 90 7C 00 0A 5D 41 78 00 7A 00 7C 01 4C B8 ; ...|..]Ax.z.|.L.
-002C1E  .dc.b 01 80 01 F6 DE 44 DE 47 22 78 02 2E D0 F1 70 00 ; .....D.G"x....p.
-002C2E  .dc.b D1 F8 02 2A 7E 06 24 78 19 46 4E 92 30 1F 53 78 ; ...*~.$x.FN.0.Sx
-002C3E  .dc.b 01 F6 59 B8 01 AA 59 B8 02 12 51 C8 FF B8 21 DF ; ..Y...Y...Q...!.
-002C4E  .dc.b 02 12 21 DF 01 AA 21 DF 01 F6 4E 75             ; ..!...!...Nu
+00298E  .dc.b 00 BA 08 03 20 00                               ; .... .
+
+; ==== sub_002994 (1 caller) ====
+002994  21 C8 35 D8                   MOVE.l a0,$35D8.w
+002998  21 C9 02 2A                   MOVE.l a1,$22A.w
+00299C  21 CA 35 DC                   MOVE.l a2,$35DC.w
+0029A0  48 B8 00 03 01 F6             MOVEM.w d0-d1,$1F6.w
+0029A6  48 B8 00 0C 35 E0             MOVEM.w d2-d3,$35E0.w
+0029AC  4A 50                         TST.w (a0)
+0029AE  66 04                         BNE $0029B4
+0029B0  61 00 4A C6                   BSR $007478
+0029B4  24 78 02 2E                   MOVEA.l $22E.w,a2
+0029B8  78 00                         MOVEQ #$0,d4
+0029BA  3A 02                         MOVE.w d2,d5
+0029BC  54 45                         ADDQ.w #2,d5
+0029BE  34 C4                         MOVE.w d4,(a2)+
+0029C0  D8 43                         ADD.w d3,d4
+0029C2  51 CD FF FA                   DBRA d5,$0029BE
+0029C6  42 9A                         CLR.l (a2)+
+0029C8  42 9A                         CLR.l (a2)+
+0029CA  28 00                         MOVE.l d0,d4
+0029CC  E5 4C                         LSL.w #2,d4
+0029CE  2A 04                         MOVE.l d4,d5
+0029D0  DA BC 00 05 B6 C0             ADD.l #$5B6C0,d5
+0029D6  21 C5 02 12                   MOVE.l d5,$212.w
+0029DA  D8 BC 00 05 BC E0             ADD.l #$5BCE0,d4
+0029E0  21 C4 01 7A                   MOVE.l d4,$17A.w
+0029E4  21 C4 01 7E                   MOVE.l d4,$17E.w
+0029E8  D8 BC 00 00 C0 00             ADD.l #$C000,d4
+0029EE  21 C4 01 92                   MOVE.l d4,$192.w
+0029F2  21 C4 01 96                   MOVE.l d4,$196.w
+0029F6  D8 BC 00 00 C0 00             ADD.l #$C000,d4
+0029FC  21 C4 01 AA                   MOVE.l d4,$1AA.w
+002A00  21 C4 01 AE                   MOVE.l d4,$1AE.w
+002A04  3D 7C 09 F0 00 40             MOVE.w #$9F0,$40(a6)
+002A0A  42 6E 00 42                   CLR.w $42(a6)
+002A0E  2D 7C FF FF FF FF 00 44       MOVE.l #$FFFFFFFF,$44(a6)
+002A16  42 6E 00 64                   CLR.w $64(a6)
+002A1A  3D 7C 00 2C 00 66             MOVE.w #$2C,$66(a6)
+002A20  24 78 02 2E                   MOVEA.l $22E.w,a2
+002A24  D0 40                         ADD.w d0,d0
+002A26  D2 72 00 00                   ADD.w $0(a2,d0.w),d1
+002A2A  D2 C1                         ADDA.w d1,a1
+002A2C  20 38 01 AA                   MOVE.l $1AA.w,d0
+002A30  32 3C 20 02                   MOVE.w #$2002,d1
+002A34  34 03                         MOVE.w d3,d2
+002A36  51 42                         SUBQ.w #8,d2
+002A38  24 79 00 00 02 12             MOVEA.l $212.l,a2
+002A3E  26 79 00 00 35 DC             MOVEA.l $35DC.l,a3
+002A44  78 0B                         MOVEQ #$B,d4
+002A46  7A 07                         MOVEQ #$7,d5
+002A48  28 4A                         MOVEA.l a2,a4
+002A4A  2D 40 00 54                   MOVE.l d0,$54(a6)
+002A4E  76 00                         MOVEQ #$0,d3
+002A50  16 19                         MOVE.b (a1)+,d3
+002A52  D6 43                         ADD.w d3,d3
+002A54  D6 43                         ADD.w d3,d3
+002A56  2D 70 30 00 00 50             MOVE.l $0(a0,d3.w),$50(a6)
+002A5C  3D 41 00 58                   MOVE.w d1,$58(a6)
+002A60  D6 43                         ADD.w d3,d3
+002A62  D6 43                         ADD.w d3,d3
+002A64  4B F3 30 00                   LEA $0(a3,d3.w),a5
+002A68  28 9D                         MOVE.l (a5)+,(a4)
+002A6A  29 5D 00 30                   MOVE.l (a5)+,$30(a4)
+002A6E  29 5D 00 60                   MOVE.l (a5)+,$60(a4)
+002A72  29 5D 00 90                   MOVE.l (a5)+,$90(a4)
+002A76  D8 FC 00 C0                   ADDA.w #$C0,a4
+002A7A  08 2E 00 0E 00 02             BTST.b #$E,$2(a6)
+002A80  66 F8                         BNE $002A7A
+002A82  51 CD FF CA                   DBRA d5,$002A4E
+002A86  D2 C2                         ADDA.w d2,a1
+002A88  58 80                         ADDQ.l #4,d0
+002A8A  58 8A                         ADDQ.l #4,a2
+002A8C  51 CC FF B8                   DBRA d4,$002A46
+002A90  42 38 02 77                   CLR.b $277.w
+002A94  42 38 02 28                   CLR.b $228.w
+002A98  31 FC 00 00 01 72             MOVE.w #$0,$172.w
+002A9E  31 FC 00 00 01 74             MOVE.w #$0,$174.w
+002AA4  31 FC FF E0 01 BE             MOVE.w #$FFE0,$1BE.w
+002AAA  42 78 01 20                   CLR.w $120.w
+002AAE  42 78 01 22                   CLR.w $122.w
+002AB2  42 78 35 EC                   CLR.w $35EC.w
+002AB6  42 78 35 EE                   CLR.w $35EE.w
+002ABA  42 78 35 F2                   CLR.w $35F2.w
+002ABE  4C B8 00 03 01 F6             MOVEM.w $1F6.w,d0-d1
+002AC4  52 40                         ADDQ.w #1,d0
+002AC6  52 41                         ADDQ.w #1,d1
+002AC8  4C B8 00 0C 01 72             MOVEM.w $172.w,d2-d3
+002ACE  E6 4A                         LSR.w #3,d2
+002AD0  E6 4B                         LSR.w #3,d3
+002AD2  D0 40                         ADD.w d0,d0
+002AD4  D0 40                         ADD.w d0,d0
+002AD6  D2 41                         ADD.w d1,d1
+002AD8  D2 41                         ADD.w d1,d1
+002ADA  90 42                         SUB.w d2,d0
+002ADC  92 43                         SUB.w d3,d1
+002ADE  48 B8 00 03 01 58             MOVEM.w d0-d1,$158.w
+002AE4  61 00 4B 1E                   BSR $007604
+002AE8  41 F8 01 76                   LEA $176.w,a0
+002AEC  61 00 07 6A                   BSR $003258
+002AF0  41 F8 01 8E                   LEA $18E.w,a0
+002AF4  61 00 07 62                   BSR $003258
+002AF8  51 F8 70 6A                   SF $706A.w
+002AFC  61 00 43 7E                   BSR $006E7C
+002B00  61 00 4A B0                   BSR $0075B2
+002B04  61 00 43 76                   BSR $006E7C
+002B08  42 6E 00 66                   CLR.w $66(a6)
+002B0C  2D 78 01 AA 00 50             MOVE.l $1AA.w,$50(a6)
+002B12  2D 78 01 92 00 54             MOVE.l $192.w,$54(a6)
+002B18  3D 7C 80 30 00 58             MOVE.w #$8030,$58(a6)
+002B1E  08 2E 00 0E 00 02             BTST.b #$E,$2(a6)
+002B24  66 F8                         BNE $002B1E
+002B26  20 38 01 AA                   MOVE.l $1AA.w,d0
+002B2A  22 38 01 7A                   MOVE.l $17A.w,d1
+002B2E  48 EE 00 03 00 50             MOVEM.l d0-d1,$50(a6)
+002B34  3D 7C 10 30 00 58             MOVE.w #$1030,$58(a6)
+002B3A  08 2E 00 0E 00 02             BTST.b #$E,$2(a6)
+002B40  66 F8                         BNE $002B3A
+002B42  24 00                         MOVE.l d0,d2
+002B44  26 01                         MOVE.l d1,d3
+002B46  D4 BC 00 00 9F 00             ADD.l #$9F00,d2
+002B4C  D6 BC 00 00 9F 00             ADD.l #$9F00,d3
+002B52  48 EE 00 0C 00 50             MOVEM.l d2-d3,$50(a6)
+002B58  3D 7C 16 30 00 58             MOVE.w #$1630,$58(a6)
+002B5E  08 2E 00 0E 00 02             BTST.b #$E,$2(a6)
+002B64  66 F8                         BNE $002B5E
+002B66  D0 BC 00 00 17 FC             ADD.l #$17FC,d0
+002B6C  D2 BC 00 00 17 FC             ADD.l #$17FC,d1
+002B72  48 EE 00 03 00 50             MOVEM.l d0-d1,$50(a6)
+002B78  3D 7C 00 28 00 64             MOVE.w #$28,$64(a6)
+002B7E  3D 7C 00 28 00 66             MOVE.w #$28,$66(a6)
+002B84  3D 7C B5 04 00 58             MOVE.w #$B504,$58(a6)
+002B8A  41 F8 35 F8                   LEA $35F8.w,a0
+002B8E  42 68 00 00                   CLR.w $0(a0)
+002B92  41 F8 36 0E                   LEA $360E.w,a0
+002B96  42 68 00 00                   CLR.w $0(a0)
+002B9A  41 F8 37 80                   LEA $3780.w,a0
+002B9E  43 F8 37 B4                   LEA $37B4.w,a1
+002BA2  70 00                         MOVEQ #$0,d0
+002BA4  72 0B                         MOVEQ #$B,d1
+002BA6  30 18                         MOVE.w (a0)+,d0
+002BA8  C0 F8 35 E2                   MULU.W $35E2.w,d0
+002BAC  30 C0                         MOVE.w d0,(a0)+
+002BAE  30 19                         MOVE.w (a1)+,d0
+002BB0  C0 F8 35 E2                   MULU.W $35E2.w,d0
+002BB4  32 C0                         MOVE.w d0,(a1)+
+002BB6  51 C9 FF EE                   DBRA d1,$002BA6
+002BBA  4C B8 00 03 35 E0             MOVEM.w $35E0.w,d0-d1
+002BC0  90 7C 00 0B                   SUB.w #$B,d0
+002BC4  92 7C 00 08                   SUB.w #$8,d1
+002BC8  48 B8 00 03 35 E4             MOVEM.w d0-d1,$35E4.w
+002BCE  4C B8 00 03 01 F6             MOVEM.w $1F6.w,d0-d1
+002BD4  EB 48                         LSL.w #5,d0
+002BD6  EB 49                         LSL.w #5,d1
+002BD8  48 B8 00 03 35 E8             MOVEM.w d0-d1,$35E8.w
+002BDE  70 0A                         MOVEQ #$A,d0
+002BE0  2F 38 01 F6                   MOVE.l $1F6.w,-(a7)
+002BE4  2F 38 01 AA                   MOVE.l $1AA.w,-(a7)
+002BE8  2F 38 02 12                   MOVE.l $212.w,-(a7)
+002BEC  06 78 00 0A 01 F6             ADDI.w #$A,$1F6.w
+002BF2  06 B8 00 00 00 28 01 AA       ADDI.l #$28,$1AA.w
+002BFA  06 B8 00 00 00 28 02 12       ADDI.l #$28,$212.w
+002C02  3F 00                         MOVE.w d0,-(a7)
+002C04  4C B8 00 03 01 F6             MOVEM.w $1F6.w,d0-d1
+002C0A  4C B8 00 0C 01 F6             MOVEM.w $1F6.w,d2-d3
+002C10  90 7C 00 0A                   SUB.w #$A,d0
+002C14  5D 41                         SUBQ.w #6,d1
+002C16  78 00                         MOVEQ #$0,d4
+002C18  7A 00                         MOVEQ #$0,d5
+002C1A  7C 01                         MOVEQ #$1,d6
+002C1C  4C B8 01 80 01 F6             MOVEM.w $1F6.w,d7/a0
+002C22  DE 44                         ADD.w d4,d7
+002C24  DE 47                         ADD.w d7,d7
+002C26  22 78 02 2E                   MOVEA.l $22E.w,a1
+002C2A  D0 F1 70 00                   ADDA.w $0(a1,d7.w),a0
+002C2E  D1 F8 02 2A                   ADDA.l $22A.w,a0
+002C32  7E 06                         MOVEQ #$6,d7
+002C34  24 78 19 46                   MOVEA.l $1946.w,a2
+002C38  4E 92                         JSR (a2)
+002C3A  30 1F                         MOVE.w (a7)+,d0
+002C3C  53 78 01 F6                   SUBQ.w #1,$1F6.w
+002C40  59 B8 01 AA                   SUBQ.l #4,$1AA.w
+002C44  59 B8 02 12                   SUBQ.l #4,$212.w
+002C48  51 C8 FF B8                   DBRA d0,$002C02
+002C4C  21 DF 02 12                   MOVE.l (a7)+,$212.w
+002C50  21 DF 01 AA                   MOVE.l (a7)+,$1AA.w
+002C54  21 DF 01 F6                   MOVE.l (a7)+,$1F6.w
+002C58  4E 75                         RTS
 
 ; ==== sub_002C5A (1 caller) ====
 002C5A  74 00                         MOVEQ #$0,d2
@@ -2297,8 +2631,7 @@
 002CA2  20 70 30 00                   MOVEA.l $0(a0,d3.w),a0
 002CA6  48 A7 E0 00                   MOVEM.w d0-d2,-(a7)
 002CAA  4E 90                         JSR (a0)
-002CAC  4C 9F                         .dc.w $4C9F
-002CAE  .dc.b 00 07                                           ; ..
+002CAC  4C 9F 00 07                   MOVEM.w (a7)+,d0-d2
 002CB0  4E 75                         RTS
 002CB2  .dc.b 00 00 2C F2 00 00 2C F4 00 00 2D 00 00 00 2C FA ; ..,...,...-...,.
 002CC2  .dc.b 00 00 2D 06 00 00 2C F2 00 00 2D 0C 00 00 2D 12 ; ..-...,...-...-.
@@ -2323,17 +2656,27 @@
 002DF2  .dc.b 45 F8 35 F8 4A 6A 00 00 67 18 4A 40 66 06 43 F8 ; E.5.Jj..g.J@f.C.
 002E02  .dc.b 36 38 60 04 43 F8 36 5C 25 49 00 02 35 7C 00 08 ; 68`.C.6\%I..5|..
 002E12  .dc.b 00 00 4E 75 70 01 72 01 61 00 FE 3E 70 FF 72 FF ; ..Nup.r.a..>p.r.
-002E22  .dc.b 61 00 FE 36 70 00 72 00 60 00 FE 2E 21 F8 01 72 ; a..6p.r.`...!..r
-002E32  .dc.b 2E A4 42 B8 01 20 50 F8 02 77 4E 75 21 F8 01 72 ; ..B.. P..wNu!..r
-002E42  .dc.b 2E A4 21 F8 01 20 2E A8 11 FC 00 02 02 77 42 78 ; ..!.. .......wBx
-002E52  .dc.b 01 20 4E 75 21 F8 01 72 2E A4 21 F8 01 20 2E A8 ; . Nu!..r..!.. ..
-002E62  .dc.b 11 FC 00 01 02 77 42 78 01 22 4E 75             ; .....wBx."Nu
+002E22  .dc.b 61 00 FE 36 70 00 72 00 60 00 FE 2E             ; a..6p.r.`...
+002E2E  21 F8 01 72 2E A4             MOVE.l $172.w,$2EA4.w
+002E34  42 B8 01 20                   CLR.l $120.w
+002E38  50 F8 02 77                   ST $277.w
+002E3C  4E 75                         RTS
+002E3E  21 F8 01 72 2E A4             MOVE.l $172.w,$2EA4.w
+002E44  21 F8 01 20 2E A8             MOVE.l $120.w,$2EA8.w
+002E4A  11 FC 00 02 02 77             MOVE.b #$2,$277.w
+002E50  42 78 01 20                   CLR.w $120.w
+002E54  4E 75                         RTS
+002E56  .dc.b 21 F8 01 72 2E A4 21 F8 01 20 2E A8 11 FC 00 01 ; !..r..!.. ......
+002E66  .dc.b 02 77 42 78 01 22 4E 75                         ; .wBx."Nu
 002E6E  11 FC 00 03 02 77             MOVE.b #$3,$277.w
 002E74  4E 75                         RTS
 002E76  11 FC 00 04 02 77             MOVE.b #$4,$277.w
-002E7C  4C B9                         .dc.w $4CB9
-002E7E  .dc.b 00 03 00 00 01 72 90 78 2E A4 92 78 2E A6 48 B8 ; .....r.x...x..H.
-002E8E  .dc.b 00 03 01 20 21 F8 2E A4 01 72 4E 75             ; ... !....rNu
+002E7C  4C B9 00 03 00 00 01 72       MOVEM.w $172.l,d0-d1
+002E84  90 78 2E A4                   SUB.w $2EA4.w,d0
+002E88  92 78 2E A6                   SUB.w $2EA6.w,d1
+002E8C  48 B8 00 03 01 20             MOVEM.w d0-d1,$120.w
+002E92  21 F8 2E A4 01 72             MOVE.l $2EA4.w,$172.w
+002E98  4E 75                         RTS
 002E9A  51 F8 02 77                   SF $277.w
 002E9E  42 B8 01 20                   CLR.l $120.w
 002EA2  4E 75                         RTS
@@ -2403,10 +2746,20 @@
 002F76  61 00 FC E2                   BSR $002C5A
 002F7A  61 00 01 D6                   BSR $003152
 002F7E  61 28                         BSR $002FA8
-002F80  4C B8                         .dc.w $4CB8
-002F82  .dc.b 00 03 01 F6 52 40 52 41 4C B8 00 0C 01 72 E6 4A ; ....R@RAL....r.J
-002F92  .dc.b E6 4B D0 40 D0 40 D2 41 D2 41 90 42 92 43 48 B8 ; .K.@.@.A.A.B.CH.
-002FA2  .dc.b 00 03 01 58 4E 75                               ; ...XNu
+002F80  4C B8 00 03 01 F6             MOVEM.w $1F6.w,d0-d1
+002F86  52 40                         ADDQ.w #1,d0
+002F88  52 41                         ADDQ.w #1,d1
+002F8A  4C B8 00 0C 01 72             MOVEM.w $172.w,d2-d3
+002F90  E6 4A                         LSR.w #3,d2
+002F92  E6 4B                         LSR.w #3,d3
+002F94  D0 40                         ADD.w d0,d0
+002F96  D0 40                         ADD.w d0,d0
+002F98  D2 41                         ADD.w d1,d1
+002F9A  D2 41                         ADD.w d1,d1
+002F9C  90 42                         SUB.w d2,d0
+002F9E  92 43                         SUB.w d3,d1
+002FA0  48 B8 00 03 01 58             MOVEM.w d0-d1,$158.w
+002FA6  4E 75                         RTS
 
 ; ==== sub_002FA8 (1 caller) ====
 002FA8  42 78 35 F0                   CLR.w $35F0.w
@@ -2419,37 +2772,117 @@
 002FC2  6A 00 00 96                   BPL $00305A
 002FC6  70 00                         MOVEQ #$0,d0
 002FC8  72 00                         MOVEQ #$0,d1
-002FCA  4C B8                         .dc.w $4CB8
-002FCC  .dc.b 00 03 01 F6 52 40 B0 78 35 E4 63 10 42 78 01 20 ; ....R@.x5.c.Bx. 
-002FDC  .dc.b 42 78 01 24 31 FC 00 00 01 72 4E 75 48 B8 00 03 ; Bx.$1....rNuH...
-002FEC  .dc.b 01 F6 58 B8 01 7A 58 B8 01 7E 58 B8 01 92 58 B8 ; ..X..zX..~X...X.
-002FFC  .dc.b 01 96 58 B8 01 AA 58 B8 01 AE 06 78 00 20 01 72 ; ..X...X....x. .r
-00300C  .dc.b 58 B8 02 12 D0 7C 00 0B 24 3C 00 00 36 80 76 08 ; X....|..$<..6.v.
-00301C  .dc.b 61 00 00 B4 4C B8 00 03 01 F6 4C B8 00 0C 01 F6 ; a...L.....L.....
-00302C  .dc.b 90 7C 00 0A 92 7C 00 06 78 0A 7A 00 7C 01 4C B8 ; .|...|..x.z.|.L.
-00303C  .dc.b 01 80 01 F6 DE 44 D0 C5 DE 47 22 78 02 2E D0 F1 ; .....D...G"x....
-00304C  .dc.b 70 00 D1 F8 02 2A 7E 06 24 78 19 46 4E D2       ; p....*~.$x.FN.
+002FCA  4C B8 00 03 01 F6             MOVEM.w $1F6.w,d0-d1
+002FD0  52 40                         ADDQ.w #1,d0
+002FD2  B0 78 35 E4                   CMP.w $35E4.w,d0
+002FD6  63 10                         BLS $002FE8
+002FD8  42 78 01 20                   CLR.w $120.w
+002FDC  42 78 01 24                   CLR.w $124.w
+002FE0  31 FC 00 00 01 72             MOVE.w #$0,$172.w
+002FE6  4E 75                         RTS
+002FE8  48 B8 00 03 01 F6             MOVEM.w d0-d1,$1F6.w
+002FEE  58 B8 01 7A                   ADDQ.l #4,$17A.w
+002FF2  58 B8 01 7E                   ADDQ.l #4,$17E.w
+002FF6  58 B8 01 92                   ADDQ.l #4,$192.w
+002FFA  58 B8 01 96                   ADDQ.l #4,$196.w
+002FFE  58 B8 01 AA                   ADDQ.l #4,$1AA.w
+003002  58 B8 01 AE                   ADDQ.l #4,$1AE.w
+003006  06 78 00 20 01 72             ADDI.w #$20,$172.w
+00300C  58 B8 02 12                   ADDQ.l #4,$212.w
+003010  D0 7C 00 0B                   ADD.w #$B,d0
+003014  24 3C 00 00 36 80             MOVE.l #$3680,d2
+00301A  76 08                         MOVEQ #$8,d3
+00301C  61 00 00 B4                   BSR $0030D2
+003020  4C B8 00 03 01 F6             MOVEM.w $1F6.w,d0-d1
+003026  4C B8 00 0C 01 F6             MOVEM.w $1F6.w,d2-d3
+00302C  90 7C 00 0A                   SUB.w #$A,d0
+003030  92 7C 00 06                   SUB.w #$6,d1
+003034  78 0A                         MOVEQ #$A,d4
+003036  7A 00                         MOVEQ #$0,d5
+003038  7C 01                         MOVEQ #$1,d6
+00303A  4C B8 01 80 01 F6             MOVEM.w $1F6.w,d7/a0
+003040  DE 44                         ADD.w d4,d7
+003042  D0 C5                         ADDA.w d5,a0
+003044  DE 47                         ADD.w d7,d7
+003046  22 78 02 2E                   MOVEA.l $22E.w,a1
+00304A  D0 F1 70 00                   ADDA.w $0(a1,d7.w),a0
+00304E  D1 F8 02 2A                   ADDA.l $22A.w,a0
+003052  7E 06                         MOVEQ #$6,d7
+003054  24 78 19 46                   MOVEA.l $1946.w,a2
+003058  4E D2                         JMP (a2)
 00305A  0C 78 00 20 01 72             CMPI.w #$20,$172.w
 003060  6D 6E                         BLT $0030D0
 003062  70 00                         MOVEQ #$0,d0
 003064  72 00                         MOVEQ #$0,d1
-003066  4C B8                         .dc.w $4CB8
-003068  .dc.b 00 03 01 F6 53 40 6A 10 42 78 01 20 42 78 01 24 ; ....S@j.Bx. Bx.$
-003078  .dc.b 31 FC 00 1F 01 72 4E 75 48 B8 00 03 01 F6 59 B8 ; 1....rNuH.....Y.
-003088  .dc.b 01 7A 59 B8 01 7E 59 B8 01 92 59 B8 01 96 59 B8 ; .zY..~Y...Y...Y.
-003098  .dc.b 01 AA 59 B8 01 AE 04 78 00 20 01 72 59 B8 02 12 ; ..Y....x. .rY...
-0030A8  .dc.b 53 40 24 3C 00 00 37 00 76 08 61 1E 4C B8 00 03 ; S@$<..7.v.a.L...
-0030B8  .dc.b 01 F6 4C B8 00 0C 01 F6 90 7C 00 0A 5D 41 78 00 ; ..L......|..]Ax.
-0030C8  .dc.b 7A 00 7C 01 60 00 FF 6C                         ; z.|.`..l
+003066  4C B8 00 03 01 F6             MOVEM.w $1F6.w,d0-d1
+00306C  53 40                         SUBQ.w #1,d0
+00306E  6A 10                         BPL $003080
+003070  42 78 01 20                   CLR.w $120.w
+003074  42 78 01 24                   CLR.w $124.w
+003078  31 FC 00 1F 01 72             MOVE.w #$1F,$172.w
+00307E  4E 75                         RTS
+003080  48 B8 00 03 01 F6             MOVEM.w d0-d1,$1F6.w
+003086  59 B8 01 7A                   SUBQ.l #4,$17A.w
+00308A  59 B8 01 7E                   SUBQ.l #4,$17E.w
+00308E  59 B8 01 92                   SUBQ.l #4,$192.w
+003092  59 B8 01 96                   SUBQ.l #4,$196.w
+003096  59 B8 01 AA                   SUBQ.l #4,$1AA.w
+00309A  59 B8 01 AE                   SUBQ.l #4,$1AE.w
+00309E  04 78 00 20 01 72             SUBI.w #$20,$172.w
+0030A4  59 B8 02 12                   SUBQ.l #4,$212.w
+0030A8  53 40                         SUBQ.w #1,d0
+0030AA  24 3C 00 00 37 00             MOVE.l #$3700,d2
+0030B0  76 08                         MOVEQ #$8,d3
+0030B2  61 1E                         BSR $0030D2
+0030B4  4C B8 00 03 01 F6             MOVEM.w $1F6.w,d0-d1
+0030BA  4C B8 00 0C 01 F6             MOVEM.w $1F6.w,d2-d3
+0030C0  90 7C 00 0A                   SUB.w #$A,d0
+0030C4  5D 41                         SUBQ.w #6,d1
+0030C6  78 00                         MOVEQ #$0,d4
+0030C8  7A 00                         MOVEQ #$0,d5
+0030CA  7C 01                         MOVEQ #$1,d6
+0030CC  60 00 FF 6C                   BRA $00303A
 0030D0  4E 75                         RTS
-0030D2  .dc.b 41 F8 35 F8 31 43 00 00 67 60 4A 40 6A 08 42 68 ; A.5.1C..g`J@j.Bh
-0030E2  .dc.b 00 00 60 00 00 4A 22 78 02 2E D0 40 D2 71 00 00 ; ..`..J"x...@.q..
-0030F2  .dc.b D2 B8 02 2A 21 41 00 0A 21 79 00 00 02 12 00 12 ; ...*!A..!y......
-003102  .dc.b 30 38 35 F2 C0 7C 00 01 67 06 43 F8 36 38 60 04 ; 085..|..g.C.68`.
-003112  .dc.b 43 F8 36 5C 21 49 00 02 30 38 01 BE C0 7C FF E0 ; C.6\!I..08...|..
-003122  .dc.b 90 7C 00 E0 44 40 E4 48 D0 82 21 40 00 06 45 F8 ; .|..D@.H..!@..E.
-003132  .dc.b 36 24 76 07 42 1A 51 CB FF FC 42 78 35 EE 4A 78 ; 6$v.B.Q...Bx5.Jx
-003142  .dc.b 01 20 6B 06 52 78 35 EC 60 04 53 78 35 EC 4E 75 ; . k.Rx5.`.Sx5.Nu
+
+; ==== sub_0030D2 (2 callers) ====
+0030D2  41 F8 35 F8                   LEA $35F8.w,a0
+0030D6  31 43 00 00                   MOVE.w d3,$0(a0)
+0030DA  67 60                         BEQ $00313C
+0030DC  4A 40                         TST.w d0
+0030DE  6A 08                         BPL $0030E8
+0030E0  42 68 00 00                   CLR.w $0(a0)
+0030E4  60 00 00 4A                   BRA $003130
+0030E8  22 78 02 2E                   MOVEA.l $22E.w,a1
+0030EC  D0 40                         ADD.w d0,d0
+0030EE  D2 71 00 00                   ADD.w $0(a1,d0.w),d1
+0030F2  D2 B8 02 2A                   ADD.l $22A.w,d1
+0030F6  21 41 00 0A                   MOVE.l d1,$A(a0)
+0030FA  21 79 00 00 02 12 00 12       MOVE.l $212.l,$12(a0)
+003102  30 38 35 F2                   MOVE.w $35F2.w,d0
+003106  C0 7C 00 01                   AND.w #$1,d0
+00310A  67 06                         BEQ $003112
+00310C  43 F8 36 38                   LEA $3638.w,a1
+003110  60 04                         BRA $003116
+003112  43 F8 36 5C                   LEA $365C.w,a1
+003116  21 49 00 02                   MOVE.l a1,$2(a0)
+00311A  30 38 01 BE                   MOVE.w $1BE.w,d0
+00311E  C0 7C FF E0                   AND.w #$FFE0,d0
+003122  90 7C 00 E0                   SUB.w #$E0,d0
+003126  44 40                         NEG.w d0
+003128  E4 48                         LSR.w #2,d0
+00312A  D0 82                         ADD.l d2,d0
+00312C  21 40 00 06                   MOVE.l d0,$6(a0)
+003130  45 F8 36 24                   LEA $3624.w,a2
+003134  76 07                         MOVEQ #$7,d3
+003136  42 1A                         CLR.b (a2)+
+003138  51 CB FF FC                   DBRA d3,$003136
+00313C  42 78 35 EE                   CLR.w $35EE.w
+003140  4A 78 01 20                   TST.w $120.w
+003144  6B 06                         BMI $00314C
+003146  52 78 35 EC                   ADDQ.w #1,$35EC.w
+00314A  60 04                         BRA $003150
+00314C  53 78 35 EC                   SUBQ.w #1,$35EC.w
+003150  4E 75                         RTS
 
 ; ==== sub_003152 (1 caller) ====
 003152  4A 78 01 22                   TST.w $122.w
@@ -2464,14 +2897,36 @@
 003178  06 78 00 20 01 74             ADDI.w #$20,$174.w
 00317E  70 00                         MOVEQ #$0,d0
 003180  72 00                         MOVEQ #$0,d1
-003182  4C B8                         .dc.w $4CB8
-003184  .dc.b 00 03 01 F6 52 41 B2 78 35 E6 63 10 42 78 01 22 ; ....RA.x5.c.Bx."
-003194  .dc.b 42 78 01 26 42 78 01 74 60 00 00 B6 48 B8 00 03 ; Bx.&Bx.t`...H...
-0031A4  .dc.b 01 F6 5E 41 76 0C 61 00 00 F0 61 00 00 A4 4C B8 ; ..^Av.a...a...L.
-0031B4  .dc.b 00 03 01 F6 4C B8 00 0C 01 F6 90 7C 00 0A 5D 41 ; ....L......|..]A
-0031C4  .dc.b 78 00 7A 06 4C B8 01 80 01 F6 DE 44 D0 C5 DE 47 ; x.z.L......D...G
-0031D4  .dc.b 22 78 02 2E D0 F1 70 00 D1 F8 02 2A 3C 38 35 E2 ; "x....p....*<85.
-0031E4  .dc.b 7E 0A 24 78 19 46 4E D2                         ; ~.$x.FN.
+003182  4C B8 00 03 01 F6             MOVEM.w $1F6.w,d0-d1
+003188  52 41                         ADDQ.w #1,d1
+00318A  B2 78 35 E6                   CMP.w $35E6.w,d1
+00318E  63 10                         BLS $0031A0
+003190  42 78 01 22                   CLR.w $122.w
+003194  42 78 01 26                   CLR.w $126.w
+003198  42 78 01 74                   CLR.w $174.w
+00319C  60 00 00 B6                   BRA $003254
+0031A0  48 B8 00 03 01 F6             MOVEM.w d0-d1,$1F6.w
+0031A6  5E 41                         ADDQ.w #7,d1
+0031A8  76 0C                         MOVEQ #$C,d3
+0031AA  61 00 00 F0                   BSR $00329C
+0031AE  61 00 00 A4                   BSR $003254
+0031B2  4C B8 00 03 01 F6             MOVEM.w $1F6.w,d0-d1
+0031B8  4C B8 00 0C 01 F6             MOVEM.w $1F6.w,d2-d3
+0031BE  90 7C 00 0A                   SUB.w #$A,d0
+0031C2  5D 41                         SUBQ.w #6,d1
+0031C4  78 00                         MOVEQ #$0,d4
+0031C6  7A 06                         MOVEQ #$6,d5
+0031C8  4C B8 01 80 01 F6             MOVEM.w $1F6.w,d7/a0
+0031CE  DE 44                         ADD.w d4,d7
+0031D0  D0 C5                         ADDA.w d5,a0
+0031D2  DE 47                         ADD.w d7,d7
+0031D4  22 78 02 2E                   MOVEA.l $22E.w,a1
+0031D8  D0 F1 70 00                   ADDA.w $0(a1,d7.w),a0
+0031DC  D1 F8 02 2A                   ADDA.l $22A.w,a0
+0031E0  3C 38 35 E2                   MOVE.w $35E2.w,d6
+0031E4  7E 0A                         MOVEQ #$A,d7
+0031E6  24 78 19 46                   MOVEA.l $1946.w,a2
+0031EA  4E D2                         JMP (a2)
 0031EC  0C 78 00 20 01 74             CMPI.w #$20,$174.w
 0031F2  6D 00 00 60                   BLT $003254
 0031F6  34 38 01 BE                   MOVE.w $1BE.w,d2
@@ -2480,15 +2935,30 @@
 003202  04 78 00 20 01 74             SUBI.w #$20,$174.w
 003208  70 00                         MOVEQ #$0,d0
 00320A  72 00                         MOVEQ #$0,d1
-00320C  4C B8                         .dc.w $4CB8
-00320E  .dc.b 00 03 01 F6 53 41 6A 12 42 78 01 22 42 78 01 26 ; ....SAj.Bx."Bx.&
-00321E  .dc.b 31 FC 00 1F 01 74 60 00 00 2E 48 B8 00 03 01 F6 ; 1....t`...H.....
-00322E  .dc.b 53 41 76 0C 61 00 00 68 61 00 00 1C 4C B8 00 03 ; SAv.a..ha...L...
-00323E  .dc.b 01 F6 4C B8 00 0C 01 F6 90 7C 00 0A 5D 41 78 00 ; ..L......|..]Ax.
-00324E  .dc.b 7A 00 60 00 FF 76                               ; z.`..v
+00320C  4C B8 00 03 01 F6             MOVEM.w $1F6.w,d0-d1
+003212  53 41                         SUBQ.w #1,d1
+003214  6A 12                         BPL $003228
+003216  42 78 01 22                   CLR.w $122.w
+00321A  42 78 01 26                   CLR.w $126.w
+00321E  31 FC 00 1F 01 74             MOVE.w #$1F,$174.w
+003224  60 00 00 2E                   BRA $003254
+003228  48 B8 00 03 01 F6             MOVEM.w d0-d1,$1F6.w
+00322E  53 41                         SUBQ.w #1,d1
+003230  76 0C                         MOVEQ #$C,d3
+003232  61 00 00 68                   BSR $00329C
+003236  61 00 00 1C                   BSR $003254
+00323A  4C B8 00 03 01 F6             MOVEM.w $1F6.w,d0-d1
+003240  4C B8 00 0C 01 F6             MOVEM.w $1F6.w,d2-d3
+003246  90 7C 00 0A                   SUB.w #$A,d0
+00324A  5D 41                         SUBQ.w #6,d1
+00324C  78 00                         MOVEQ #$0,d4
+00324E  7A 00                         MOVEQ #$0,d5
+003250  60 00 FF 76                   BRA $0031C8
+
+; ==== sub_003254 (2 callers) ====
 003254  20 78 01 C2                   MOVEA.l $1C2.w,a0
 
-; ==== sub_003258 (2 callers) ====
+; ==== sub_003258 (5 callers) ====
 003258  32 38 01 BE                   MOVE.w $1BE.w,d1
 00325C  C2 7C FF E0                   AND.w #$FFE0,d1
 003260  34 01                         MOVE.w d1,d2
@@ -2508,35 +2978,81 @@
 003290  D6 B1 10 00                   ADD.l $0(a1,d1.w),d3
 003294  48 E8 00 0C 00 04             MOVEM.l d2-d3,$4(a0)
 00329A  4E 75                         RTS
-00329C  .dc.b 41 F8 36 0E 31 43 00 00 67 00 00 9C B4 7C FF C0 ; A.6.1C..g....|..
-0032AC  .dc.b 6E 04 34 3C 00 C0 B4 7C 00 E0 6D 02 74 E0 31 C2 ; n.4<...|..m.t.1.
-0032BC  .dc.b 01 BE 4A 41 6A 08 42 68 00 00 60 00 00 6E 22 78 ; ..JAj.Bh..`..n"x
-0032CC  .dc.b 02 2E D0 40 D2 71 00 00 D2 B8 02 2A 21 41 00 0A ; ...@.q.....*!A..
-0032DC  .dc.b 36 02 96 7C 00 C0 44 43 C6 7C 00 FF 22 78 02 0A ; 6..|..DC.|.."x..
-0032EC  .dc.b E6 4B 26 31 30 00 D6 B8 02 12 21 43 00 12 30 38 ; .K&10.....!C..08
-0032FC  .dc.b 35 F2 C0 7C 00 02 67 06 43 F8 37 80 60 04 43 F8 ; 5..|..g.C.7.`.C.
-00330C  .dc.b 37 B4 21 49 00 02 21 7C 00 00 38 28 00 06 30 02 ; 7.!I..!|..8(..0.
-00331C  .dc.b 90 7C 00 C0 44 40 D0 40 D0 40 24 78 02 0A 20 32 ; .|..D@.@.@$x.. 2
-00332C  .dc.b 00 00 D0 B8 01 7A 21 40 00 0E 45 F8 36 2C 76 0B ; .....z!@..E.6,v.
-00333C  .dc.b 42 1A 51 CB FF FC 42 78 35 EC 4A 78 01 22 6B 06 ; B.Q...Bx5.Jx."k.
-00334C  .dc.b 52 78 35 EE 60 04 53 78 35 EE 4E 75 48 E7 00 04 ; Rx5.`.Sx5.NuH...
-00335C  .dc.b 4B F8 36 24 3C 02 3E 38 35 EE 08 38 00 00 35 F3 ; K.6$<.>85..8..5.
-00336C  .dc.b 67 02 53 47 4A 47 67 18 6A 0C 5E 47 B4 47 63 10 ; g.SGJGg.j.^G.Gc.
-00337C  .dc.b 51 44 60 08 60 06 B4 47 64 06 50 44 51 F5 60 00 ; QD`.`..Gd.PDQ.`.
-00338C  .dc.b 4A 35 60 00 66 32 50 F5 60 00 72 00 12 31 40 00 ; J5`.f2P.`.r..1@.
-00339C  .dc.b E7 4A 2A 73 20 04 DB E8 00 12 20 78 35 DC 3E 01 ; .J*s ..... x5.>.
-0033AC  .dc.b E9 4F D0 C7 2A 98 2B 58 00 30 2B 58 00 60 2B 58 ; .O..*.+X.0+X.`+X
-0033BC  .dc.b 00 90 41 F8 35 F8 7E 00 4C DF 20 00 4E 75 48 E7 ; ..A.5.~.L. .NuH.
-0033CC  .dc.b 00 04 3C 02 3E 38 35 EC 08 38 00 01 35 F3 67 02 ; ..<.>85..8..5.g.
-0033DC  .dc.b 53 47 4A 47 67 3E 6A 20 DE 7C 00 0B B4 47 63 34 ; SGJGg>j .|...Gc4
-0033EC  .dc.b 94 7C 00 0C 38 02 44 44 2A 78 02 2E D8 44 38 35 ; .|..8.DD*x...D85
-0033FC  .dc.b 40 00 44 44 60 16 60 14 B4 47 64 18 D4 7C 00 0C ; @.DD`.`..Gd..|..
-00340C  .dc.b 38 02 2A 78 02 2E D8 44 38 35 40 00 4B F8 36 2C ; 8.*x...D85@.K.6,
-00341C  .dc.b 51 F5 60 00 4B F8 36 2C 4A 35 60 00 66 34 50 F5 ; Q.`.K.6,J5`.f4P.
-00342C  .dc.b 60 00 72 00 12 31 40 00 D4 42 D4 42 2A 73 20 00 ; `.r..1@..B.B*s .
-00343C  .dc.b DB E8 00 12 20 78 35 DC 3E 01 E9 4F D0 C7 2A 98 ; .... x5.>..O..*.
-00344C  .dc.b 2B 58 00 30 2B 58 00 60 2B 58 00 90 41 F8 36 0E ; +X.0+X.`+X..A.6.
-00345C  .dc.b 7E 00 4C DF 20 00 4E 75                         ; ~.L. .Nu
+
+; ==== sub_00329C (2 callers) ====
+00329C  41 F8 36 0E                   LEA $360E.w,a0
+0032A0  31 43 00 00                   MOVE.w d3,$0(a0)
+0032A4  67 00 00 9C                   BEQ $003342
+0032A8  B4 7C FF C0                   CMP.w #$FFC0,d2
+0032AC  6E 04                         BGT $0032B2
+0032AE  34 3C 00 C0                   MOVE.w #$C0,d2
+0032B2  B4 7C 00 E0                   CMP.w #$E0,d2
+0032B6  6D 02                         BLT $0032BA
+0032B8  74 E0                         MOVEQ #$E0,d2
+0032BA  31 C2 01 BE                   MOVE.w d2,$1BE.w
+0032BE  4A 41                         TST.w d1
+0032C0  6A 08                         BPL $0032CA
+0032C2  42 68 00 00                   CLR.w $0(a0)
+0032C6  60 00 00 6E                   BRA $003336
+0032CA  22 78 02 2E                   MOVEA.l $22E.w,a1
+0032CE  D0 40                         ADD.w d0,d0
+0032D0  D2 71 00 00                   ADD.w $0(a1,d0.w),d1
+0032D4  D2 B8 02 2A                   ADD.l $22A.w,d1
+0032D8  21 41 00 0A                   MOVE.l d1,$A(a0)
+0032DC  36 02                         MOVE.w d2,d3
+0032DE  96 7C 00 C0                   SUB.w #$C0,d3
+0032E2  44 43                         NEG.w d3
+0032E4  C6 7C 00 FF                   AND.w #$FF,d3
+0032E8  22 78 02 0A                   MOVEA.l $20A.w,a1
+0032EC  E6 4B                         LSR.w #3,d3
+0032EE  26 31 30 00                   MOVE.l $0(a1,d3.w),d3
+0032F2  D6 B8 02 12                   ADD.l $212.w,d3
+0032F6  21 43 00 12                   MOVE.l d3,$12(a0)
+0032FA  30 38 35 F2                   MOVE.w $35F2.w,d0
+0032FE  C0 7C 00 02                   AND.w #$2,d0
+003302  67 06                         BEQ $00330A
+003304  43 F8 37 80                   LEA $3780.w,a1
+003308  60 04                         BRA $00330E
+00330A  43 F8 37 B4                   LEA $37B4.w,a1
+00330E  21 49 00 02                   MOVE.l a1,$2(a0)
+003312  21 7C 00 00 38 28 00 06       MOVE.l #$3828,$6(a0)
+00331A  30 02                         MOVE.w d2,d0
+00331C  90 7C 00 C0                   SUB.w #$C0,d0
+003320  44 40                         NEG.w d0
+003322  D0 40                         ADD.w d0,d0
+003324  D0 40                         ADD.w d0,d0
+003326  24 78 02 0A                   MOVEA.l $20A.w,a2
+00332A  20 32 00 00                   MOVE.l $0(a2,d0.w),d0
+00332E  D0 B8 01 7A                   ADD.l $17A.w,d0
+003332  21 40 00 0E                   MOVE.l d0,$E(a0)
+003336  45 F8 36 2C                   LEA $362C.w,a2
+00333A  76 0B                         MOVEQ #$B,d3
+00333C  42 1A                         CLR.b (a2)+
+00333E  51 CB FF FC                   DBRA d3,$00333C
+003342  42 78 35 EC                   CLR.w $35EC.w
+003346  4A 78 01 22                   TST.w $122.w
+00334A  6B 06                         BMI $003352
+00334C  52 78 35 EE                   ADDQ.w #1,$35EE.w
+003350  60 04                         BRA $003356
+003352  53 78 35 EE                   SUBQ.w #1,$35EE.w
+003356  4E 75                         RTS
+003358  .dc.b 48 E7 00 04 4B F8 36 24 3C 02 3E 38 35 EE 08 38 ; H...K.6$<.>85..8
+003368  .dc.b 00 00 35 F3 67 02 53 47 4A 47 67 18 6A 0C 5E 47 ; ..5.g.SGJGg.j.^G
+003378  .dc.b B4 47 63 10 51 44 60 08 60 06 B4 47 64 06 50 44 ; .Gc.QD`.`..Gd.PD
+003388  .dc.b 51 F5 60 00 4A 35 60 00 66 32 50 F5 60 00 72 00 ; Q.`.J5`.f2P.`.r.
+003398  .dc.b 12 31 40 00 E7 4A 2A 73 20 04 DB E8 00 12 20 78 ; .1@..J*s ..... x
+0033A8  .dc.b 35 DC 3E 01 E9 4F D0 C7 2A 98 2B 58 00 30 2B 58 ; 5.>..O..*.+X.0+X
+0033B8  .dc.b 00 60 2B 58 00 90 41 F8 35 F8 7E 00 4C DF 20 00 ; .`+X..A.5.~.L. .
+0033C8  .dc.b 4E 75 48 E7 00 04 3C 02 3E 38 35 EC 08 38 00 01 ; NuH...<.>85..8..
+0033D8  .dc.b 35 F3 67 02 53 47 4A 47 67 3E 6A 20 DE 7C 00 0B ; 5.g.SGJGg>j .|..
+0033E8  .dc.b B4 47 63 34 94 7C 00 0C 38 02 44 44 2A 78 02 2E ; .Gc4.|..8.DD*x..
+0033F8  .dc.b D8 44 38 35 40 00 44 44 60 16 60 14 B4 47 64 18 ; .D85@.DD`.`..Gd.
+003408  .dc.b D4 7C 00 0C 38 02 2A 78 02 2E D8 44 38 35 40 00 ; .|..8.*x...D85@.
+003418  .dc.b 4B F8 36 2C 51 F5 60 00 4B F8 36 2C 4A 35 60 00 ; K.6,Q.`.K.6,J5`.
+003428  .dc.b 66 34 50 F5 60 00 72 00 12 31 40 00 D4 42 D4 42 ; f4P.`.r..1@..B.B
+003438  .dc.b 2A 73 20 00 DB E8 00 12 20 78 35 DC 3E 01 E9 4F ; *s ..... x5.>..O
+003448  .dc.b D0 C7 2A 98 2B 58 00 30 2B 58 00 60 2B 58 00 90 ; ..*.+X.0+X.`+X..
+003458  .dc.b 41 F8 36 0E 7E 00 4C DF 20 00 4E 75             ; A.6.~.L. .Nu
 
 ; ==== sub_003464 (1 caller) ====
 003464  41 F8 35 F8                   LEA $35F8.w,a0
@@ -2639,7 +3155,7 @@
 0035A8  21 4A 00 02                   MOVE.l a2,$2(a0)
 0035AC  4E 75                         RTS
 
-; ==== sub_0035AE (5 callers) ====
+; ==== sub_0035AE (22 callers) ====
 0035AE  90 78 01 72                   SUB.w $172.w,d0
 0035B2  92 78 01 74                   SUB.w $174.w,d1
 0035B6  24 78 02 12                   MOVEA.l $212.w,a2
@@ -2754,6 +3270,8 @@
 0039A4  50 F8 02 6D                   ST $26D.w
 0039A8  51 F8 02 28                   SF $228.w
 0039AC  4E 75                         RTS
+
+; ==== sub_0039AE (1 caller) ====
 0039AE  31 FC 00 02 38 F6             MOVE.w #$2,$38F6.w
 0039B4  53 78 38 F4                   SUBQ.w #1,$38F4.w
 0039B8  66 0E                         BNE $0039C8
@@ -2764,9 +3282,11 @@
 0039CC  47 F8 38 FC                   LEA $38FC.w,a3
 0039D0  61 00 E0 E8                   BSR $001ABA
 0039D4  2B 78 38 F0 00 18             MOVE.l $38F0.w,$18(a5)
-0039DA  4C B3                         .dc.w $4CB3
-0039DC  .dc.b 00 03 70 00 58 78 38 F8 51 ED 00 1E 61 00 E1 02 ; ..p.Xx8.Q...a...
-0039EC  .dc.b 60 00 E9 5E                                     ; `..^
+0039DA  4C B3 00 03 70 00             MOVEM.w $0(a3,d7.w),d0-d1
+0039E0  58 78 38 F8                   ADDQ.w #4,$38F8.w
+0039E4  51 ED 00 1E                   SF $1E(a5)
+0039E8  61 00 E1 02                   BSR $001AEC
+0039EC  60 00 E9 5E                   BRA $00234C
 0039F0  21 F8 01 04 38 F0             MOVE.l $104.w,$38F0.w
 0039F6  42 B8 01 04                   CLR.l $104.w
 0039FA  42 B8 01 24                   CLR.l $124.w
@@ -2781,10 +3301,17 @@
 003A1C  51 F8 02 28                   SF $228.w
 003A20  20 78 02 54                   MOVEA.l $254.w,a0
 003A24  4E 90                         JSR (a0)
-003A26  4C B8                         .dc.w $4CB8
-003A28  .dc.b 00 03 38 F0 B2 7C 00 D4 6D 12 42 78 38 F4 31 FC ; ..8..|..m.Bx8.1.
-003A38  .dc.b 00 14 38 F6 70 21 4E F9 00 01 A2 DC 31 FC 00 17 ; ..8.p!N.....1...
-003A48  .dc.b 38 F4 42 78 38 F8 61 00 FF 5E 60 00 FF 5A       ; 8.Bx8.a..^`..Z
+003A26  4C B8 00 03 38 F0             MOVEM.w $38F0.w,d0-d1
+003A2C  B2 7C 00 D4                   CMP.w #$D4,d1
+003A30  6D 12                         BLT $003A44
+003A32  42 78 38 F4                   CLR.w $38F4.w
+003A36  31 FC 00 14 38 F6             MOVE.w #$14,$38F6.w
+003A3C  70 21                         MOVEQ #$21,d0
+003A3E  4E F9 00 01 A2 DC             JMP $1A2DC.l
+003A44  31 FC 00 17 38 F4             MOVE.w #$17,$38F4.w
+003A4A  42 78 38 F8                   CLR.w $38F8.w
+003A4E  61 00 FF 5E                   BSR $0039AE
+003A52  60 00 FF 5A                   BRA $0039AE
 
 ; ==== sub_003A56 (2 callers) ====
 003A56  4A 38 02 76                   TST.b $276.w
@@ -2809,184 +3336,838 @@
 003A9A  66 1C                         BNE $003AB8
 003A9C  4A 38 02 77                   TST.b $277.w
 003AA0  67 16                         BEQ $003AB8
-003AA2  4C B8                         .dc.w $4CB8
-003AA4  .dc.b 00 C0 01 04 9C 78 01 20 9E 78 01 22 48 B8 00 C0 ; .....x. .x."H...
-003AB4  .dc.b 01 04 4E 75                                     ; ..Nu
+003AA2  4C B8 00 C0 01 04             MOVEM.w $104.w,d6-d7
+003AA8  9C 78 01 20                   SUB.w $120.w,d6
+003AAC  9E 78 01 22                   SUB.w $122.w,d7
+003AB0  48 B8 00 C0 01 04             MOVEM.w d6-d7,$104.w
+003AB6  4E 75                         RTS
 003AB8  61 00 0A 12                   BSR $0044CC
 003ABC  48 B8 00 03 01 EE             MOVEM.w d0-d1,$1EE.w
-003AC2  4C B8                         .dc.w $4CB8
-003AC4  .dc.b 00 C0 01 04 9C 78 01 20 9E 78 01 22 BE 7C 00 D4 ; .....x. .x.".|..
-003AD4  .dc.b 6E 00 FF 1A 4A 38 59 4A 66 00 06 CE 4A 38 38 E9 ; n...J8YJf...J88.
-003AE4  .dc.b 66 00 06 3A 4A 38 38 EB 66 00 04 BE 61 00 01 38 ; f..:J88.f...a..8
-003AF4  .dc.b 6B 00 05 56 66 00 00 C6 30 06 32 07 58 40 D2 7C ; k..Vf...0.2.X@.|
-003B04  .dc.b 00 25 4A 38 02 6C 66 02 5C 40 4A 38 38 E8 67 04 ; .%J8.lf.\@J88.g.
-003B14  .dc.b 30 06 5C 40 51 F8 02 49 38 00 3A 01 61 00 FA 8C ; 0.\@Q..I8.:.a...
-003B24  .dc.b 67 18 6A 12 48 E7 40 20 32 04 34 05 61 00 02 10 ; g.j.H.@ 2.4.a...
-003B34  .dc.b 4C DF 04 02 60 04 50 F8 02 49 52 41 50 44 10 32 ; L...`.P..IRAPD.2
-003B44  .dc.b 10 00 67 18 6A 12 48 E7 40 20 32 04 34 05 61 00 ; ..g.j.H.@ 2.4.a.
-003B54  .dc.b 01 EE 4C DF 04 02 60 04 50 F8 02 49 52 41 50 44 ; ..L...`.P..IRAPD
-003B64  .dc.b 10 32 10 00 67 18 6A 12 48 E7 40 20 32 04 34 05 ; .2..g.j.H.@ 2.4.
-003B74  .dc.b 61 00 01 CC 4C DF 04 02 60 04 50 F8 02 49 4A 38 ; a...L...`.P..IJ8
-003B84  .dc.b 02 49 67 00 04 C4 4A 38 38 E8 66 12 4A 38 38 EE ; .Ig...J88.f.J88.
-003B94  .dc.b 67 0C 51 F8 38 EE 70 0A 4E B9 00 01 A2 DC 4A 38 ; g.Q.8.p.N.....J8
-003BA4  .dc.b 01 3C 66 18 30 07 D0 7C 00 25 90 78 01 74 C0 7C ; .<f.0..|.%.x.t.|
-003BB4  .dc.b FF F8 D0 78 01 74 90 7C 00 24 3E 00 42 78 47 6A ; ...x.t.|.$>.BxGj
-003BC4  .dc.b 4A 78 01 F0 6A 1A 4A 38 38 ED 66 4A 50 F8 38 ED ; Jx..j.J88.fJP.8.
-003BD4  .dc.b 50 F8 38 EB 42 78 47 6C 42 38 38 EC 60 00 03 CA ; P.8.BxGlB88.`...
-003BE4  .dc.b 42 38 38 ED 4A 38 38 EA 67 1E 51 F8 38 EA 11 FC ; B88.J88.g.Q.8...
-003BF4  .dc.b 00 04 38 E9 42 78 47 C8 42 78 47 C6 70 0B 4E B9 ; ..8.BxG.BxG.p.N.
-003C04  .dc.b 00 01 A2 DC 60 00 05 16 4A 38 38 E8 66 08 4A 78 ; ....`...J88.f.Jx
-003C14  .dc.b 01 F0 66 00 04 BE 4A 78 01 EE 6B 00 02 94 66 00 ; ..f...Jx..k...f.
-003C24  .dc.b 01 98 60 00 01 46 4A 38 02 84 66 02 4E 75 30 06 ; ..`..FJ8..f.Nu0.
-003C34  .dc.b 32 07 D0 7C 00 10 D2 7C 00 26 90 78 01 72 92 78 ; 2..|...|.&.x.r.x
-003C44  .dc.b 01 74 34 00 36 01 EA 48 EA 49 D0 78 01 F6 D2 78 ; .t4.6..H.I.x...x
-003C54  .dc.b 01 F8 24 78 02 2E D0 40 D2 72 00 00 24 78 02 2A ; ..$x...@.r..$x.*
-003C64  .dc.b 10 32 10 00 B0 3C 00 08 66 10 30 02 C0 7C 00 1F ; .2...<..f.0..|..
-003C74  .dc.b E2 48 50 F8 02 85 60 00 00 82 B0 3C 00 09 66 12 ; .HP...`....<..f.
-003C84  .dc.b 30 02 C0 7C 00 1F E2 48 D0 7C 00 10 50 F8 02 85 ; 0..|...H.|..P...
-003C94  .dc.b 60 68 B0 3C 00 16 67 E8 B0 3C 00 10 66 12 70 0F ; `h.<..g..<..f.p.
-003CA4  .dc.b C4 7C 00 1F E2 4A 90 42 11 FC 00 01 02 85 60 4A ; .|...J.B......`J
-003CB4  .dc.b B0 3C 00 0F 66 12 70 1F C4 7C 00 1F E2 4A 90 42 ; .<..f.p..|...J.B
-003CC4  .dc.b 11 FC 00 01 02 85 60 32 B0 3C 00 17 67 E8 30 03 ; ......`2.<..g.0.
-003CD4  .dc.b C0 7C 00 1F 90 7C 00 1C 6B 1C 0C 32 00 08 10 01 ; .|...|..k..2....
-003CE4  .dc.b 66 06 D6 7C 00 20 60 82 0C 32 00 10 10 01 66 06 ; f..|. `..2....f.
-003CF4  .dc.b D6 7C 00 20 60 A8 70 00 4E 75 32 03 C2 7C FF E0 ; .|. `.p.Nu2..|..
-003D04  .dc.b D2 40 D2 78 01 74 92 7C 00 26 BE 41 6C 08 42 38 ; .@.x.t.|.&.Al.B8
-003D14  .dc.b 02 85 70 FF 4E 75 3E 01 70 01 4E 75 4A 78 02 62 ; ..p.Nu>.p.NuJx.b
-003D24  .dc.b 66 1A 4A 38 38 E8 66 14 B0 3C 00 D3 66 0E 48 E7 ; f.J88.f..<..f.H.
-003D34  .dc.b 40 20 61 00 39 F0 4C DF 04 02 70 00 4E 75 B0 3C ; @ a.9.L...p.Nu.<
-003D44  .dc.b 00 80 66 24 48 E7 FF FC 61 00 26 60 70 13 4E B9 ; ..f$H...a.&`p.N.
-003D54  .dc.b 00 01 A2 DC 70 01 61 00 3A 9A 70 03 72 04 61 00 ; ....p.a.:.p.r.a.
-003D64  .dc.b 3B 68 4C DF 3F FF 70 00 4E 75 4A 38 38 E8 66 00 ; ;hL.?.p.NuJ88.f.
-003D74  .dc.b 00 40 4A 38 01 3C 66 1E 21 F8 01 F6 45 AA 30 06 ; .@J8.<f.!...E.0.
-003D84  .dc.b 32 07 90 78 01 72 92 78 01 74 48 B8 00 03 45 A4 ; 2..x.r.x.tH...E.
-003D94  .dc.b 11 F8 02 6C 47 65 48 B8 00 C0 01 04 42 78 47 6A ; ...lGeH.....BxGj
-003DA4  .dc.b 10 38 02 6C C0 7C 00 01 31 C0 02 5C 60 00 04 36 ; .8.l.|..1..\`..6
-003DB4  .dc.b 4A 38 02 6C 67 00 00 FA 50 F8 02 6C 4A 38 38 E8 ; J8.lg...P..lJ88.
-003DC4  .dc.b 67 06 41 F8 47 5D 60 04 41 F8 47 3B 30 38 47 62 ; g.A.G]`.A.G;08Gb
-003DD4  .dc.b 10 30 00 00 6A 06 42 78 47 62 10 10 52 78 47 62 ; .0..j.BxGb..RxGb
-003DE4  .dc.b 48 80 31 C0 02 5C 30 06 32 07 D0 7C 00 1C D2 7C ; H.1..\0.2..|...|
-003DF4  .dc.b 00 20 38 00 3A 01 4A 38 02 85 6B 12 67 10 92 7C ; . 8.:.J8..k.g..|
-003E04  .dc.b 00 10 9A 7C 00 10 61 00 F7 A2 66 46 60 60 61 00 ; ...|..a...fF``a.
-003E14  .dc.b F7 9A 66 3E 51 45 92 7C 00 30 6A 04 D2 7C 06 00 ; ..f>QE.|.0j..|..
-003E24  .dc.b 10 32 10 00 66 2C 4A 38 38 E8 66 42 51 45 92 7C ; .2..f,J88.fBQE.|
-003E34  .dc.b 00 30 6A 04 D2 7C 06 00 10 32 10 00 66 14 51 45 ; .0j..|...2..f.QE
-003E44  .dc.b 92 7C 00 30 6A 04 D2 7C 06 00 10 32 10 00 67 00 ; .|.0j..|...2..g.
-003E54  .dc.b 00 1E 6A 0A 32 04 34 05 61 00 FE E4 60 10 4A 38 ; ..j.2.4.a...`.J8
-003E64  .dc.b 38 E8 67 00 03 76 51 F8 02 6C 60 00 03 6E 10 38 ; 8.g..vQ..l`..n.8
-003E74  .dc.b 01 E0 67 08 B0 3C 00 D3 66 00 00 08 BC 7C 01 30 ; ..g..<..f....|.0
-003E84  .dc.b 6C 2A 10 38 38 E8 C0 7C 00 02 54 40 DC 40 31 C0 ; l*.88..|..T@.@1.
-003E94  .dc.b 47 68 4A 38 02 85 67 14 6B 0A E2 48 9E 40 31 C0 ; GhJ8..g.k..H.@1.
-003EA4  .dc.b 47 6A 60 08 E2 48 DE 40 31 C0 47 6A 60 00 03 2C ; Gj`..H.@1.Gj`..,
-003EB4  .dc.b 51 F8 02 6C 4A 38 38 E8 67 06 41 F8 47 58 60 04 ; Q..lJ88.g.A.GX`.
-003EC4  .dc.b 41 F8 47 1E 30 38 47 62 10 30 00 00 6A 06 42 78 ; A.G.08Gb.0..j.Bx
-003ED4  .dc.b 47 62 10 10 52 78 47 62 48 80 31 C0 02 5C 30 06 ; Gb..RxGbH.1..\0.
-003EE4  .dc.b 32 07 54 40 D2 7C 00 20 38 00 3A 01 4A 38 02 85 ; 2.T@.|. 8.:.J8..
-003EF4  .dc.b 6A 10 92 7C 00 10 9A 7C 00 10 61 00 F6 AE 66 46 ; j..|...|..a...fF
-003F04  .dc.b 60 60 61 00 F6 A6 66 3E 51 45 92 7C 00 30 6A 04 ; ``a...f>QE.|.0j.
-003F14  .dc.b D2 7C 06 00 10 32 10 00 66 2C 4A 38 38 E8 66 42 ; .|...2..f,J88.fB
-003F24  .dc.b 51 45 92 7C 00 30 6A 04 D2 7C 06 00 10 32 10 00 ; QE.|.0j..|...2..
-003F34  .dc.b 66 14 51 45 92 7C 00 30 6A 04 D2 7C 06 00 10 32 ; f.QE.|.0j..|...2
-003F44  .dc.b 10 00 67 00 00 1E 6A 0A 32 04 34 05 61 00 FD F0 ; ..g...j.2.4.a...
-003F54  .dc.b 60 10 4A 38 38 E8 67 00 02 82 50 F8 02 6C 60 00 ; `.J88.g...P..l`.
-003F64  .dc.b 02 7A 10 38 01 E0 67 06 B0 3C 00 D3 66 06 BC 7C ; .z.8..g..<..f..|
-003F74  .dc.b 00 20 6F 30 10 38 38 E8 C0 7C 00 02 54 40 9C 40 ; . o0.88..|..T@.@
-003F84  .dc.b 44 40 31 C0 47 68 4A 38 02 85 67 18 6A 0C 44 40 ; D@1.GhJ8..g.j.D@
-003F94  .dc.b E2 48 9E 40 31 C0 47 6A 60 0A 44 40 E2 48 DE 40 ; .H.@1.Gj`.D@.H.@
-003FA4  .dc.b 31 C0 47 6A 60 00 02 34 4A 39 00 00 38 E8 67 08 ; 1.Gj`..4J9..8.g.
-003FB4  .dc.b 51 F8 38 E8 42 78 47 62 4A 78 01 F0 6A 00 00 5A ; Q.8.BxGbJx..j..Z
-003FC4  .dc.b 4A 38 01 3D 66 00 00 52 30 06 32 07 58 41 4A 38 ; J8.=f..R0.2.XAJ8
-003FD4  .dc.b 02 6C 66 02 5C 40 D0 7C 00 0C 38 00 3A 01 61 00 ; .lf.\@.|..8.:.a.
-003FE4  .dc.b F5 CA 66 26 51 44 50 45 53 41 D2 7C 00 30 B2 7C ; ..f&QDPESA.|.0.|
-003FF4  .dc.b 06 00 6D 04 92 7C 06 00 10 32 10 00 66 0C D8 7C ; ..m..|...2..f..|
-004004  .dc.b 00 10 54 41 10 32 10 00 67 16 6A 0C 32 04 34 05 ; ..TA.2..g.j.2.4.
-004014  .dc.b 61 00 FD 2C 60 00 00 0A 31 FC 00 40 47 6C 60 06 ; a..,`...1..@Gl`.
-004024  .dc.b BE 7C 00 20 6D F2 41 F8 47 6E 30 28 FF FE 30 30 ; .|. m.A.Gn0(..00
-004034  .dc.b 00 00 DE 40 44 40 33 C0 00 00 47 6A 66 04 51 F8 ; ...@D@3...Gjf.Q.
-004044  .dc.b 38 EB 54 68 FF FE 60 4E 4A 39 00 00 01 3C 66 00 ; 8.Th..`NJ9...<f.
-004054  .dc.b FB 36 50 F8 38 EE 41 F8 47 6E 30 28 FF FE 67 1E ; .6P.8.A.Gn0(..g.
-004064  .dc.b 0C 70 80 00 00 00 66 06 42 68 FF FE 60 18 54 68 ; .p....f.Bh..`.Th
-004074  .dc.b FF FE 30 30 00 00 DE 40 31 C0 47 6A 60 10 4A 38 ; ..00...@1.Gj`.J8
-004084  .dc.b 38 E8 56 F8 38 EA 58 47 31 FC 00 04 47 6A 4A 38 ; 8.V.8.XG1...GjJ8
-004094  .dc.b 38 E8 66 00 FD 1C 4A 78 01 EE 66 18 10 38 02 6C ; 8.f...Jx..f..8.l
-0040A4  .dc.b C0 7C 00 01 D0 7C 00 20 31 C0 02 5C 42 78 47 68 ; .|...|. 1..\BxGh
-0040B4  .dc.b 60 00 01 28 6A 0E 51 F8 02 6C 31 FC 00 20 02 5C ; `..(j.Q..l1.. .\
-0040C4  .dc.b 60 00 FE 1C 50 F8 02 6C 31 FC 00 21 02 5C 60 00 ; `...P..l1..!.\`.
-0040D4  .dc.b FD 16 4A 78 01 EE 67 04 5A F8 02 6C 4A 38 01 E8 ; ..Jx..g.Z..lJ8..
-0040E4  .dc.b 67 1A 42 38 01 E8 42 38 02 16 61 00 36 92 6B 14 ; g.B8..B8..a.6.k.
-0040F4  .dc.b 42 78 47 62 50 F8 38 E8 60 00 FC B6 0C 38 00 40 ; BxGbP.8.`....8.@
-004104  .dc.b 02 16 67 DE 10 38 02 6C C0 7C 00 01 54 40 31 C0 ; ..g..8.l.|..T@1.
-004114  .dc.b 02 5C 48 B8 00 C0 01 04 60 00 00 CA 41 F8 47 CA ; .\H.....`...A.G.
-004124  .dc.b 30 28 FF FE 0C 70 80 01 00 00 66 0C 51 F8 38 E9 ; 0(...p....f.Q.8.
-004134  .dc.b 51 F8 38 EA 60 00 F9 1C 4A 70 00 00 6B 54 32 07 ; Q.8.`...Jp..kT2.
-004144  .dc.b 30 06 58 40 D2 7C 00 25 38 00 3A 01 61 00 F4 5C ; 0.X@.|.%8.:.a..\
-004154  .dc.b 66 14 50 44 52 41 10 32 10 00 66 0A 50 44 52 41 ; f.PDRA.2..f.PDRA
-004164  .dc.b 10 32 10 00 67 2C 6A 0A 32 04 34 05 61 00 FB D0 ; .2..g,j.2.4.a...
-004174  .dc.b 60 20 54 78 47 C6 31 78 47 C6 FF FE 53 38 38 E9 ; ` TxG.1xG...S88.
-004184  .dc.b 66 08 51 F8 38 E9 60 00 F8 CA 30 28 FF FE 30 30 ; f.Q.8.`...0(..00
-004194  .dc.b 00 00 30 28 FF FE 54 68 FF FE 30 30 00 00 DE 40 ; ..0(..Th..00...@
-0041A4  .dc.b 31 C0 47 6A 60 00 FC 0A 4A 38 47 66 67 08 53 39 ; 1.Gj`...J8Gfg.S9
-0041B4  .dc.b 00 00 47 66 4E 75 13 FC 00 01 00 00 47 66 30 38 ; ..GfNu......Gf08
-0041C4  .dc.b 01 EE D0 38 59 4B C0 3C 00 1F 11 C0 59 4B 42 78 ; ...8YK.<....YKBx
-0041D4  .dc.b 47 68 61 10 42 B8 01 24 4E 75 48 B8 00 C0 01 04 ; Gha.B..$NuH.....
-0041E4  .dc.b 42 78 01 EA 61 00 01 0E 4C B8 00 03 02 64 58 41 ; Bx..a...L....dXA
-0041F4  .dc.b 61 00 F3 B8 6A 06 61 00 FB 24 67 16 10 32 10 01 ; a...j.a..$g..2..
-004204  .dc.b 6A 06 61 00 FB 18 67 0A 10 32 10 02 6A 04 61 00 ; j.a...g..2..j.a.
-004214  .dc.b FB 0C 30 38 02 64 32 38 02 6A 59 41 61 00 F3 8C ; ..08.d28.jYAa...
-004224  .dc.b 6A 06 61 00 FA F8 67 16 10 32 10 01 6A 06 61 00 ; j.a...g..2..j.a.
-004234  .dc.b FA EC 67 0A 10 32 10 02 6A 04 61 00 FA E0 51 F8 ; ..g..2..j.a...Q.
-004244  .dc.b 01 3C 51 F8 01 3D 4A 38 38 EC 66 00 00 40 11 FC ; .<Q..=J88.f..@..
-004254  .dc.b 00 05 38 EC 30 38 01 04 34 38 01 20 38 38 47 68 ; ..8.08..48. 88Gh
-004264  .dc.b B0 7C 00 84 6C 08 53 42 B4 44 6D 10 60 1A B0 7C ; .|..l.SB.Dm.`..|
-004274  .dc.b 00 D4 6F 08 52 42 B4 44 6E 02 60 0C 4A 42 67 08 ; ..o.RB.Dn.`.JBg.
-004284  .dc.b 6A 04 52 42 60 02 53 42 31 C2 01 24 53 38 38 EC ; j.RB`.SB1..$S88.
-004294  .dc.b 42 78 01 26 32 38 01 06 30 38 47 6A 66 02 70 01 ; Bx.&28..08Gjf.p.
-0042A4  .dc.b B2 7C 00 48 6C 06 91 78 01 26 4E 75 B2 7C 00 8E ; .|.Hl..x.&Nu.|..
-0042B4  .dc.b 6F 04 D1 78 01 26 30 38 01 24 66 14 4A 78 01 20 ; o..x.&08.$f.Jx. 
-0042C4  .dc.b 67 0E 34 38 35 F8 B4 7C 00 04 6F 04 30 38 01 20 ; g.485..|..o.08. 
-0042D4  .dc.b 32 38 01 26 66 14 4A 78 01 22 67 0E 34 38 36 0E ; 28.&f.Jx."g.486.
-0042E4  .dc.b B4 7C 00 06 6F 04 32 38 01 22 31 C0 01 24 31 C1 ; .|..o.28."1..$1.
-0042F4  .dc.b 01 26 4E 75                                     ; .&Nu
-0042F8  4C B8                         .dc.w $4CB8
-0042FA  .dc.b 00 03 01 04 D0 7C 00 0C 54 41 4A 38 02 6C 67 02 ; .....|..TAJ8.lg.
-00430A  .dc.b 5D 40 34 00 36 01 D4 7C 00 0E D6 7C 00 22 4A 38 ; ]@4.6..|...|."J8
-00431A  .dc.b 38 E8 66 08 4A 78 01 F0 67 08 6B 06 D2 7C 00 0E ; 8.f.Jx..g.k..|..
-00432A  .dc.b 60 14 0C 78 00 20 02 5C 67 08 0C 78 00 21 02 5C ; `..x. .\g..x.!.\
-00433A  .dc.b 66 04 59 41 5F 43 48 B8 00 0F 02 64 3C 38 02 62 ; f.YA_CH....d<8.b
-00434A  .dc.b 8C 38 38 E8 4B F8 4A BA 7E 0E 4A 55 67 2C 4C B8 ; .88.K.J.~.JUg,L.
-00435A  .dc.b 00 0F 02 64 4C AD 00 30 00 02 B8 42 6E 1C BA 43 ; ...dL..0...Bn..C
-00436A  .dc.b 6E 18 5C 44 B8 40 6D 12 5C 45 BA 41 6D 0C 42 55 ; n.\D.@m.\E.Am.BU
-00437A  .dc.b 4A 46 66 06 72 04 61 00 33 CC 5C 4D 51 CF FF CC ; JFf.r.a.3.\MQ...
-00438A  .dc.b 4E 75                                           ; Nu
+003AC2  4C B8 00 C0 01 04             MOVEM.w $104.w,d6-d7
+003AC8  9C 78 01 20                   SUB.w $120.w,d6
+003ACC  9E 78 01 22                   SUB.w $122.w,d7
+003AD0  BE 7C 00 D4                   CMP.w #$D4,d7
+003AD4  6E 00 FF 1A                   BGT $0039F0
+003AD8  4A 38 59 4A                   TST.b $594A.w
+003ADC  66 00 06 CE                   BNE $0041AC
+003AE0  4A 38 38 E9                   TST.b $38E9.w
+003AE4  66 00 06 3A                   BNE $004120
+003AE8  4A 38 38 EB                   TST.b $38EB.w
+003AEC  66 00 04 BE                   BNE $003FAC
+003AF0  61 00 01 38                   BSR $003C2A
+003AF4  6B 00 05 56                   BMI $00404C
+003AF8  66 00 00 C6                   BNE $003BC0
+003AFC  30 06                         MOVE.w d6,d0
+003AFE  32 07                         MOVE.w d7,d1
+003B00  58 40                         ADDQ.w #4,d0
+003B02  D2 7C 00 25                   ADD.w #$25,d1
+003B06  4A 38 02 6C                   TST.b $26C.w
+003B0A  66 02                         BNE $003B0E
+003B0C  5C 40                         ADDQ.w #6,d0
+003B0E  4A 38 38 E8                   TST.b $38E8.w
+003B12  67 04                         BEQ $003B18
+003B14  30 06                         MOVE.w d6,d0
+003B16  5C 40                         ADDQ.w #6,d0
+003B18  51 F8 02 49                   SF $249.w
+003B1C  38 00                         MOVE.w d0,d4
+003B1E  3A 01                         MOVE.w d1,d5
+003B20  61 00 FA 8C                   BSR $0035AE
+003B24  67 18                         BEQ $003B3E
+003B26  6A 12                         BPL $003B3A
+003B28  48 E7 40 20                   MOVEM.l d1/a2,-(a7)
+003B2C  32 04                         MOVE.w d4,d1
+003B2E  34 05                         MOVE.w d5,d2
+003B30  61 00 02 10                   BSR $003D42
+003B34  4C DF 04 02                   MOVEM.l (a7)+,d1/a2
+003B38  60 04                         BRA $003B3E
+003B3A  50 F8 02 49                   ST $249.w
+003B3E  52 41                         ADDQ.w #1,d1
+003B40  50 44                         ADDQ.w #8,d4
+003B42  10 32 10 00                   MOVE.b $0(a2,d1.w),d0
+003B46  67 18                         BEQ $003B60
+003B48  6A 12                         BPL $003B5C
+003B4A  48 E7 40 20                   MOVEM.l d1/a2,-(a7)
+003B4E  32 04                         MOVE.w d4,d1
+003B50  34 05                         MOVE.w d5,d2
+003B52  61 00 01 EE                   BSR $003D42
+003B56  4C DF 04 02                   MOVEM.l (a7)+,d1/a2
+003B5A  60 04                         BRA $003B60
+003B5C  50 F8 02 49                   ST $249.w
+003B60  52 41                         ADDQ.w #1,d1
+003B62  50 44                         ADDQ.w #8,d4
+003B64  10 32 10 00                   MOVE.b $0(a2,d1.w),d0
+003B68  67 18                         BEQ $003B82
+003B6A  6A 12                         BPL $003B7E
+003B6C  48 E7 40 20                   MOVEM.l d1/a2,-(a7)
+003B70  32 04                         MOVE.w d4,d1
+003B72  34 05                         MOVE.w d5,d2
+003B74  61 00 01 CC                   BSR $003D42
+003B78  4C DF 04 02                   MOVEM.l (a7)+,d1/a2
+003B7C  60 04                         BRA $003B82
+003B7E  50 F8 02 49                   ST $249.w
+003B82  4A 38 02 49                   TST.b $249.w
+003B86  67 00 04 C4                   BEQ $00404C
+003B8A  4A 38 38 E8                   TST.b $38E8.w
+003B8E  66 12                         BNE $003BA2
+003B90  4A 38 38 EE                   TST.b $38EE.w
+003B94  67 0C                         BEQ $003BA2
+003B96  51 F8 38 EE                   SF $38EE.w
+003B9A  70 0A                         MOVEQ #$A,d0
+003B9C  4E B9 00 01 A2 DC             JSR $1A2DC.l
+003BA2  4A 38 01 3C                   TST.b $13C.w
+003BA6  66 18                         BNE $003BC0
+003BA8  30 07                         MOVE.w d7,d0
+003BAA  D0 7C 00 25                   ADD.w #$25,d0
+003BAE  90 78 01 74                   SUB.w $174.w,d0
+003BB2  C0 7C FF F8                   AND.w #$FFF8,d0
+003BB6  D0 78 01 74                   ADD.w $174.w,d0
+003BBA  90 7C 00 24                   SUB.w #$24,d0
+003BBE  3E 00                         MOVE.w d0,d7
+003BC0  42 78 47 6A                   CLR.w $476A.w
+003BC4  4A 78 01 F0                   TST.w $1F0.w
+003BC8  6A 1A                         BPL $003BE4
+003BCA  4A 38 38 ED                   TST.b $38ED.w
+003BCE  66 4A                         BNE $003C1A
+003BD0  50 F8 38 ED                   ST $38ED.w
+003BD4  50 F8 38 EB                   ST $38EB.w
+003BD8  42 78 47 6C                   CLR.w $476C.w
+003BDC  42 38 38 EC                   CLR.b $38EC.w
+003BE0  60 00 03 CA                   BRA $003FAC
+003BE4  42 38 38 ED                   CLR.b $38ED.w
+003BE8  4A 38 38 EA                   TST.b $38EA.w
+003BEC  67 1E                         BEQ $003C0C
+003BEE  51 F8 38 EA                   SF $38EA.w
+003BF2  11 FC 00 04 38 E9             MOVE.b #$4,$38E9.w
+003BF8  42 78 47 C8                   CLR.w $47C8.w
+003BFC  42 78 47 C6                   CLR.w $47C6.w
+003C00  70 0B                         MOVEQ #$B,d0
+003C02  4E B9 00 01 A2 DC             JSR $1A2DC.l
+003C08  60 00 05 16                   BRA $004120
+003C0C  4A 38 38 E8                   TST.b $38E8.w
+003C10  66 08                         BNE $003C1A
+003C12  4A 78 01 F0                   TST.w $1F0.w
+003C16  66 00 04 BE                   BNE $0040D6
+003C1A  4A 78 01 EE                   TST.w $1EE.w
+003C1E  6B 00 02 94                   BMI $003EB4
+003C22  66 00 01 98                   BNE $003DBC
+003C26  60 00 01 46                   BRA $003D6E
+
+; ==== sub_003C2A (1 caller) ====
+003C2A  4A 38 02 84                   TST.b $284.w
+003C2E  66 02                         BNE $003C32
+003C30  4E 75                         RTS
+003C32  30 06                         MOVE.w d6,d0
+003C34  32 07                         MOVE.w d7,d1
+003C36  D0 7C 00 10                   ADD.w #$10,d0
+003C3A  D2 7C 00 26                   ADD.w #$26,d1
+003C3E  90 78 01 72                   SUB.w $172.w,d0
+003C42  92 78 01 74                   SUB.w $174.w,d1
+003C46  34 00                         MOVE.w d0,d2
+003C48  36 01                         MOVE.w d1,d3
+003C4A  EA 48                         LSR.w #5,d0
+003C4C  EA 49                         LSR.w #5,d1
+003C4E  D0 78 01 F6                   ADD.w $1F6.w,d0
+003C52  D2 78 01 F8                   ADD.w $1F8.w,d1
+003C56  24 78 02 2E                   MOVEA.l $22E.w,a2
+003C5A  D0 40                         ADD.w d0,d0
+003C5C  D2 72 00 00                   ADD.w $0(a2,d0.w),d1
+003C60  24 78 02 2A                   MOVEA.l $22A.w,a2
+003C64  10 32 10 00                   MOVE.b $0(a2,d1.w),d0
+003C68  B0 3C 00 08                   CMP.b #$8,d0
+003C6C  66 10                         BNE $003C7E
+003C6E  30 02                         MOVE.w d2,d0
+003C70  C0 7C 00 1F                   AND.w #$1F,d0
+003C74  E2 48                         LSR.w #1,d0
+003C76  50 F8 02 85                   ST $285.w
+003C7A  60 00 00 82                   BRA $003CFE
+003C7E  B0 3C 00 09                   CMP.b #$9,d0
+003C82  66 12                         BNE $003C96
+003C84  30 02                         MOVE.w d2,d0
+003C86  C0 7C 00 1F                   AND.w #$1F,d0
+003C8A  E2 48                         LSR.w #1,d0
+003C8C  D0 7C 00 10                   ADD.w #$10,d0
+003C90  50 F8 02 85                   ST $285.w
+003C94  60 68                         BRA $003CFE
+003C96  B0 3C 00 16                   CMP.b #$16,d0
+003C9A  67 E8                         BEQ $003C84
+003C9C  B0 3C 00 10                   CMP.b #$10,d0
+003CA0  66 12                         BNE $003CB4
+003CA2  70 0F                         MOVEQ #$F,d0
+003CA4  C4 7C 00 1F                   AND.w #$1F,d2
+003CA8  E2 4A                         LSR.w #1,d2
+003CAA  90 42                         SUB.w d2,d0
+003CAC  11 FC 00 01 02 85             MOVE.b #$1,$285.w
+003CB2  60 4A                         BRA $003CFE
+003CB4  B0 3C 00 0F                   CMP.b #$F,d0
+003CB8  66 12                         BNE $003CCC
+003CBA  70 1F                         MOVEQ #$1F,d0
+003CBC  C4 7C 00 1F                   AND.w #$1F,d2
+003CC0  E2 4A                         LSR.w #1,d2
+003CC2  90 42                         SUB.w d2,d0
+003CC4  11 FC 00 01 02 85             MOVE.b #$1,$285.w
+003CCA  60 32                         BRA $003CFE
+003CCC  B0 3C 00 17                   CMP.b #$17,d0
+003CD0  67 E8                         BEQ $003CBA
+003CD2  30 03                         MOVE.w d3,d0
+003CD4  C0 7C 00 1F                   AND.w #$1F,d0
+003CD8  90 7C 00 1C                   SUB.w #$1C,d0
+003CDC  6B 1C                         BMI $003CFA
+003CDE  0C 32 00 08 10 01             CMPI.b #$8,$1(a2,d1.w)
+003CE4  66 06                         BNE $003CEC
+003CE6  D6 7C 00 20                   ADD.w #$20,d3
+003CEA  60 82                         BRA $003C6E
+003CEC  0C 32 00 10 10 01             CMPI.b #$10,$1(a2,d1.w)
+003CF2  66 06                         BNE $003CFA
+003CF4  D6 7C 00 20                   ADD.w #$20,d3
+003CF8  60 A8                         BRA $003CA2
+003CFA  70 00                         MOVEQ #$0,d0
+003CFC  4E 75                         RTS
+003CFE  32 03                         MOVE.w d3,d1
+003D00  C2 7C FF E0                   AND.w #$FFE0,d1
+003D04  D2 40                         ADD.w d0,d1
+003D06  D2 78 01 74                   ADD.w $174.w,d1
+003D0A  92 7C 00 26                   SUB.w #$26,d1
+003D0E  BE 41                         CMP.w d1,d7
+003D10  6C 08                         BGE $003D1A
+003D12  42 38 02 85                   CLR.b $285.w
+003D16  70 FF                         MOVEQ #$FF,d0
+003D18  4E 75                         RTS
+003D1A  3E 01                         MOVE.w d1,d7
+003D1C  70 01                         MOVEQ #$1,d0
+003D1E  4E 75                         RTS
+
+; ==== sub_003D20 (6 callers) ====
+003D20  4A 78 02 62                   TST.w $262.w
+003D24  66 1A                         BNE $003D40
+003D26  4A 38 38 E8                   TST.b $38E8.w
+003D2A  66 14                         BNE $003D40
+003D2C  B0 3C 00 D3                   CMP.b #$D3,d0
+003D30  66 0E                         BNE $003D40
+003D32  48 E7 40 20                   MOVEM.l d1/a2,-(a7)
+003D36  61 00 39 F0                   BSR $007728
+003D3A  4C DF 04 02                   MOVEM.l (a7)+,d1/a2
+003D3E  70 00                         MOVEQ #$0,d0
+003D40  4E 75                         RTS
+
+; ==== sub_003D42 (7 callers) ====
+003D42  B0 3C 00 80                   CMP.b #$80,d0
+003D46  66 24                         BNE $003D6C
+003D48  48 E7 FF FC                   MOVEM.l d0-d7/a0-a5,-(a7)
+003D4C  61 00 26 60                   BSR $0063AE
+003D50  70 13                         MOVEQ #$13,d0
+003D52  4E B9 00 01 A2 DC             JSR $1A2DC.l
+003D58  70 01                         MOVEQ #$1,d0
+003D5A  61 00 3A 9A                   BSR $0077F6
+003D5E  70 03                         MOVEQ #$3,d0
+003D60  72 04                         MOVEQ #$4,d1
+003D62  61 00 3B 68                   BSR $0078CC
+003D66  4C DF 3F FF                   MOVEM.l (a7)+,d0-d7/a0-a5
+003D6A  70 00                         MOVEQ #$0,d0
+003D6C  4E 75                         RTS
+003D6E  4A 38 38 E8                   TST.b $38E8.w
+003D72  66 00 00 40                   BNE $003DB4
+003D76  4A 38 01 3C                   TST.b $13C.w
+003D7A  66 1E                         BNE $003D9A
+003D7C  21 F8 01 F6 45 AA             MOVE.l $1F6.w,$45AA.w
+003D82  30 06                         MOVE.w d6,d0
+003D84  32 07                         MOVE.w d7,d1
+003D86  90 78 01 72                   SUB.w $172.w,d0
+003D8A  92 78 01 74                   SUB.w $174.w,d1
+003D8E  48 B8 00 03 45 A4             MOVEM.w d0-d1,$45A4.w
+003D94  11 F8 02 6C 47 65             MOVE.b $26C.w,$4765.w
+003D9A  48 B8 00 C0 01 04             MOVEM.w d6-d7,$104.w
+003DA0  42 78 47 6A                   CLR.w $476A.w
+003DA4  10 38 02 6C                   MOVE.b $26C.w,d0
+003DA8  C0 7C 00 01                   AND.w #$1,d0
+003DAC  31 C0 02 5C                   MOVE.w d0,$25C.w
+003DB0  60 00 04 36                   BRA $0041E8
+003DB4  4A 38 02 6C                   TST.b $26C.w
+003DB8  67 00 00 FA                   BEQ $003EB4
+003DBC  50 F8 02 6C                   ST $26C.w
+003DC0  4A 38 38 E8                   TST.b $38E8.w
+003DC4  67 06                         BEQ $003DCC
+003DC6  41 F8 47 5D                   LEA $475D.w,a0
+003DCA  60 04                         BRA $003DD0
+003DCC  41 F8 47 3B                   LEA $473B.w,a0
+003DD0  30 38 47 62                   MOVE.w $4762.w,d0
+003DD4  10 30 00 00                   MOVE.b $0(a0,d0.w),d0
+003DD8  6A 06                         BPL $003DE0
+003DDA  42 78 47 62                   CLR.w $4762.w
+003DDE  10 10                         MOVE.b (a0),d0
+003DE0  52 78 47 62                   ADDQ.w #1,$4762.w
+003DE4  48 80                         EXT.W d0
+003DE6  31 C0 02 5C                   MOVE.w d0,$25C.w
+003DEA  30 06                         MOVE.w d6,d0
+003DEC  32 07                         MOVE.w d7,d1
+003DEE  D0 7C 00 1C                   ADD.w #$1C,d0
+003DF2  D2 7C 00 20                   ADD.w #$20,d1
+003DF6  38 00                         MOVE.w d0,d4
+003DF8  3A 01                         MOVE.w d1,d5
+003DFA  4A 38 02 85                   TST.b $285.w
+003DFE  6B 12                         BMI $003E12
+003E00  67 10                         BEQ $003E12
+003E02  92 7C 00 10                   SUB.w #$10,d1
+003E06  9A 7C 00 10                   SUB.w #$10,d5
+003E0A  61 00 F7 A2                   BSR $0035AE
+003E0E  66 46                         BNE $003E56
+003E10  60 60                         BRA $003E72
+003E12  61 00 F7 9A                   BSR $0035AE
+003E16  66 3E                         BNE $003E56
+003E18  51 45                         SUBQ.w #8,d5
+003E1A  92 7C 00 30                   SUB.w #$30,d1
+003E1E  6A 04                         BPL $003E24
+003E20  D2 7C 06 00                   ADD.w #$600,d1
+003E24  10 32 10 00                   MOVE.b $0(a2,d1.w),d0
+003E28  66 2C                         BNE $003E56
+003E2A  4A 38 38 E8                   TST.b $38E8.w
+003E2E  66 42                         BNE $003E72
+003E30  51 45                         SUBQ.w #8,d5
+003E32  92 7C 00 30                   SUB.w #$30,d1
+003E36  6A 04                         BPL $003E3C
+003E38  D2 7C 06 00                   ADD.w #$600,d1
+003E3C  10 32 10 00                   MOVE.b $0(a2,d1.w),d0
+003E40  66 14                         BNE $003E56
+003E42  51 45                         SUBQ.w #8,d5
+003E44  92 7C 00 30                   SUB.w #$30,d1
+003E48  6A 04                         BPL $003E4E
+003E4A  D2 7C 06 00                   ADD.w #$600,d1
+003E4E  10 32 10 00                   MOVE.b $0(a2,d1.w),d0
+003E52  67 00 00 1E                   BEQ $003E72
+003E56  6A 0A                         BPL $003E62
+003E58  32 04                         MOVE.w d4,d1
+003E5A  34 05                         MOVE.w d5,d2
+003E5C  61 00 FE E4                   BSR $003D42
+003E60  60 10                         BRA $003E72
+003E62  4A 38 38 E8                   TST.b $38E8.w
+003E66  67 00 03 76                   BEQ $0041DE
+003E6A  51 F8 02 6C                   SF $26C.w
+003E6E  60 00 03 6E                   BRA $0041DE
+003E72  10 38 01 E0                   MOVE.b $1E0.w,d0
+003E76  67 08                         BEQ $003E80
+003E78  B0 3C 00 D3                   CMP.b #$D3,d0
+003E7C  66 00 00 08                   BNE $003E86
+003E80  BC 7C 01 30                   CMP.w #$130,d6
+003E84  6C 2A                         BGE $003EB0
+003E86  10 38 38 E8                   MOVE.b $38E8.w,d0
+003E8A  C0 7C 00 02                   AND.w #$2,d0
+003E8E  54 40                         ADDQ.w #2,d0
+003E90  DC 40                         ADD.w d0,d6
+003E92  31 C0 47 68                   MOVE.w d0,$4768.w
+003E96  4A 38 02 85                   TST.b $285.w
+003E9A  67 14                         BEQ $003EB0
+003E9C  6B 0A                         BMI $003EA8
+003E9E  E2 48                         LSR.w #1,d0
+003EA0  9E 40                         SUB.w d0,d7
+003EA2  31 C0 47 6A                   MOVE.w d0,$476A.w
+003EA6  60 08                         BRA $003EB0
+003EA8  E2 48                         LSR.w #1,d0
+003EAA  DE 40                         ADD.w d0,d7
+003EAC  31 C0 47 6A                   MOVE.w d0,$476A.w
+003EB0  60 00 03 2C                   BRA $0041DE
+003EB4  51 F8 02 6C                   SF $26C.w
+003EB8  4A 38 38 E8                   TST.b $38E8.w
+003EBC  67 06                         BEQ $003EC4
+003EBE  41 F8 47 58                   LEA $4758.w,a0
+003EC2  60 04                         BRA $003EC8
+003EC4  41 F8 47 1E                   LEA $471E.w,a0
+003EC8  30 38 47 62                   MOVE.w $4762.w,d0
+003ECC  10 30 00 00                   MOVE.b $0(a0,d0.w),d0
+003ED0  6A 06                         BPL $003ED8
+003ED2  42 78 47 62                   CLR.w $4762.w
+003ED6  10 10                         MOVE.b (a0),d0
+003ED8  52 78 47 62                   ADDQ.w #1,$4762.w
+003EDC  48 80                         EXT.W d0
+003EDE  31 C0 02 5C                   MOVE.w d0,$25C.w
+003EE2  30 06                         MOVE.w d6,d0
+003EE4  32 07                         MOVE.w d7,d1
+003EE6  54 40                         ADDQ.w #2,d0
+003EE8  D2 7C 00 20                   ADD.w #$20,d1
+003EEC  38 00                         MOVE.w d0,d4
+003EEE  3A 01                         MOVE.w d1,d5
+003EF0  4A 38 02 85                   TST.b $285.w
+003EF4  6A 10                         BPL $003F06
+003EF6  92 7C 00 10                   SUB.w #$10,d1
+003EFA  9A 7C 00 10                   SUB.w #$10,d5
+003EFE  61 00 F6 AE                   BSR $0035AE
+003F02  66 46                         BNE $003F4A
+003F04  60 60                         BRA $003F66
+003F06  61 00 F6 A6                   BSR $0035AE
+003F0A  66 3E                         BNE $003F4A
+003F0C  51 45                         SUBQ.w #8,d5
+003F0E  92 7C 00 30                   SUB.w #$30,d1
+003F12  6A 04                         BPL $003F18
+003F14  D2 7C 06 00                   ADD.w #$600,d1
+003F18  10 32 10 00                   MOVE.b $0(a2,d1.w),d0
+003F1C  66 2C                         BNE $003F4A
+003F1E  4A 38 38 E8                   TST.b $38E8.w
+003F22  66 42                         BNE $003F66
+003F24  51 45                         SUBQ.w #8,d5
+003F26  92 7C 00 30                   SUB.w #$30,d1
+003F2A  6A 04                         BPL $003F30
+003F2C  D2 7C 06 00                   ADD.w #$600,d1
+003F30  10 32 10 00                   MOVE.b $0(a2,d1.w),d0
+003F34  66 14                         BNE $003F4A
+003F36  51 45                         SUBQ.w #8,d5
+003F38  92 7C 00 30                   SUB.w #$30,d1
+003F3C  6A 04                         BPL $003F42
+003F3E  D2 7C 06 00                   ADD.w #$600,d1
+003F42  10 32 10 00                   MOVE.b $0(a2,d1.w),d0
+003F46  67 00 00 1E                   BEQ $003F66
+003F4A  6A 0A                         BPL $003F56
+003F4C  32 04                         MOVE.w d4,d1
+003F4E  34 05                         MOVE.w d5,d2
+003F50  61 00 FD F0                   BSR $003D42
+003F54  60 10                         BRA $003F66
+003F56  4A 38 38 E8                   TST.b $38E8.w
+003F5A  67 00 02 82                   BEQ $0041DE
+003F5E  50 F8 02 6C                   ST $26C.w
+003F62  60 00 02 7A                   BRA $0041DE
+003F66  10 38 01 E0                   MOVE.b $1E0.w,d0
+003F6A  67 06                         BEQ $003F72
+003F6C  B0 3C 00 D3                   CMP.b #$D3,d0
+003F70  66 06                         BNE $003F78
+003F72  BC 7C 00 20                   CMP.w #$20,d6
+003F76  6F 30                         BLE $003FA8
+003F78  10 38 38 E8                   MOVE.b $38E8.w,d0
+003F7C  C0 7C 00 02                   AND.w #$2,d0
+003F80  54 40                         ADDQ.w #2,d0
+003F82  9C 40                         SUB.w d0,d6
+003F84  44 40                         NEG.w d0
+003F86  31 C0 47 68                   MOVE.w d0,$4768.w
+003F8A  4A 38 02 85                   TST.b $285.w
+003F8E  67 18                         BEQ $003FA8
+003F90  6A 0C                         BPL $003F9E
+003F92  44 40                         NEG.w d0
+003F94  E2 48                         LSR.w #1,d0
+003F96  9E 40                         SUB.w d0,d7
+003F98  31 C0 47 6A                   MOVE.w d0,$476A.w
+003F9C  60 0A                         BRA $003FA8
+003F9E  44 40                         NEG.w d0
+003FA0  E2 48                         LSR.w #1,d0
+003FA2  DE 40                         ADD.w d0,d7
+003FA4  31 C0 47 6A                   MOVE.w d0,$476A.w
+003FA8  60 00 02 34                   BRA $0041DE
+003FAC  4A 39 00 00 38 E8             TST.b $38E8.l
+003FB2  67 08                         BEQ $003FBC
+003FB4  51 F8 38 E8                   SF $38E8.w
+003FB8  42 78 47 62                   CLR.w $4762.w
+003FBC  4A 78 01 F0                   TST.w $1F0.w
+003FC0  6A 00 00 5A                   BPL $00401C
+003FC4  4A 38 01 3D                   TST.b $13D.w
+003FC8  66 00 00 52                   BNE $00401C
+003FCC  30 06                         MOVE.w d6,d0
+003FCE  32 07                         MOVE.w d7,d1
+003FD0  58 41                         ADDQ.w #4,d1
+003FD2  4A 38 02 6C                   TST.b $26C.w
+003FD6  66 02                         BNE $003FDA
+003FD8  5C 40                         ADDQ.w #6,d0
+003FDA  D0 7C 00 0C                   ADD.w #$C,d0
+003FDE  38 00                         MOVE.w d0,d4
+003FE0  3A 01                         MOVE.w d1,d5
+003FE2  61 00 F5 CA                   BSR $0035AE
+003FE6  66 26                         BNE $00400E
+003FE8  51 44                         SUBQ.w #8,d4
+003FEA  50 45                         ADDQ.w #8,d5
+003FEC  53 41                         SUBQ.w #1,d1
+003FEE  D2 7C 00 30                   ADD.w #$30,d1
+003FF2  B2 7C 06 00                   CMP.w #$600,d1
+003FF6  6D 04                         BLT $003FFC
+003FF8  92 7C 06 00                   SUB.w #$600,d1
+003FFC  10 32 10 00                   MOVE.b $0(a2,d1.w),d0
+004000  66 0C                         BNE $00400E
+004002  D8 7C 00 10                   ADD.w #$10,d4
+004006  54 41                         ADDQ.w #2,d1
+004008  10 32 10 00                   MOVE.b $0(a2,d1.w),d0
+00400C  67 16                         BEQ $004024
+00400E  6A 0C                         BPL $00401C
+004010  32 04                         MOVE.w d4,d1
+004012  34 05                         MOVE.w d5,d2
+004014  61 00 FD 2C                   BSR $003D42
+004018  60 00 00 0A                   BRA $004024
+00401C  31 FC 00 40 47 6C             MOVE.w #$40,$476C.w
+004022  60 06                         BRA $00402A
+004024  BE 7C 00 20                   CMP.w #$20,d7
+004028  6D F2                         BLT $00401C
+00402A  41 F8 47 6E                   LEA $476E.w,a0
+00402E  30 28 FF FE                   MOVE.w -$2(a0),d0
+004032  30 30 00 00                   MOVE.w $0(a0,d0.w),d0
+004036  DE 40                         ADD.w d0,d7
+004038  44 40                         NEG.w d0
+00403A  33 C0 00 00 47 6A             MOVE.w d0,$476A.l
+004040  66 04                         BNE $004046
+004042  51 F8 38 EB                   SF $38EB.w
+004046  54 68 FF FE                   ADDQ.w #2,-$2(a0)
+00404A  60 4E                         BRA $00409A
+00404C  4A 39 00 00 01 3C             TST.b $13C.l
+004052  66 00 FB 36                   BNE $003B8A
+004056  50 F8 38 EE                   ST $38EE.w
+00405A  41 F8 47 6E                   LEA $476E.w,a0
+00405E  30 28 FF FE                   MOVE.w -$2(a0),d0
+004062  67 1E                         BEQ $004082
+004064  0C 70 80 00 00 00             CMPI.w #$8000,$0(a0,d0.w)
+00406A  66 06                         BNE $004072
+00406C  42 68 FF FE                   CLR.w -$2(a0)
+004070  60 18                         BRA $00408A
+004072  54 68 FF FE                   ADDQ.w #2,-$2(a0)
+004076  30 30 00 00                   MOVE.w $0(a0,d0.w),d0
+00407A  DE 40                         ADD.w d0,d7
+00407C  31 C0 47 6A                   MOVE.w d0,$476A.w
+004080  60 10                         BRA $004092
+004082  4A 38 38 E8                   TST.b $38E8.w
+004086  56 F8 38 EA                   SNE $38EA.w
+00408A  58 47                         ADDQ.w #4,d7
+00408C  31 FC 00 04 47 6A             MOVE.w #$4,$476A.w
+004092  4A 38 38 E8                   TST.b $38E8.w
+004096  66 00 FD 1C                   BNE $003DB4
+00409A  4A 78 01 EE                   TST.w $1EE.w
+00409E  66 18                         BNE $0040B8
+0040A0  10 38 02 6C                   MOVE.b $26C.w,d0
+0040A4  C0 7C 00 01                   AND.w #$1,d0
+0040A8  D0 7C 00 20                   ADD.w #$20,d0
+0040AC  31 C0 02 5C                   MOVE.w d0,$25C.w
+0040B0  42 78 47 68                   CLR.w $4768.w
+0040B4  60 00 01 28                   BRA $0041DE
+0040B8  6A 0E                         BPL $0040C8
+0040BA  51 F8 02 6C                   SF $26C.w
+0040BE  31 FC 00 20 02 5C             MOVE.w #$20,$25C.w
+0040C4  60 00 FE 1C                   BRA $003EE2
+0040C8  50 F8 02 6C                   ST $26C.w
+0040CC  31 FC 00 21 02 5C             MOVE.w #$21,$25C.w
+0040D2  60 00 FD 16                   BRA $003DEA
+0040D6  4A 78 01 EE                   TST.w $1EE.w
+0040DA  67 04                         BEQ $0040E0
+0040DC  5A F8 02 6C                   SPL $26C.w
+0040E0  4A 38 01 E8                   TST.b $1E8.w
+0040E4  67 1A                         BEQ $004100
+0040E6  42 38 01 E8                   CLR.b $1E8.w
+0040EA  42 38 02 16                   CLR.b $216.w
+0040EE  61 00 36 92                   BSR $007782
+0040F2  6B 14                         BMI $004108
+0040F4  42 78 47 62                   CLR.w $4762.w
+0040F8  50 F8 38 E8                   ST $38E8.w
+0040FC  60 00 FC B6                   BRA $003DB4
+004100  0C 38 00 40 02 16             CMPI.b #$40,$216.w
+004106  67 DE                         BEQ $0040E6
+004108  10 38 02 6C                   MOVE.b $26C.w,d0
+00410C  C0 7C 00 01                   AND.w #$1,d0
+004110  54 40                         ADDQ.w #2,d0
+004112  31 C0 02 5C                   MOVE.w d0,$25C.w
+004116  48 B8 00 C0 01 04             MOVEM.w d6-d7,$104.w
+00411C  60 00 00 CA                   BRA $0041E8
+004120  41 F8 47 CA                   LEA $47CA.w,a0
+004124  30 28 FF FE                   MOVE.w -$2(a0),d0
+004128  0C 70 80 01 00 00             CMPI.w #$8001,$0(a0,d0.w)
+00412E  66 0C                         BNE $00413C
+004130  51 F8 38 E9                   SF $38E9.w
+004134  51 F8 38 EA                   SF $38EA.w
+004138  60 00 F9 1C                   BRA $003A56
+00413C  4A 70 00 00                   TST.w $0(a0,d0.w)
+004140  6B 54                         BMI $004196
+004142  32 07                         MOVE.w d7,d1
+004144  30 06                         MOVE.w d6,d0
+004146  58 40                         ADDQ.w #4,d0
+004148  D2 7C 00 25                   ADD.w #$25,d1
+00414C  38 00                         MOVE.w d0,d4
+00414E  3A 01                         MOVE.w d1,d5
+004150  61 00 F4 5C                   BSR $0035AE
+004154  66 14                         BNE $00416A
+004156  50 44                         ADDQ.w #8,d4
+004158  52 41                         ADDQ.w #1,d1
+00415A  10 32 10 00                   MOVE.b $0(a2,d1.w),d0
+00415E  66 0A                         BNE $00416A
+004160  50 44                         ADDQ.w #8,d4
+004162  52 41                         ADDQ.w #1,d1
+004164  10 32 10 00                   MOVE.b $0(a2,d1.w),d0
+004168  67 2C                         BEQ $004196
+00416A  6A 0A                         BPL $004176
+00416C  32 04                         MOVE.w d4,d1
+00416E  34 05                         MOVE.w d5,d2
+004170  61 00 FB D0                   BSR $003D42
+004174  60 20                         BRA $004196
+004176  54 78 47 C6                   ADDQ.w #2,$47C6.w
+00417A  31 78 47 C6 FF FE             MOVE.w $47C6.w,-$2(a0)
+004180  53 38 38 E9                   SUBQ.b #1,$38E9.w
+004184  66 08                         BNE $00418E
+004186  51 F8 38 E9                   SF $38E9.w
+00418A  60 00 F8 CA                   BRA $003A56
+00418E  30 28 FF FE                   MOVE.w -$2(a0),d0
+004192  30 30 00 00                   MOVE.w $0(a0,d0.w),d0
+004196  30 28 FF FE                   MOVE.w -$2(a0),d0
+00419A  54 68 FF FE                   ADDQ.w #2,-$2(a0)
+00419E  30 30 00 00                   MOVE.w $0(a0,d0.w),d0
+0041A2  DE 40                         ADD.w d0,d7
+0041A4  31 C0 47 6A                   MOVE.w d0,$476A.w
+0041A8  60 00 FC 0A                   BRA $003DB4
+0041AC  4A 38 47 66                   TST.b $4766.w
+0041B0  67 08                         BEQ $0041BA
+0041B2  53 39 00 00 47 66             SUBQ.b #1,$4766.l
+0041B8  4E 75                         RTS
+0041BA  13 FC 00 01 00 00 47 66       MOVE.b #$1,$4766.l
+0041C2  30 38 01 EE                   MOVE.w $1EE.w,d0
+0041C6  D0 38 59 4B                   ADD.b $594B.w,d0
+0041CA  C0 3C 00 1F                   AND.b #$1F,d0
+0041CE  11 C0 59 4B                   MOVE.b d0,$594B.w
+0041D2  42 78 47 68                   CLR.w $4768.w
+0041D6  61 10                         BSR $0041E8
+0041D8  42 B8 01 24                   CLR.l $124.w
+0041DC  4E 75                         RTS
+0041DE  48 B8 00 C0 01 04             MOVEM.w d6-d7,$104.w
+0041E4  42 78 01 EA                   CLR.w $1EA.w
+
+; ==== sub_0041E8 (1 caller) ====
+0041E8  61 00 01 0E                   BSR $0042F8
+0041EC  4C B8 00 03 02 64             MOVEM.w $264.w,d0-d1
+0041F2  58 41                         ADDQ.w #4,d1
+0041F4  61 00 F3 B8                   BSR $0035AE
+0041F8  6A 06                         BPL $004200
+0041FA  61 00 FB 24                   BSR $003D20
+0041FE  67 16                         BEQ $004216
+004200  10 32 10 01                   MOVE.b $1(a2,d1.w),d0
+004204  6A 06                         BPL $00420C
+004206  61 00 FB 18                   BSR $003D20
+00420A  67 0A                         BEQ $004216
+00420C  10 32 10 02                   MOVE.b $2(a2,d1.w),d0
+004210  6A 04                         BPL $004216
+004212  61 00 FB 0C                   BSR $003D20
+004216  30 38 02 64                   MOVE.w $264.w,d0
+00421A  32 38 02 6A                   MOVE.w $26A.w,d1
+00421E  59 41                         SUBQ.w #4,d1
+004220  61 00 F3 8C                   BSR $0035AE
+004224  6A 06                         BPL $00422C
+004226  61 00 FA F8                   BSR $003D20
+00422A  67 16                         BEQ $004242
+00422C  10 32 10 01                   MOVE.b $1(a2,d1.w),d0
+004230  6A 06                         BPL $004238
+004232  61 00 FA EC                   BSR $003D20
+004236  67 0A                         BEQ $004242
+004238  10 32 10 02                   MOVE.b $2(a2,d1.w),d0
+00423C  6A 04                         BPL $004242
+00423E  61 00 FA E0                   BSR $003D20
+004242  51 F8 01 3C                   SF $13C.w
+004246  51 F8 01 3D                   SF $13D.w
+00424A  4A 38 38 EC                   TST.b $38EC.w
+00424E  66 00 00 40                   BNE $004290
+004252  11 FC 00 05 38 EC             MOVE.b #$5,$38EC.w
+004258  30 38 01 04                   MOVE.w $104.w,d0
+00425C  34 38 01 20                   MOVE.w $120.w,d2
+004260  38 38 47 68                   MOVE.w $4768.w,d4
+004264  B0 7C 00 84                   CMP.w #$84,d0
+004268  6C 08                         BGE $004272
+00426A  53 42                         SUBQ.w #1,d2
+00426C  B4 44                         CMP.w d4,d2
+00426E  6D 10                         BLT $004280
+004270  60 1A                         BRA $00428C
+004272  B0 7C 00 D4                   CMP.w #$D4,d0
+004276  6F 08                         BLE $004280
+004278  52 42                         ADDQ.w #1,d2
+00427A  B4 44                         CMP.w d4,d2
+00427C  6E 02                         BGT $004280
+00427E  60 0C                         BRA $00428C
+004280  4A 42                         TST.w d2
+004282  67 08                         BEQ $00428C
+004284  6A 04                         BPL $00428A
+004286  52 42                         ADDQ.w #1,d2
+004288  60 02                         BRA $00428C
+00428A  53 42                         SUBQ.w #1,d2
+00428C  31 C2 01 24                   MOVE.w d2,$124.w
+004290  53 38 38 EC                   SUBQ.b #1,$38EC.w
+004294  42 78 01 26                   CLR.w $126.w
+004298  32 38 01 06                   MOVE.w $106.w,d1
+00429C  30 38 47 6A                   MOVE.w $476A.w,d0
+0042A0  66 02                         BNE $0042A4
+0042A2  70 01                         MOVEQ #$1,d0
+0042A4  B2 7C 00 48                   CMP.w #$48,d1
+0042A8  6C 06                         BGE $0042B0
+0042AA  91 78 01 26                   SUB.w d0,$126.w
+0042AE  4E 75                         RTS
+0042B0  B2 7C 00 8E                   CMP.w #$8E,d1
+0042B4  6F 04                         BLE $0042BA
+0042B6  D1 78 01 26                   ADD.w d0,$126.w
+0042BA  30 38 01 24                   MOVE.w $124.w,d0
+0042BE  66 14                         BNE $0042D4
+0042C0  4A 78 01 20                   TST.w $120.w
+0042C4  67 0E                         BEQ $0042D4
+0042C6  34 38 35 F8                   MOVE.w $35F8.w,d2
+0042CA  B4 7C 00 04                   CMP.w #$4,d2
+0042CE  6F 04                         BLE $0042D4
+0042D0  30 38 01 20                   MOVE.w $120.w,d0
+0042D4  32 38 01 26                   MOVE.w $126.w,d1
+0042D8  66 14                         BNE $0042EE
+0042DA  4A 78 01 22                   TST.w $122.w
+0042DE  67 0E                         BEQ $0042EE
+0042E0  34 38 36 0E                   MOVE.w $360E.w,d2
+0042E4  B4 7C 00 06                   CMP.w #$6,d2
+0042E8  6F 04                         BLE $0042EE
+0042EA  32 38 01 22                   MOVE.w $122.w,d1
+0042EE  31 C0 01 24                   MOVE.w d0,$124.w
+0042F2  31 C1 01 26                   MOVE.w d1,$126.w
+0042F6  4E 75                         RTS
+
+; ==== sub_0042F8 (1 caller) ====
+0042F8  4C B8 00 03 01 04             MOVEM.w $104.w,d0-d1
+0042FE  D0 7C 00 0C                   ADD.w #$C,d0
+004302  54 41                         ADDQ.w #2,d1
+004304  4A 38 02 6C                   TST.b $26C.w
+004308  67 02                         BEQ $00430C
+00430A  5D 40                         SUBQ.w #6,d0
+00430C  34 00                         MOVE.w d0,d2
+00430E  36 01                         MOVE.w d1,d3
+004310  D4 7C 00 0E                   ADD.w #$E,d2
+004314  D6 7C 00 22                   ADD.w #$22,d3
+004318  4A 38 38 E8                   TST.b $38E8.w
+00431C  66 08                         BNE $004326
+00431E  4A 78 01 F0                   TST.w $1F0.w
+004322  67 08                         BEQ $00432C
+004324  6B 06                         BMI $00432C
+004326  D2 7C 00 0E                   ADD.w #$E,d1
+00432A  60 14                         BRA $004340
+00432C  0C 78 00 20 02 5C             CMPI.w #$20,$25C.w
+004332  67 08                         BEQ $00433C
+004334  0C 78 00 21 02 5C             CMPI.w #$21,$25C.w
+00433A  66 04                         BNE $004340
+00433C  59 41                         SUBQ.w #4,d1
+00433E  5F 43                         SUBQ.w #7,d3
+004340  48 B8 00 0F 02 64             MOVEM.w d0-d3,$264.w
+004346  3C 38 02 62                   MOVE.w $262.w,d6
+00434A  8C 38 38 E8                   OR.b $38E8.w,d6
+00434E  4B F8 4A BA                   LEA $4ABA.w,a5
+004352  7E 0E                         MOVEQ #$E,d7
+004354  4A 55                         TST.w (a5)
+004356  67 2C                         BEQ $004384
+004358  4C B8 00 0F 02 64             MOVEM.w $264.w,d0-d3
+00435E  4C AD 00 30 00 02             MOVEM.w $2(a5),d4-d5
+004364  B8 42                         CMP.w d2,d4
+004366  6E 1C                         BGT $004384
+004368  BA 43                         CMP.w d3,d5
+00436A  6E 18                         BGT $004384
+00436C  5C 44                         ADDQ.w #6,d4
+00436E  B8 40                         CMP.w d0,d4
+004370  6D 12                         BLT $004384
+004372  5C 45                         ADDQ.w #6,d5
+004374  BA 41                         CMP.w d1,d5
+004376  6D 0C                         BLT $004384
+004378  42 55                         CLR.w (a5)
+00437A  4A 46                         TST.w d6
+00437C  66 06                         BNE $004384
+00437E  72 04                         MOVEQ #$4,d1
+004380  61 00 33 CC                   BSR $00774E
+004384  5C 4D                         ADDQ.w #6,a5
+004386  51 CF FF CC                   DBRA d7,$004354
+00438A  4E 75                         RTS
 
 ; ==== sub_00438C (1 caller) ====
-00438C  4C B8                         .dc.w $4CB8
-00438E  .dc.b 00 0F 02 64 4C AD 00 30 00 18 28 6D 00 08 3C 2D ; ...dL..0..(m..<-
-00439E  .dc.b 00 0C E7 4E D8 C6 D8 5C B4 44 6D 2A DA 5C B6 45 ; ...N...\.Dm*.\.E
-0043AE  .dc.b 6D 24 D8 5C B0 44 6E 1E DA 5C B2 45 6E 18 4A 38 ; m$.\.Dn..\.En.J8
-0043BE  .dc.b 38 E8 67 04 7C FF 4E 75 4A 78 02 62 67 04 7C FF ; 8.g.|.NuJx.bg.|.
-0043CE  .dc.b 4E 75 7C 01 4E 75 7C 00 4E 75                   ; Nu|.Nu|.Nu
+00438C  4C B8 00 0F 02 64             MOVEM.w $264.w,d0-d3
+004392  4C AD 00 30 00 18             MOVEM.w $18(a5),d4-d5
+004398  28 6D 00 08                   MOVEA.l $8(a5),a4
+00439C  3C 2D 00 0C                   MOVE.w $C(a5),d6
+0043A0  E7 4E                         LSL.w #3,d6
+0043A2  D8 C6                         ADDA.w d6,a4
+0043A4  D8 5C                         ADD.w (a4)+,d4
+0043A6  B4 44                         CMP.w d4,d2
+0043A8  6D 2A                         BLT $0043D4
+0043AA  DA 5C                         ADD.w (a4)+,d5
+0043AC  B6 45                         CMP.w d5,d3
+0043AE  6D 24                         BLT $0043D4
+0043B0  D8 5C                         ADD.w (a4)+,d4
+0043B2  B0 44                         CMP.w d4,d0
+0043B4  6E 1E                         BGT $0043D4
+0043B6  DA 5C                         ADD.w (a4)+,d5
+0043B8  B2 45                         CMP.w d5,d1
+0043BA  6E 18                         BGT $0043D4
+0043BC  4A 38 38 E8                   TST.b $38E8.w
+0043C0  67 04                         BEQ $0043C6
+0043C2  7C FF                         MOVEQ #$FF,d6
+0043C4  4E 75                         RTS
+0043C6  4A 78 02 62                   TST.w $262.w
+0043CA  67 04                         BEQ $0043D0
+0043CC  7C FF                         MOVEQ #$FF,d6
+0043CE  4E 75                         RTS
+0043D0  7C 01                         MOVEQ #$1,d6
+0043D2  4E 75                         RTS
+0043D4  7C 00                         MOVEQ #$0,d6
+0043D6  4E 75                         RTS
 
 ; ==== sub_0043D8 (5 callers) ====
 0043D8  4A 38 02 52                   TST.b $252.w
 0043DC  67 02                         BEQ $0043E0
 0043DE  4E 75                         RTS
-0043E0  4C B8                         .dc.w $4CB8
-0043E2  .dc.b 00 03 01 04 4A 78 02 62 67 3A 53 78 02 62 53 78 ; ....Jx.bg:Sx.bSx
-0043F2  .dc.b 02 60 6A 10 31 FC 00 03 02 60 52 78 02 5E 02 78 ; .`j.1....`Rx.^.x
-004402  .dc.b 00 07 02 5E 38 38 02 62 B8 7C 00 64 6C 06 C8 7C ; ...^88.b.|.dl..|
-004412  .dc.b 00 03 60 04 C8 7C 00 01 66 0A 38 38 02 5E D8 7C ; ..`..|..f.88.^.|
-004422  .dc.b 00 26 60 04 38 38 02 5C E7 4C 41 F8 45 AE D0 C4 ; .&`.88.\.LA.E...
-004432  .dc.b D2 68 00 04 74 00 36 3C 00 80 D2 3C 00 0C D0 7C ; .h..t.6<...<...|
-004442  .dc.b 00 71 E2 48 64 04 08 C3 00 00 14 01 E1 4A 14 00 ; .q.Hd........J..
-004452  .dc.b D2 28 00 03 64 04 08 C3 00 01 E1 49 86 41 70 00 ; .(..d......I.Ap.
-004462  .dc.b 72 00 30 10 D0 BC 00 00 AD 00 32 28 00 06 43 F8 ; r.0.......2(..C.
-004472  .dc.b 72 94 48 40 33 40 00 02 48 40 33 40 00 06 20 40 ; r.H@3@..H@3@.. @
-004482  .dc.b 48 90 00 0C 50 49 D0 81 48 40 33 40 00 02 48 40 ; H...PI..H@3@..H@
-004492  .dc.b 33 40 00 06 20 40 48 90 00 0C 50 02 50 49 D0 81 ; 3@.. @H...P.PI..
-0044A2  .dc.b 48 40 33 40 00 02 48 40 33 40 00 06 20 40 48 90 ; H@3@..H@3@.. @H.
-0044B2  .dc.b 00 0C 50 49 D0 81 48 40 33 40 00 02 48 40 33 40 ; ..PI..H@3@..H@3@
-0044C2  .dc.b 00 06 20 40 48 90 00 0C 4E 75                   ; .. @H...Nu
+0043E0  4C B8 00 03 01 04             MOVEM.w $104.w,d0-d1
+0043E6  4A 78 02 62                   TST.w $262.w
+0043EA  67 3A                         BEQ $004426
+0043EC  53 78 02 62                   SUBQ.w #1,$262.w
+0043F0  53 78 02 60                   SUBQ.w #1,$260.w
+0043F4  6A 10                         BPL $004406
+0043F6  31 FC 00 03 02 60             MOVE.w #$3,$260.w
+0043FC  52 78 02 5E                   ADDQ.w #1,$25E.w
+004400  02 78 00 07 02 5E             ANDI.w #$7,$25E.w
+004406  38 38 02 62                   MOVE.w $262.w,d4
+00440A  B8 7C 00 64                   CMP.w #$64,d4
+00440E  6C 06                         BGE $004416
+004410  C8 7C 00 03                   AND.w #$3,d4
+004414  60 04                         BRA $00441A
+004416  C8 7C 00 01                   AND.w #$1,d4
+00441A  66 0A                         BNE $004426
+00441C  38 38 02 5E                   MOVE.w $25E.w,d4
+004420  D8 7C 00 26                   ADD.w #$26,d4
+004424  60 04                         BRA $00442A
+004426  38 38 02 5C                   MOVE.w $25C.w,d4
+00442A  E7 4C                         LSL.w #3,d4
+00442C  41 F8 45 AE                   LEA $45AE.w,a0
+004430  D0 C4                         ADDA.w d4,a0
+004432  D2 68 00 04                   ADD.w $4(a0),d1
+004436  74 00                         MOVEQ #$0,d2
+004438  36 3C 00 80                   MOVE.w #$80,d3
+00443C  D2 3C 00 0C                   ADD.b #$C,d1
+004440  D0 7C 00 71                   ADD.w #$71,d0
+004444  E2 48                         LSR.w #1,d0
+004446  64 04                         BCC $00444C
+004448  08 C3 00 00                   BSET.l #$0,d3
+00444C  14 01                         MOVE.b d1,d2
+00444E  E1 4A                         LSL.w #8,d2
+004450  14 00                         MOVE.b d0,d2
+004452  D2 28 00 03                   ADD.b $3(a0),d1
+004456  64 04                         BCC $00445C
+004458  08 C3 00 01                   BSET.l #$1,d3
+00445C  E1 49                         LSL.w #8,d1
+00445E  86 41                         OR.w d1,d3
+004460  70 00                         MOVEQ #$0,d0
+004462  72 00                         MOVEQ #$0,d1
+004464  30 10                         MOVE.w (a0),d0
+004466  D0 BC 00 00 AD 00             ADD.l #$AD00,d0
+00446C  32 28 00 06                   MOVE.w $6(a0),d1
+004470  43 F8 72 94                   LEA $7294.w,a1
+004474  48 40                         SWAP d0
+004476  33 40 00 02                   MOVE.w d0,$2(a1)
+00447A  48 40                         SWAP d0
+00447C  33 40 00 06                   MOVE.w d0,$6(a1)
+004480  20 40                         MOVEA.l d0,a0
+004482  48 90 00 0C                   MOVEM.w d2-d3,(a0)
+004486  50 49                         ADDQ.w #8,a1
+004488  D0 81                         ADD.l d1,d0
+00448A  48 40                         SWAP d0
+00448C  33 40 00 02                   MOVE.w d0,$2(a1)
+004490  48 40                         SWAP d0
+004492  33 40 00 06                   MOVE.w d0,$6(a1)
+004496  20 40                         MOVEA.l d0,a0
+004498  48 90 00 0C                   MOVEM.w d2-d3,(a0)
+00449C  50 02                         ADDQ.b #8,d2
+00449E  50 49                         ADDQ.w #8,a1
+0044A0  D0 81                         ADD.l d1,d0
+0044A2  48 40                         SWAP d0
+0044A4  33 40 00 02                   MOVE.w d0,$2(a1)
+0044A8  48 40                         SWAP d0
+0044AA  33 40 00 06                   MOVE.w d0,$6(a1)
+0044AE  20 40                         MOVEA.l d0,a0
+0044B0  48 90 00 0C                   MOVEM.w d2-d3,(a0)
+0044B4  50 49                         ADDQ.w #8,a1
+0044B6  D0 81                         ADD.l d1,d0
+0044B8  48 40                         SWAP d0
+0044BA  33 40 00 02                   MOVE.w d0,$2(a1)
+0044BE  48 40                         SWAP d0
+0044C0  33 40 00 06                   MOVE.w d0,$6(a1)
+0044C4  20 40                         MOVEA.l d0,a0
+0044C6  48 90 00 0C                   MOVEM.w d2-d3,(a0)
+0044CA  4E 75                         RTS
 
 ; ==== sub_0044CC (3 callers) ====
 0044CC  42 6E 00 36                   CLR.w $36(a6)
@@ -2997,258 +4178,283 @@
 0044DC  67 06                         BEQ $0044E4
 0044DE  5C 4D                         ADDQ.w #6,a5
 0044E0  51 C9 FF F8                   DBRA d1,$0044DA
-0044E4  4C AD                         .dc.w $4CAD
-0044E6  .dc.b 00 03 00 02 4A 38 01 E7 66 12 08 39 00 07 00 BF ; ....J8..f..9....
-0044F6  .dc.b E0 01 66 24 50 F8 01 E7 50 F8 01 E6 08 39 00 07 ; ..f$P...P....9..
-004506  .dc.b 00 BF E0 01 67 0E 42 78 01 EA 51 F8 01 E7 51 F8 ; ....g.Bx..Q...Q.
-004516  .dc.b 01 E6 60 04 52 78 01 EA 4A 38 01 E9 66 16 3D 7C ; ..`.Rx..J8..f.=|
-004526  .dc.b FF 00 00 34 08 2E 00 0E 00 16 66 28 50 F8 01 E9 ; ...4......f(P...
-004536  .dc.b 50 F8 01 E8 3D 7C FF 00 00 34 08 2E 00 0E 00 16 ; P...=|...4......
-004546  .dc.b 67 0E 42 78 01 EC 51 F8 01 E9 51 F8 01 E8 60 04 ; g.Bx..Q...Q...`.
-004556  .dc.b 52 78 01 EC 4A 38 01 E0 67 06 20 78 01 E2 4E D0 ; Rx..J8..g. x..N.
-004566  .dc.b 4E 75 00 00 00 00 00 00 03 00 FF FF 00 00 00 03 ; Nu..............
-004576  .dc.b 00 01 00 00 01 00 00 00 FF FF 00 01 00 00 00 01 ; ................
-004586  .dc.b 02 00 FF FF FF FF 03 01 FF FF 00 01 00 02 00 01 ; ................
-004596  .dc.b 00 01 01 03 00 01 FF FF 00 00 00 00 00 00 00 00 ; ................
-0045A6  .dc.b 00 00 00 00 00 00 00 00 00 00 00 25 00 00 00 9C ; ...........%....
-0045B6  .dc.b 02 70 00 25 00 00 00 9C 04 E0 00 25 00 00 00 9C ; .p.%.......%....
-0045C6  .dc.b 07 50 00 25 00 00 00 9C 09 C0 00 25 00 00 00 9C ; .P.%.......%....
-0045D6  .dc.b 0C 30 00 25 00 00 00 9C 0E A0 00 25 00 00 00 9C ; .0.%.......%....
-0045E6  .dc.b 11 10 00 25 00 00 00 9C 13 80 00 25 00 00 00 9C ; ...%.......%....
-0045F6  .dc.b 15 F0 00 25 00 00 00 9C 18 60 00 25 00 00 00 9C ; ...%.....`.%....
-004606  .dc.b 1A D0 00 25 00 00 00 9C 1D 40 00 25 00 00 00 9C ; ...%.....@.%....
-004616  .dc.b 1F B0 00 25 00 00 00 9C 22 20 00 25 00 00 00 9C ; ...%...." .%....
-004626  .dc.b 24 90 00 25 00 00 00 9C 27 00 00 25 00 00 00 9C ; $..%....'..%....
-004636  .dc.b 29 70 00 25 00 00 00 9C 2B E0 00 25 00 00 00 9C ; )p.%....+..%....
-004646  .dc.b 2E 50 00 25 00 00 00 9C 30 C0 00 25 00 00 00 9C ; .P.%....0..%....
-004656  .dc.b 33 30 00 25 00 00 00 9C 35 A0 00 25 00 00 00 9C ; 30.%....5..%....
-004666  .dc.b 38 10 00 25 00 00 00 9C 3A 80 00 25 00 00 00 9C ; 8..%....:..%....
-004676  .dc.b 3C F0 00 25 00 00 00 9C 3F 60 00 25 00 00 00 9C ; <..%....?`.%....
-004686  .dc.b 41 D0 00 25 00 00 00 9C 44 40 00 25 00 00 00 9C ; A..%....D@.%....
-004696  .dc.b 46 B0 00 25 00 00 00 9C 49 20 00 25 00 00 00 9C ; F..%....I .%....
-0046A6  .dc.b 4B 90 00 25 00 00 00 9C 4E 00 00 29 00 00 00 AC ; K..%....N..)....
-0046B6  .dc.b 50 B0 00 29 00 00 00 AC 53 60 00 15 00 10 00 5C ; P..)....S`.....\
-0046C6  .dc.b 54 D0 00 15 00 10 00 5C 56 40 00 15 00 10 00 5C ; T......\V@.....\
-0046D6  .dc.b 57 B0 00 15 00 10 00 5C A2 08 00 29 FF FE 00 AC ; W......\...)....
-0046E6  .dc.b A4 B8 00 29 FF FE 00 AC A7 68 00 29 FF FE 00 AC ; ...).....h.)....
-0046F6  .dc.b AA 18 00 29 FF FE 00 AC AC C8 00 29 FF FE 00 AC ; ...).......)....
-004706  .dc.b AF 78 00 29 FF FE 00 AC B2 28 00 29 FF FE 00 AC ; .x.).....(.)....
-004716  .dc.b B4 D8 00 29 FF FE 00 AC 04 04 05 05 06 06 07 07 ; ...)............
-004726  .dc.b 08 08 09 09 0A 0A 0B 0B 0C 0C 0D 0D 0E 0E 0F 0F ; ................
-004736  .dc.b 10 10 11 11 FF 12 12 13 13 14 14 15 15 16 16 17 ; ................
-004746  .dc.b 17 18 18 19 19 1A 1A 1B 1B 1C 1C 1D 1D 1E 1E 1F ; ................
-004756  .dc.b 1F FF 22 23 24 25 FF 25 24 23 22 FF 00 00 00 00 ; .."#$%.%$#".....
-004766  .dc.b 00 00 00 00 00 00 00 00 FF F9 FF F9 FF FA FF FA ; ................
-004776  .dc.b FF FB FF FA FF FB FF FB FF FC FF FC FF FC FF FC ; ................
-004786  .dc.b FF FD FF FD FF FD FF FD FF FD FF FE FF FE FF FE ; ................
-004796  .dc.b FF FE FF FE FF FE FF FF FF FF FF FF FF FF FF FF ; ................
-0047A6  .dc.b FF FF FF FF 00 00 00 00 00 00 00 00 00 01 00 01 ; ................
-0047B6  .dc.b 00 01 00 02 00 02 00 02 00 03 00 03 00 04 80 00 ; ................
-0047C6  .dc.b 00 00 00 00 FF FD FF FE FF FE FF FF FF FF 00 00 ; ................
-0047D6  .dc.b 00 01 00 01 00 02 00 02 00 03 00 04 80 01 00 00 ; ................
-0047E6  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-0047F6  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-004806  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-004816  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-004826  .dc.b 00 00 00 00 00 00 00 00 00 00 00 01 0C 58 00 01 ; .............X..
-004836  .dc.b 0C B8 00 BC 04 02 10 00 00 01 0C D8 00 01 0D 38 ; ...............8
-004846  .dc.b 00 BC 04 02 10 00 00 01 4B 88 00 01 4B E8 00 BC ; ........K...K...
-004856  .dc.b 04 02 10 00 00 00 00 01 4B 88 00 01 4B E8 00 BC ; ........K...K...
-004866  .dc.b 04 02 10 00 00 00 00 01 4C 08 00 01 4C 68 00 BC ; ........L...Lh..
-004876  .dc.b 04 02 10 00 00 00 00 01 4C 08 00 01 4C 68 00 BC ; ........L...Lh..
-004886  .dc.b 04 02 10 00 00 00 00 01 4C 88 00 01 4C E8 00 BC ; ........L...L...
-004896  .dc.b 04 02 10 00 00 00 00 01 4C 88 00 01 4C E8 00 BC ; ........L...L...
-0048A6  .dc.b 04 02 10 00 00 00 00 01 4D 08 00 01 4D 68 00 BC ; ........M...Mh..
-0048B6  .dc.b 04 02 10 00 00 00 00 01 4D 08 00 01 4D 68 00 BC ; ........M...Mh..
-0048C6  .dc.b 04 02 10 00 00 00 00 01 4D 88 00 01 4D E8 00 BC ; ........M...M...
-0048D6  .dc.b 04 02 10 00 00 00 00 01 4D 88 00 01 4D E8 00 BC ; ........M...M...
-0048E6  .dc.b 04 02 10 00 00 00 00 01 09 D8 00 01 0A 38 00 BC ; .............8..
-0048F6  .dc.b 04 02 10 00 00 00 00 01 09 D8 00 01 0A 38 00 BC ; .............8..
-004906  .dc.b 04 02 10 00 00 00 00 01 0A 58 00 01 0A B8 00 BC ; .........X......
-004916  .dc.b 04 02 10 00 00 00 00 01 0A 58 00 01 0A B8 00 BC ; .........X......
-004926  .dc.b 04 02 10 00 00 00 00 01 0A D8 00 01 0B 38 00 BC ; .............8..
-004936  .dc.b 04 02 10 00 00 00 00 01 0A D8 00 01 0B 38 00 BC ; .............8..
-004946  .dc.b 04 02 10 00 00 00 00 01 0B 58 00 01 0B B8 00 BC ; .........X......
-004956  .dc.b 04 02 10 00 00 00 00 01 0B 58 00 01 0B B8 00 BC ; .........X......
-004966  .dc.b 04 02 10 00 00 00 00 01 0B D8 00 01 0C 38 00 BC ; .............8..
-004976  .dc.b 04 02 10 00 00 00 00 01 0B D8 00 01 0C 38 00 BC ; .............8..
-004986  .dc.b 04 02 10 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-004996  .dc.b 00 00 00 00 00 00 00 01 06 20 00 01 06 4A 00 BC ; ......... ...J..
-0049A6  .dc.b 01 C2 07 00 00 00 00 01 06 58 00 01 06 82 00 BC ; .........X......
-0049B6  .dc.b 01 C2 07 00 00 00 00 01 06 90 00 01 06 BA 00 BC ; ................
-0049C6  .dc.b 01 C2 07 00 00 00 00 01 06 C8 00 01 06 F2 00 BC ; ................
-0049D6  .dc.b 01 C2 07 00 00 00 00 01 07 00 00 01 07 2A 00 BC ; .............*..
-0049E6  .dc.b 01 C2 07 00 00 00 00 01 07 38 00 01 07 62 00 BC ; .........8...b..
-0049F6  .dc.b 01 C2 07 00 00 00 00 01 07 70 00 01 07 9A 00 BC ; .........p......
-004A06  .dc.b 01 C2 07 00 00 00 00 01 07 A8 00 01 07 D2 00 BC ; ................
-004A16  .dc.b 01 C2 07 00 00 00 00 01 07 E0 00 01 08 0A 00 BC ; ................
-004A26  .dc.b 01 C2 07 00 00 00 00 01 08 18 00 01 08 42 00 BC ; .............B..
-004A36  .dc.b 01 C2 07 00 00 00 00 01 08 50 00 01 08 7A 00 BC ; .........P...z..
-004A46  .dc.b 01 C2 07 00 00 00 00 01 08 88 00 01 08 B2 00 BC ; ................
-004A56  .dc.b 01 C2 07 00 00 00 00 01 08 C0 00 01 08 EA 00 BC ; ................
-004A66  .dc.b 01 C2 07 00 00 00 00 01 08 F8 00 01 09 22 00 BC ; ............."..
-004A76  .dc.b 01 C2 07 00 00 00 00 01 09 30 00 01 09 5A 00 BC ; .........0...Z..
-004A86  .dc.b 01 C2 07 00 00 00 00 01 09 68 00 01 09 92 00 BC ; .........h......
-004A96  .dc.b 01 C2 07 00 00 00 00 01 09 A0 00 01 09 CA 00 BC ; ................
-004AA6  .dc.b 01 C2 07 00 00 00 00 01 08 C0 00 01 08 EA 00 BC ; ................
-004AB6  .dc.b 01 C2 07 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-004AC6  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-004AD6  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-004AE6  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-004AF6  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-004B06  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-004B16  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-004B26  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 FF FE 00 00 ; ................
-004B36  .dc.b FF FE FF FF FF FE FF FE FF FF FF FE 00 00 FF FE ; ................
-004B46  .dc.b 00 01 FF FE 00 02 FF FE 00 02 FF FF 00 02 00 00 ; ................
-004B56  .dc.b 00 02 00 01 00 02 00 02 00 01 00 02 00 00 00 02 ; ................
-004B66  .dc.b FF FF 00 02 FF FE 00 02 FF FE 00 01 FF FC 00 01 ; ................
-004B76  .dc.b FF FE 00 02 00 00 00 03 00 02 00 02 00 04 00 01 ; ................
-004B86  .dc.b FF FC 00 01 FF FC 00 00 FF FC FF FF 00 04 00 01 ; ................
-004B96  .dc.b 00 04 00 00 00 04 FF FF 00 00 00 00 00 00 00 00 ; ................
-004BA6  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-004BB6  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-004BC6  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-004BD6  .dc.b 00 00 00 00 00 00 00 00 00 01 09 68 00 01 09 92 ; ...........h....
-004BE6  .dc.b 00 BC 01 C2 07 00 00 01 09 30 00 01 09 5A 00 BC ; .........0...Z..
-004BF6  .dc.b 01 C2 07 00 00 01 09 A0 00 01 09 CA 00 BC 01 C2 ; ................
-004C06  .dc.b 07 00 00 01 08 F8 00 01 09 22 00 BC 01 C2 07 00 ; ........."......
-004C16  .dc.b 00 00 4C 1E 00 00 4C 2C 00 01 08 50 00 01 08 7A ; ..L...L,...P...z
-004C26  .dc.b 00 BC 01 C2 07 00 00 01 08 88 00 01 08 B2 00 BC ; ................
-004C36  .dc.b 01 C2 07 00 00 00 4C 5A 00 00 4C 68 00 00 4C 76 ; ......LZ..Lh..Lv
-004C46  .dc.b 00 00 4C 84 00 00 4C 92 00 00 4C A0 00 00 4C AE ; ..L...L...L...L.
-004C56  .dc.b 00 00 4C BC 00 01 17 E8 00 01 19 68 00 BA 08 03 ; ..L........h....
-004C66  .dc.b 20 00 00 01 19 E8 00 01 1B 68 00 BA 08 03 20 00 ;  ........h.... .
-004C76  .dc.b 00 01 1B E8 00 01 1D 68 00 BA 08 03 20 00 00 01 ; .......h.... ...
-004C86  .dc.b 1D E8 00 01 1F 68 00 BA 08 03 20 00 00 01 1F E8 ; .....h.... .....
-004C96  .dc.b 00 01 21 68 00 BA 08 03 20 00 00 01 21 E8 00 01 ; ..!h.... ...!...
-004CA6  .dc.b 23 68 00 BA 08 03 20 00 00 01 23 E8 00 01 25 68 ; #h.... ...#...%h
-004CB6  .dc.b 00 BA 08 03 20 00 00 01 25 E8 00 01 27 68 00 BA ; .... ...%...'h..
-004CC6  .dc.b 08 03 20 00 00 00 51 56 00 00 51 64 00 00 51 72 ; .. ...QV..Qd..Qr
-004CD6  .dc.b 00 00 51 80 00 00 51 8E 00 00 51 9C 00 00 51 AA ; ..Q...Q...Q...Q.
-004CE6  .dc.b 00 00 51 B8 00 00 51 C6 00 00 51 D4 00 00 51 E2 ; ..Q...Q...Q...Q.
-004CF6  .dc.b 00 00 51 F0 00 00 51 FE 00 00 52 0C 00 00 52 1A ; ..Q...Q...R...R.
-004D06  .dc.b 00 00 52 28 00 00 52 36 00 00 52 44 00 00 52 52 ; ..R(..R6..RD..RR
-004D16  .dc.b 00 00 52 66 00 00 52 7A 00 00 52 8E 00 00 52 A2 ; ..Rf..Rz..R...R.
-004D26  .dc.b 00 00 52 B6 00 00 52 CA 00 00 52 DE 00 00 52 F2 ; ..R...R...R...R.
-004D36  .dc.b 00 00 53 06 00 00 53 1A 00 00 53 2E 00 00 53 42 ; ..S...S...S...SB
-004D46  .dc.b 00 00 53 56 00 00 53 86 00 00 53 94 00 00 53 A2 ; ..SV..S...S...S.
-004D56  .dc.b FF E0 00 00 FF E3 FF F9 FF E4 FF F3 FF E6 FF EF ; ................
-004D66  .dc.b FF E9 FF EA FF EE FF E5 FF F3 FF E4 FF F9 FF E2 ; ................
-004D76  .dc.b 00 00 FF E0 00 07 FF E2 00 0D FF E4 00 12 FF E5 ; ................
-004D86  .dc.b 00 17 FF EA 00 1A FF EF 00 1C FF F3 00 1D FF F9 ; ................
-004D96  .dc.b 00 20 00 00 00 1D 00 07 00 1C 00 0D 00 1A 00 11 ; . ..............
-004DA6  .dc.b 00 17 00 16 00 12 00 1B 00 0D 00 1C 00 07 00 1E ; ................
-004DB6  .dc.b 00 00 00 20 FF F9 00 1E FF F3 00 1C FF EE 00 1B ; ... ............
-004DC6  .dc.b FF E9 00 16 FF E6 00 11 FF E4 00 0D FF E3 00 07 ; ................
-004DD6  .dc.b FF E0 FF FB FF E0 FF F5 FF E2 FF F0 FF E4 FF EB ; ................
-004DE6  .dc.b FF E7 FF E7 FF EB FF E5 FF EE FF E3 FF F4 FF E2 ; ................
-004DF6  .dc.b FF FA FF E2 FF FA FF E2 FF FC FF E3 FF FD FF E5 ; ................
-004E06  .dc.b FF FB FF E8 FF FC FF EC FF FE FF F0 FF FF FF F5 ; ................
-004E16  .dc.b FF FF FF FA FF FE FF FC FF FD FF FE FF FB FF FD ; ................
-004E26  .dc.b FF FB FF FE FF FA FF FE FF FB FF FE FF FB FF FF ; ................
-004E36  .dc.b FF F9 00 01 FF F4 FF FF FF F1 FF FF FF E9 00 00 ; ................
-004E46  .dc.b FF E6 FF FE FF E3 FF FE FF E2 FF FD FF E1 FF FC ; ................
-004E56  .dc.b 00 1B 00 07 00 10 00 07 00 05 00 07 00 1A 00 0A ; ................
-004E66  .dc.b 00 10 00 08 00 07 00 06 00 18 00 0E 00 10 00 0A ; ................
-004E76  .dc.b 00 08 00 07 00 17 00 12 00 0F 00 0C 00 09 00 07 ; ................
-004E86  .dc.b 00 16 00 16 00 10 00 10 00 08 00 08 00 13 00 17 ; ................
-004E96  .dc.b 00 0E 00 10 00 09 00 08 00 0F 00 17 00 0C 00 10 ; ................
-004EA6  .dc.b 00 09 00 08 00 0A 00 19 00 09 00 11 00 07 00 08 ; ................
-004EB6  .dc.b 00 06 00 1A 00 06 00 0F 00 06 00 06 00 07 00 18 ; ................
-004EC6  .dc.b 00 08 00 10 00 0A 00 06 00 08 00 18 00 0B 00 0F ; ................
-004ED6  .dc.b 00 0F 00 07 00 08 00 18 00 0E 00 11 00 12 00 09 ; ................
-004EE6  .dc.b 00 07 00 16 00 0F 00 0F 00 15 00 09 00 09 00 11 ; ................
-004EF6  .dc.b 00 10 00 0C 00 18 00 06 00 07 00 0F 00 10 00 0B ; ................
-004F06  .dc.b 00 18 00 08 00 07 00 0B 00 10 00 09 00 19 00 07 ; ................
-004F16  .dc.b 00 05 00 07 00 10 00 07 00 1B 00 07 00 07 00 06 ; ................
-004F26  .dc.b 00 10 00 08 00 1A 00 0A 00 08 00 07 00 10 00 0A ; ................
-004F36  .dc.b 00 18 00 0E 00 09 00 07 00 0F 00 0C 00 17 00 12 ; ................
-004F46  .dc.b 00 08 00 08 00 10 00 10 00 16 00 16 00 09 00 08 ; ................
-004F56  .dc.b 00 0E 00 10 00 13 00 17 00 09 00 08 00 17 00 10 ; ................
-004F66  .dc.b 00 0F 00 17 00 07 00 08 00 09 00 11 00 0A 00 19 ; ................
-004F76  .dc.b 00 06 00 06 00 06 00 0F 00 06 00 1A 00 0A 00 06 ; ................
-004F86  .dc.b 00 08 00 10 00 07 00 18 00 0F 00 07 00 0B 00 0F ; ................
-004F96  .dc.b 00 08 00 18 00 12 00 09 00 0E 00 11 00 08 00 18 ; ................
-004FA6  .dc.b 00 15 00 09 00 0F 00 0F 00 07 00 16 00 18 00 06 ; ................
-004FB6  .dc.b 00 10 00 0C 00 09 00 11 00 18 00 08 00 10 00 0B ; ................
-004FC6  .dc.b 00 07 00 0F 00 19 00 07 00 10 00 09 00 07 00 0B ; ................
-004FD6  .dc.b 00 00 4E 56 00 00 4E 62 00 00 4E 6E 00 00 4E 7A ; ..NV..Nb..Nn..Nz
-004FE6  .dc.b 00 00 4E 86 00 00 4E 92 00 00 4E 9E 00 00 4E AA ; ..N...N...N...N.
-004FF6  .dc.b 00 00 4E B6 00 00 4E C2 00 00 4E CE 00 00 4E DA ; ..N...N...N...N.
-005006  .dc.b 00 00 4E E6 00 00 4E F2 00 00 4E FE 00 00 4F 0A ; ..N...N...N...O.
-005016  .dc.b 00 00 4F 16 00 00 4F 22 00 00 4F 2E 00 00 4F 3A ; ..O...O"..O...O:
-005026  .dc.b 00 00 4F 46 00 00 4F 52 00 00 4F 5E 00 00 4F 6A ; ..OF..OR..O^..Oj
-005036  .dc.b 00 00 4F 76 00 00 4F 82 00 00 4F 8E 00 00 4F 9A ; ..Ov..O...O...O.
-005046  .dc.b 00 00 4F A6 00 00 4F B2 00 00 4F BE 00 00 4F CA ; ..O...O...O...O.
-005056  .dc.b FF F9 FF F7 FF F9 FF F7 FF FB FF F7 FF FA FF F7 ; ................
-005066  .dc.b FF FA FF F9 FF F9 FF FA FF F6 FF FA FF F6 FF FB ; ................
-005076  .dc.b FF F6 FF F9 FF F9 FF FB FF FC FF FB 00 00 FF F9 ; ................
-005086  .dc.b 00 02 FF F9 00 04 FF F8 00 06 FF F8 00 05 FF F7 ; ................
-005096  .dc.b 00 07 FF F7 00 05 FF F9 00 06 FF FC 00 04 00 00 ; ................
-0050A6  .dc.b 00 02 00 04 00 00 00 07 FF FC 00 05 FF F9 00 05 ; ................
-0050B6  .dc.b FF F6 00 07 FF F6 00 05 FF F6 00 05 FF F9 00 06 ; ................
-0050C6  .dc.b FF FA 00 05 FF FA 00 00 FF FB FF FC FF F9 FF F7 ; ................
-0050D6  .dc.b FF FB FF FE FF FC FF FC FF FC FF FC FF FD FF FC ; ................
-0050E6  .dc.b FF FC FF FB FF FD FF FB FF FB FF FA FF FC FF F9 ; ................
-0050F6  .dc.b FF FE FF F9 00 05 FF F9 00 09 FF FA 00 0F FF FB ; ................
-005106  .dc.b 00 14 FF FB 00 13 FF FC 00 14 FF FC 00 14 FF FC ; ................
-005116  .dc.b 00 15 FF FE 00 14 00 04 00 14 00 08 00 13 00 0C ; ................
-005126  .dc.b 00 13 00 11 00 0F 00 14 00 08 00 14 00 04 00 15 ; ................
-005136  .dc.b FF FE 00 16 FF FB 00 15 FF FC 00 14 FF FD 00 14 ; ................
-005146  .dc.b FF FD 00 11 FF FD 00 0C FF FC 00 08 FF FC 00 04 ; ................
-005156  .dc.b 00 01 27 E8 00 01 28 90 00 BA 03 83 0E 00 00 01 ; ..'...(.........
-005166  .dc.b 28 C8 00 01 29 70 00 BA 03 83 0E 00 00 01 29 A8 ; (...)p........).
-005176  .dc.b 00 01 2A 80 00 BA 04 83 12 00 00 01 2A C8 00 01 ; ..*.........*...
-005186  .dc.b 2B A0 00 BA 04 83 12 00 00 01 2B E8 00 01 2C F0 ; +.........+...,.
-005196  .dc.b 00 BA 05 83 16 00 00 01 2D 48 00 01 2E 50 00 BA ; ........-H...P..
-0051A6  .dc.b 05 83 16 00 00 01 2E A8 00 01 2F D4 00 BA 06 43 ; ........../....C
-0051B6  .dc.b 19 00 00 01 30 38 00 01 31 64 00 BA 06 43 19 00 ; ....08..1d...C..
-0051C6  .dc.b 00 01 31 C8 00 01 33 30 00 BA 07 83 1E 00 00 01 ; ..1...30........
-0051D6  .dc.b 33 A8 00 01 35 10 00 BA 07 83 1E 00 00 01 35 88 ; 3...5.........5.
-0051E6  .dc.b 00 01 37 08 00 BA 08 03 20 00 00 01 37 88 00 01 ; ..7..... ...7...
-0051F6  .dc.b 39 08 00 BA 08 03 20 00 00 01 39 88 00 01 3B 08 ; 9..... ...9...;.
-005206  .dc.b 00 BA 08 03 20 00 00 01 3B 88 00 01 3D 08 00 BA ; .... ...;...=...
-005216  .dc.b 08 03 20 00 00 01 3D 88 00 01 3F 08 00 BA 08 03 ; .. ...=...?.....
-005226  .dc.b 20 00 00 01 3F 88 00 01 41 08 00 BA 08 03 20 00 ;  ...?...A..... .
-005236  .dc.b 00 01 41 88 00 01 43 08 00 BA 08 03 20 00 00 01 ; ..A...C..... ...
-005246  .dc.b 43 88 00 01 45 08 00 BA 08 03 20 00 00 01 3D 88 ; C...E..... ...=.
-005256  .dc.b 00 01 3F 08 00 BA 08 03 20 01 FF F6 00 01 3F 84 ; ..?..... .....?.
-005266  .dc.b 00 01 3F 88 00 01 41 08 00 BA 08 03 20 01 FF F6 ; ..?...A..... ...
-005276  .dc.b 00 01 41 84 00 01 39 88 00 01 3B 08 00 BA 08 03 ; ..A...9...;.....
-005286  .dc.b 20 01 FF F6 00 01 3B 84 00 01 3B 88 00 01 3D 08 ;  .....;...;...=.
-005296  .dc.b 00 BA 08 03 20 01 FF F6 00 01 3D 84 00 01 35 88 ; .... .....=...5.
-0052A6  .dc.b 00 01 37 08 00 BA 08 03 20 01 FF F6 00 01 37 84 ; ..7..... .....7.
-0052B6  .dc.b 00 01 37 88 00 01 39 08 00 BA 08 03 20 01 FF F6 ; ..7...9..... ...
-0052C6  .dc.b 00 01 39 84 00 01 31 C8 00 01 33 30 00 BA 07 83 ; ..9...1...30....
-0052D6  .dc.b 1E 01 FF F6 00 01 33 A4 00 01 33 A8 00 01 35 10 ; ......3...3...5.
-0052E6  .dc.b 00 BA 07 83 1E 01 FF F6 00 01 35 84 00 01 2E A8 ; ..........5.....
-0052F6  .dc.b 00 01 2F D4 00 BA 06 43 19 01 FF F6 00 01 30 34 ; ../....C......04
-005306  .dc.b 00 01 30 38 00 01 31 64 00 BA 06 43 19 01 FF F6 ; ..08..1d...C....
-005316  .dc.b 00 01 31 C4 00 01 2B E8 00 01 2C F0 00 BA 05 83 ; ..1...+...,.....
-005326  .dc.b 16 01 FF F6 00 01 2D 44 00 01 2D 48 00 01 2E 50 ; ......-D..-H...P
-005336  .dc.b 00 BA 05 83 16 01 FF F6 00 01 2E A4 00 01 29 A8 ; ..............).
-005346  .dc.b 00 01 2A 80 00 BA 04 83 12 01 FF F6 00 01 2A C4 ; ..*...........*.
-005356  .dc.b 00 01 2A C8 00 01 2B A0 00 BA 04 83 12 01 FF F6 ; ..*...+.........
-005366  .dc.b 00 01 2B E4 00 01 13 D8 00 01 14 38 00 BC 04 02 ; ..+........8....
-005376  .dc.b 10 00 00 01 14 58 00 01 14 B8 00 BC 04 02 10 00 ; .....X..........
-005386  .dc.b 00 01 45 88 00 01 47 08 00 BA 08 03 20 00 00 01 ; ..E...G..... ...
-005396  .dc.b 47 88 00 01 49 08 00 BA 08 03 20 00 00 01 49 88 ; G...I..... ...I.
-0053A6  .dc.b 00 01 4B 08 00 BA 08 03 20 00 FF F3 00 06 00 20 ; ..K..... ...... 
-0053B6  .dc.b 00 06 FF F2 00 0F 00 21 00 0F FF F3 00 06 FF F4 ; .......!........
-0053C6  .dc.b 00 06 FF F5 00 06 FF F6 00 06 FF F7 00 05 FF F8 ; ................
-0053D6  .dc.b 00 05 FF F8 00 05 FF F9 00 06 FF F8 00 06 FF F8 ; ................
-0053E6  .dc.b 00 06 FF F7 00 05 FF F6 00 05 FF F5 00 05 FF F4 ; ................
-0053F6  .dc.b 00 05 00 20 00 06 00 1F 00 06 00 1E 00 06 00 1D ; ... ............
-005406  .dc.b 00 05 00 1C 00 05 00 1B 00 05 00 1B 00 05 00 1A ; ................
-005416  .dc.b 00 06 00 1B 00 06 00 1B 00 06 00 1C 00 05 00 1D ; ................
-005426  .dc.b 00 05 00 1E 00 05 00 1F 00 05 FF F3 00 06 00 20 ; ............... 
-005436  .dc.b 00 06 00 10 00 13 00 10 00 13 00 10 00 13 00 10 ; ................
-005446  .dc.b 00 13 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-005456  .dc.b 00 00 00 00 00 00 00 00 00 00 11 FC 00 0F 01 35 ; ...............5
-005466  .dc.b 21 FC 00 00 72 D8 02 3E 21 FC 00 00 19 D0 02 42 ; !...r..>!......B
-005476  .dc.b 31 FC 00 1E 02 46 11 FC 00 01 02 48 41 F9 00 00 ; 1....F.....HA...
-005486  .dc.b 72 D8 70 1E 31 41 00 02 58 48 51 C8 FF F8 4E 75 ; r.p.1A..XHQ...Nu
+0044E4  4C AD 00 03 00 02             MOVEM.w $2(a5),d0-d1
+0044EA  4A 38 01 E7                   TST.b $1E7.w
+0044EE  66 12                         BNE $004502
+0044F0  08 39 00 07 00 BF E0 01       BTST.b #$7,$BFE001.l
+0044F8  66 24                         BNE $00451E
+0044FA  50 F8 01 E7                   ST $1E7.w
+0044FE  50 F8 01 E6                   ST $1E6.w
+004502  08 39 00 07 00 BF E0 01       BTST.b #$7,$BFE001.l
+00450A  67 0E                         BEQ $00451A
+00450C  42 78 01 EA                   CLR.w $1EA.w
+004510  51 F8 01 E7                   SF $1E7.w
+004514  51 F8 01 E6                   SF $1E6.w
+004518  60 04                         BRA $00451E
+00451A  52 78 01 EA                   ADDQ.w #1,$1EA.w
+00451E  4A 38 01 E9                   TST.b $1E9.w
+004522  66 16                         BNE $00453A
+004524  3D 7C FF 00 00 34             MOVE.w #$FF00,$34(a6)
+00452A  08 2E 00 0E 00 16             BTST.b #$E,$16(a6)
+004530  66 28                         BNE $00455A
+004532  50 F8 01 E9                   ST $1E9.w
+004536  50 F8 01 E8                   ST $1E8.w
+00453A  3D 7C FF 00 00 34             MOVE.w #$FF00,$34(a6)
+004540  08 2E 00 0E 00 16             BTST.b #$E,$16(a6)
+004546  67 0E                         BEQ $004556
+004548  42 78 01 EC                   CLR.w $1EC.w
+00454C  51 F8 01 E9                   SF $1E9.w
+004550  51 F8 01 E8                   SF $1E8.w
+004554  60 04                         BRA $00455A
+004556  52 78 01 EC                   ADDQ.w #1,$1EC.w
+00455A  4A 38 01 E0                   TST.b $1E0.w
+00455E  67 06                         BEQ $004566
+004560  20 78 01 E2                   MOVEA.l $1E2.w,a0
+004564  4E D0                         JMP (a0)
+004566  4E 75                         RTS
+004568  .dc.b 00 00 00 00 00 00 03 00 FF FF 00 00 00 03 00 01 ; ................
+004578  .dc.b 00 00 01 00 00 00 FF FF 00 01 00 00 00 01 02 00 ; ................
+004588  .dc.b FF FF FF FF 03 01 FF FF 00 01 00 02 00 01 00 01 ; ................
+004598  .dc.b 01 03 00 01 FF FF 00 00 00 00 00 00 00 00 00 00 ; ................
+0045A8  .dc.b 00 00 00 00 00 00 00 00 00 25 00 00 00 9C 02 70 ; .........%.....p
+0045B8  .dc.b 00 25 00 00 00 9C 04 E0 00 25 00 00 00 9C 07 50 ; .%.......%.....P
+0045C8  .dc.b 00 25 00 00 00 9C 09 C0 00 25 00 00 00 9C 0C 30 ; .%.......%.....0
+0045D8  .dc.b 00 25 00 00 00 9C 0E A0 00 25 00 00 00 9C 11 10 ; .%.......%......
+0045E8  .dc.b 00 25 00 00 00 9C 13 80 00 25 00 00 00 9C 15 F0 ; .%.......%......
+0045F8  .dc.b 00 25 00 00 00 9C 18 60 00 25 00 00 00 9C 1A D0 ; .%.....`.%......
+004608  .dc.b 00 25 00 00 00 9C 1D 40 00 25 00 00 00 9C 1F B0 ; .%.....@.%......
+004618  .dc.b 00 25 00 00 00 9C 22 20 00 25 00 00 00 9C 24 90 ; .%...." .%....$.
+004628  .dc.b 00 25 00 00 00 9C 27 00 00 25 00 00 00 9C 29 70 ; .%....'..%....)p
+004638  .dc.b 00 25 00 00 00 9C 2B E0 00 25 00 00 00 9C 2E 50 ; .%....+..%.....P
+004648  .dc.b 00 25 00 00 00 9C 30 C0 00 25 00 00 00 9C 33 30 ; .%....0..%....30
+004658  .dc.b 00 25 00 00 00 9C 35 A0 00 25 00 00 00 9C 38 10 ; .%....5..%....8.
+004668  .dc.b 00 25 00 00 00 9C 3A 80 00 25 00 00 00 9C 3C F0 ; .%....:..%....<.
+004678  .dc.b 00 25 00 00 00 9C 3F 60 00 25 00 00 00 9C 41 D0 ; .%....?`.%....A.
+004688  .dc.b 00 25 00 00 00 9C 44 40 00 25 00 00 00 9C 46 B0 ; .%....D@.%....F.
+004698  .dc.b 00 25 00 00 00 9C 49 20 00 25 00 00 00 9C 4B 90 ; .%....I .%....K.
+0046A8  .dc.b 00 25 00 00 00 9C 4E 00 00 29 00 00 00 AC 50 B0 ; .%....N..)....P.
+0046B8  .dc.b 00 29 00 00 00 AC 53 60 00 15 00 10 00 5C 54 D0 ; .)....S`.....\T.
+0046C8  .dc.b 00 15 00 10 00 5C 56 40 00 15 00 10 00 5C 57 B0 ; .....\V@.....\W.
+0046D8  .dc.b 00 15 00 10 00 5C A2 08 00 29 FF FE 00 AC A4 B8 ; .....\...)......
+0046E8  .dc.b 00 29 FF FE 00 AC A7 68 00 29 FF FE 00 AC AA 18 ; .).....h.)......
+0046F8  .dc.b 00 29 FF FE 00 AC AC C8 00 29 FF FE 00 AC AF 78 ; .).......).....x
+004708  .dc.b 00 29 FF FE 00 AC B2 28 00 29 FF FE 00 AC B4 D8 ; .).....(.)......
+004718  .dc.b 00 29 FF FE 00 AC 04 04 05 05 06 06 07 07 08 08 ; .)..............
+004728  .dc.b 09 09 0A 0A 0B 0B 0C 0C 0D 0D 0E 0E 0F 0F 10 10 ; ................
+004738  .dc.b 11 11 FF 12 12 13 13 14 14 15 15 16 16 17 17 18 ; ................
+004748  .dc.b 18 19 19 1A 1A 1B 1B 1C 1C 1D 1D 1E 1E 1F 1F FF ; ................
+004758  .dc.b 22 23 24 25 FF 25 24 23 22 FF 00 00 00 00 00 00 ; "#$%.%$#".......
+004768  .dc.b 00 00 00 00 00 00 FF F9 FF F9 FF FA FF FA FF FB ; ................
+004778  .dc.b FF FA FF FB FF FB FF FC FF FC FF FC FF FC FF FD ; ................
+004788  .dc.b FF FD FF FD FF FD FF FD FF FE FF FE FF FE FF FE ; ................
+004798  .dc.b FF FE FF FE FF FF FF FF FF FF FF FF FF FF FF FF ; ................
+0047A8  .dc.b FF FF 00 00 00 00 00 00 00 00 00 01 00 01 00 01 ; ................
+0047B8  .dc.b 00 02 00 02 00 02 00 03 00 03 00 04 80 00 00 00 ; ................
+0047C8  .dc.b 00 00 FF FD FF FE FF FE FF FF FF FF 00 00 00 01 ; ................
+0047D8  .dc.b 00 01 00 02 00 02 00 03 00 04 80 01 00 00 00 00 ; ................
+0047E8  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+0047F8  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+004808  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+004818  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+004828  .dc.b 00 00 00 00 00 00 00 00 00 01 0C 58 00 01 0C B8 ; ...........X....
+004838  .dc.b 00 BC 04 02 10 00 00 01 0C D8 00 01 0D 38 00 BC ; .............8..
+004848  .dc.b 04 02 10 00 00 01 4B 88 00 01 4B E8 00 BC 04 02 ; ......K...K.....
+004858  .dc.b 10 00 00 00 00 01 4B 88 00 01 4B E8 00 BC 04 02 ; ......K...K.....
+004868  .dc.b 10 00 00 00 00 01 4C 08 00 01 4C 68 00 BC 04 02 ; ......L...Lh....
+004878  .dc.b 10 00 00 00 00 01 4C 08 00 01 4C 68 00 BC 04 02 ; ......L...Lh....
+004888  .dc.b 10 00 00 00 00 01 4C 88 00 01 4C E8 00 BC 04 02 ; ......L...L.....
+004898  .dc.b 10 00 00 00 00 01 4C 88 00 01 4C E8 00 BC 04 02 ; ......L...L.....
+0048A8  .dc.b 10 00 00 00 00 01 4D 08 00 01 4D 68 00 BC 04 02 ; ......M...Mh....
+0048B8  .dc.b 10 00 00 00 00 01 4D 08 00 01 4D 68 00 BC 04 02 ; ......M...Mh....
+0048C8  .dc.b 10 00 00 00 00 01 4D 88 00 01 4D E8 00 BC 04 02 ; ......M...M.....
+0048D8  .dc.b 10 00 00 00 00 01 4D 88 00 01 4D E8 00 BC 04 02 ; ......M...M.....
+0048E8  .dc.b 10 00 00 00 00 01 09 D8 00 01 0A 38 00 BC 04 02 ; ...........8....
+0048F8  .dc.b 10 00 00 00 00 01 09 D8 00 01 0A 38 00 BC 04 02 ; ...........8....
+004908  .dc.b 10 00 00 00 00 01 0A 58 00 01 0A B8 00 BC 04 02 ; .......X........
+004918  .dc.b 10 00 00 00 00 01 0A 58 00 01 0A B8 00 BC 04 02 ; .......X........
+004928  .dc.b 10 00 00 00 00 01 0A D8 00 01 0B 38 00 BC 04 02 ; ...........8....
+004938  .dc.b 10 00 00 00 00 01 0A D8 00 01 0B 38 00 BC 04 02 ; ...........8....
+004948  .dc.b 10 00 00 00 00 01 0B 58 00 01 0B B8 00 BC 04 02 ; .......X........
+004958  .dc.b 10 00 00 00 00 01 0B 58 00 01 0B B8 00 BC 04 02 ; .......X........
+004968  .dc.b 10 00 00 00 00 01 0B D8 00 01 0C 38 00 BC 04 02 ; ...........8....
+004978  .dc.b 10 00 00 00 00 01 0B D8 00 01 0C 38 00 BC 04 02 ; ...........8....
+004988  .dc.b 10 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+004998  .dc.b 00 00 00 00 00 01 06 20 00 01 06 4A 00 BC 01 C2 ; ....... ...J....
+0049A8  .dc.b 07 00 00 00 00 01 06 58 00 01 06 82 00 BC 01 C2 ; .......X........
+0049B8  .dc.b 07 00 00 00 00 01 06 90 00 01 06 BA 00 BC 01 C2 ; ................
+0049C8  .dc.b 07 00 00 00 00 01 06 C8 00 01 06 F2 00 BC 01 C2 ; ................
+0049D8  .dc.b 07 00 00 00 00 01 07 00 00 01 07 2A 00 BC 01 C2 ; ...........*....
+0049E8  .dc.b 07 00 00 00 00 01 07 38 00 01 07 62 00 BC 01 C2 ; .......8...b....
+0049F8  .dc.b 07 00 00 00 00 01 07 70 00 01 07 9A 00 BC 01 C2 ; .......p........
+004A08  .dc.b 07 00 00 00 00 01 07 A8 00 01 07 D2 00 BC 01 C2 ; ................
+004A18  .dc.b 07 00 00 00 00 01 07 E0 00 01 08 0A 00 BC 01 C2 ; ................
+004A28  .dc.b 07 00 00 00 00 01 08 18 00 01 08 42 00 BC 01 C2 ; ...........B....
+004A38  .dc.b 07 00 00 00 00 01 08 50 00 01 08 7A 00 BC 01 C2 ; .......P...z....
+004A48  .dc.b 07 00 00 00 00 01 08 88 00 01 08 B2 00 BC 01 C2 ; ................
+004A58  .dc.b 07 00 00 00 00 01 08 C0 00 01 08 EA 00 BC 01 C2 ; ................
+004A68  .dc.b 07 00 00 00 00 01 08 F8 00 01 09 22 00 BC 01 C2 ; ..........."....
+004A78  .dc.b 07 00 00 00 00 01 09 30 00 01 09 5A 00 BC 01 C2 ; .......0...Z....
+004A88  .dc.b 07 00 00 00 00 01 09 68 00 01 09 92 00 BC 01 C2 ; .......h........
+004A98  .dc.b 07 00 00 00 00 01 09 A0 00 01 09 CA 00 BC 01 C2 ; ................
+004AA8  .dc.b 07 00 00 00 00 01 08 C0 00 01 08 EA 00 BC 01 C2 ; ................
+004AB8  .dc.b 07 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+004AC8  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+004AD8  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+004AE8  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+004AF8  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+004B08  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+004B18  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+004B28  .dc.b 00 00 00 00 00 00 00 00 00 00 FF FE 00 00 FF FE ; ................
+004B38  .dc.b FF FF FF FE FF FE FF FF FF FE 00 00 FF FE 00 01 ; ................
+004B48  .dc.b FF FE 00 02 FF FE 00 02 FF FF 00 02 00 00 00 02 ; ................
+004B58  .dc.b 00 01 00 02 00 02 00 01 00 02 00 00 00 02 FF FF ; ................
+004B68  .dc.b 00 02 FF FE 00 02 FF FE 00 01 FF FC 00 01 FF FE ; ................
+004B78  .dc.b 00 02 00 00 00 03 00 02 00 02 00 04 00 01 FF FC ; ................
+004B88  .dc.b 00 01 FF FC 00 00 FF FC FF FF 00 04 00 01 00 04 ; ................
+004B98  .dc.b 00 00 00 04 FF FF 00 00 00 00 00 00 00 00 00 00 ; ................
+004BA8  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+004BB8  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+004BC8  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+004BD8  .dc.b 00 00 00 00 00 00 00 01 09 68 00 01 09 92 00 BC ; .........h......
+004BE8  .dc.b 01 C2 07 00 00 01 09 30 00 01 09 5A 00 BC 01 C2 ; .......0...Z....
+004BF8  .dc.b 07 00 00 01 09 A0 00 01 09 CA 00 BC 01 C2 07 00 ; ................
+004C08  .dc.b 00 01 08 F8 00 01 09 22 00 BC 01 C2 07 00 00 00 ; ......."........
+004C18  .dc.b 4C 1E 00 00 4C 2C 00 01 08 50 00 01 08 7A 00 BC ; L...L,...P...z..
+004C28  .dc.b 01 C2 07 00 00 01 08 88 00 01 08 B2 00 BC 01 C2 ; ................
+004C38  .dc.b 07 00 00 00 4C 5A 00 00 4C 68 00 00 4C 76 00 00 ; ....LZ..Lh..Lv..
+004C48  .dc.b 4C 84 00 00 4C 92 00 00 4C A0 00 00 4C AE 00 00 ; L...L...L...L...
+004C58  .dc.b 4C BC 00 01 17 E8 00 01 19 68 00 BA 08 03 20 00 ; L........h.... .
+004C68  .dc.b 00 01 19 E8 00 01 1B 68 00 BA 08 03 20 00 00 01 ; .......h.... ...
+004C78  .dc.b 1B E8 00 01 1D 68 00 BA 08 03 20 00 00 01 1D E8 ; .....h.... .....
+004C88  .dc.b 00 01 1F 68 00 BA 08 03 20 00 00 01 1F E8 00 01 ; ...h.... .......
+004C98  .dc.b 21 68 00 BA 08 03 20 00 00 01 21 E8 00 01 23 68 ; !h.... ...!...#h
+004CA8  .dc.b 00 BA 08 03 20 00 00 01 23 E8 00 01 25 68 00 BA ; .... ...#...%h..
+004CB8  .dc.b 08 03 20 00 00 01 25 E8 00 01 27 68 00 BA 08 03 ; .. ...%...'h....
+004CC8  .dc.b 20 00 00 00 51 56 00 00 51 64 00 00 51 72 00 00 ;  ...QV..Qd..Qr..
+004CD8  .dc.b 51 80 00 00 51 8E 00 00 51 9C 00 00 51 AA 00 00 ; Q...Q...Q...Q...
+004CE8  .dc.b 51 B8 00 00 51 C6 00 00 51 D4 00 00 51 E2 00 00 ; Q...Q...Q...Q...
+004CF8  .dc.b 51 F0 00 00 51 FE 00 00 52 0C 00 00 52 1A 00 00 ; Q...Q...R...R...
+004D08  .dc.b 52 28 00 00 52 36 00 00 52 44 00 00 52 52 00 00 ; R(..R6..RD..RR..
+004D18  .dc.b 52 66 00 00 52 7A 00 00 52 8E 00 00 52 A2 00 00 ; Rf..Rz..R...R...
+004D28  .dc.b 52 B6 00 00 52 CA 00 00 52 DE 00 00 52 F2 00 00 ; R...R...R...R...
+004D38  .dc.b 53 06 00 00 53 1A 00 00 53 2E 00 00 53 42 00 00 ; S...S...S...SB..
+004D48  .dc.b 53 56 00 00 53 86 00 00 53 94 00 00 53 A2 FF E0 ; SV..S...S...S...
+004D58  .dc.b 00 00 FF E3 FF F9 FF E4 FF F3 FF E6 FF EF FF E9 ; ................
+004D68  .dc.b FF EA FF EE FF E5 FF F3 FF E4 FF F9 FF E2 00 00 ; ................
+004D78  .dc.b FF E0 00 07 FF E2 00 0D FF E4 00 12 FF E5 00 17 ; ................
+004D88  .dc.b FF EA 00 1A FF EF 00 1C FF F3 00 1D FF F9 00 20 ; ............... 
+004D98  .dc.b 00 00 00 1D 00 07 00 1C 00 0D 00 1A 00 11 00 17 ; ................
+004DA8  .dc.b 00 16 00 12 00 1B 00 0D 00 1C 00 07 00 1E 00 00 ; ................
+004DB8  .dc.b 00 20 FF F9 00 1E FF F3 00 1C FF EE 00 1B FF E9 ; . ..............
+004DC8  .dc.b 00 16 FF E6 00 11 FF E4 00 0D FF E3 00 07 FF E0 ; ................
+004DD8  .dc.b FF FB FF E0 FF F5 FF E2 FF F0 FF E4 FF EB FF E7 ; ................
+004DE8  .dc.b FF E7 FF EB FF E5 FF EE FF E3 FF F4 FF E2 FF FA ; ................
+004DF8  .dc.b FF E2 FF FA FF E2 FF FC FF E3 FF FD FF E5 FF FB ; ................
+004E08  .dc.b FF E8 FF FC FF EC FF FE FF F0 FF FF FF F5 FF FF ; ................
+004E18  .dc.b FF FA FF FE FF FC FF FD FF FE FF FB FF FD FF FB ; ................
+004E28  .dc.b FF FE FF FA FF FE FF FB FF FE FF FB FF FF FF F9 ; ................
+004E38  .dc.b 00 01 FF F4 FF FF FF F1 FF FF FF E9 00 00 FF E6 ; ................
+004E48  .dc.b FF FE FF E3 FF FE FF E2 FF FD FF E1 FF FC 00 1B ; ................
+004E58  .dc.b 00 07 00 10 00 07 00 05 00 07 00 1A 00 0A 00 10 ; ................
+004E68  .dc.b 00 08 00 07 00 06 00 18 00 0E 00 10 00 0A 00 08 ; ................
+004E78  .dc.b 00 07 00 17 00 12 00 0F 00 0C 00 09 00 07 00 16 ; ................
+004E88  .dc.b 00 16 00 10 00 10 00 08 00 08 00 13 00 17 00 0E ; ................
+004E98  .dc.b 00 10 00 09 00 08 00 0F 00 17 00 0C 00 10 00 09 ; ................
+004EA8  .dc.b 00 08 00 0A 00 19 00 09 00 11 00 07 00 08 00 06 ; ................
+004EB8  .dc.b 00 1A 00 06 00 0F 00 06 00 06 00 07 00 18 00 08 ; ................
+004EC8  .dc.b 00 10 00 0A 00 06 00 08 00 18 00 0B 00 0F 00 0F ; ................
+004ED8  .dc.b 00 07 00 08 00 18 00 0E 00 11 00 12 00 09 00 07 ; ................
+004EE8  .dc.b 00 16 00 0F 00 0F 00 15 00 09 00 09 00 11 00 10 ; ................
+004EF8  .dc.b 00 0C 00 18 00 06 00 07 00 0F 00 10 00 0B 00 18 ; ................
+004F08  .dc.b 00 08 00 07 00 0B 00 10 00 09 00 19 00 07 00 05 ; ................
+004F18  .dc.b 00 07 00 10 00 07 00 1B 00 07 00 07 00 06 00 10 ; ................
+004F28  .dc.b 00 08 00 1A 00 0A 00 08 00 07 00 10 00 0A 00 18 ; ................
+004F38  .dc.b 00 0E 00 09 00 07 00 0F 00 0C 00 17 00 12 00 08 ; ................
+004F48  .dc.b 00 08 00 10 00 10 00 16 00 16 00 09 00 08 00 0E ; ................
+004F58  .dc.b 00 10 00 13 00 17 00 09 00 08 00 17 00 10 00 0F ; ................
+004F68  .dc.b 00 17 00 07 00 08 00 09 00 11 00 0A 00 19 00 06 ; ................
+004F78  .dc.b 00 06 00 06 00 0F 00 06 00 1A 00 0A 00 06 00 08 ; ................
+004F88  .dc.b 00 10 00 07 00 18 00 0F 00 07 00 0B 00 0F 00 08 ; ................
+004F98  .dc.b 00 18 00 12 00 09 00 0E 00 11 00 08 00 18 00 15 ; ................
+004FA8  .dc.b 00 09 00 0F 00 0F 00 07 00 16 00 18 00 06 00 10 ; ................
+004FB8  .dc.b 00 0C 00 09 00 11 00 18 00 08 00 10 00 0B 00 07 ; ................
+004FC8  .dc.b 00 0F 00 19 00 07 00 10 00 09 00 07 00 0B 00 00 ; ................
+004FD8  .dc.b 4E 56 00 00 4E 62 00 00 4E 6E 00 00 4E 7A 00 00 ; NV..Nb..Nn..Nz..
+004FE8  .dc.b 4E 86 00 00 4E 92 00 00 4E 9E 00 00 4E AA 00 00 ; N...N...N...N...
+004FF8  .dc.b 4E B6 00 00 4E C2 00 00 4E CE 00 00 4E DA 00 00 ; N...N...N...N...
+005008  .dc.b 4E E6 00 00 4E F2 00 00 4E FE 00 00 4F 0A 00 00 ; N...N...N...O...
+005018  .dc.b 4F 16 00 00 4F 22 00 00 4F 2E 00 00 4F 3A 00 00 ; O...O"..O...O:..
+005028  .dc.b 4F 46 00 00 4F 52 00 00 4F 5E 00 00 4F 6A 00 00 ; OF..OR..O^..Oj..
+005038  .dc.b 4F 76 00 00 4F 82 00 00 4F 8E 00 00 4F 9A 00 00 ; Ov..O...O...O...
+005048  .dc.b 4F A6 00 00 4F B2 00 00 4F BE 00 00 4F CA FF F9 ; O...O...O...O...
+005058  .dc.b FF F7 FF F9 FF F7 FF FB FF F7 FF FA FF F7 FF FA ; ................
+005068  .dc.b FF F9 FF F9 FF FA FF F6 FF FA FF F6 FF FB FF F6 ; ................
+005078  .dc.b FF F9 FF F9 FF FB FF FC FF FB 00 00 FF F9 00 02 ; ................
+005088  .dc.b FF F9 00 04 FF F8 00 06 FF F8 00 05 FF F7 00 07 ; ................
+005098  .dc.b FF F7 00 05 FF F9 00 06 FF FC 00 04 00 00 00 02 ; ................
+0050A8  .dc.b 00 04 00 00 00 07 FF FC 00 05 FF F9 00 05 FF F6 ; ................
+0050B8  .dc.b 00 07 FF F6 00 05 FF F6 00 05 FF F9 00 06 FF FA ; ................
+0050C8  .dc.b 00 05 FF FA 00 00 FF FB FF FC FF F9 FF F7 FF FB ; ................
+0050D8  .dc.b FF FE FF FC FF FC FF FC FF FC FF FD FF FC FF FC ; ................
+0050E8  .dc.b FF FB FF FD FF FB FF FB FF FA FF FC FF F9 FF FE ; ................
+0050F8  .dc.b FF F9 00 05 FF F9 00 09 FF FA 00 0F FF FB 00 14 ; ................
+005108  .dc.b FF FB 00 13 FF FC 00 14 FF FC 00 14 FF FC 00 15 ; ................
+005118  .dc.b FF FE 00 14 00 04 00 14 00 08 00 13 00 0C 00 13 ; ................
+005128  .dc.b 00 11 00 0F 00 14 00 08 00 14 00 04 00 15 FF FE ; ................
+005138  .dc.b 00 16 FF FB 00 15 FF FC 00 14 FF FD 00 14 FF FD ; ................
+005148  .dc.b 00 11 FF FD 00 0C FF FC 00 08 FF FC 00 04 00 01 ; ................
+005158  .dc.b 27 E8 00 01 28 90 00 BA 03 83 0E 00 00 01 28 C8 ; '...(.........(.
+005168  .dc.b 00 01 29 70 00 BA 03 83 0E 00 00 01 29 A8 00 01 ; ..)p........)...
+005178  .dc.b 2A 80 00 BA 04 83 12 00 00 01 2A C8 00 01 2B A0 ; *.........*...+.
+005188  .dc.b 00 BA 04 83 12 00 00 01 2B E8 00 01 2C F0 00 BA ; ........+...,...
+005198  .dc.b 05 83 16 00 00 01 2D 48 00 01 2E 50 00 BA 05 83 ; ......-H...P....
+0051A8  .dc.b 16 00 00 01 2E A8 00 01 2F D4 00 BA 06 43 19 00 ; ......../....C..
+0051B8  .dc.b 00 01 30 38 00 01 31 64 00 BA 06 43 19 00 00 01 ; ..08..1d...C....
+0051C8  .dc.b 31 C8 00 01 33 30 00 BA 07 83 1E 00 00 01 33 A8 ; 1...30........3.
+0051D8  .dc.b 00 01 35 10 00 BA 07 83 1E 00 00 01 35 88 00 01 ; ..5.........5...
+0051E8  .dc.b 37 08 00 BA 08 03 20 00 00 01 37 88 00 01 39 08 ; 7..... ...7...9.
+0051F8  .dc.b 00 BA 08 03 20 00 00 01 39 88 00 01 3B 08 00 BA ; .... ...9...;...
+005208  .dc.b 08 03 20 00 00 01 3B 88 00 01 3D 08 00 BA 08 03 ; .. ...;...=.....
+005218  .dc.b 20 00 00 01 3D 88 00 01 3F 08 00 BA 08 03 20 00 ;  ...=...?..... .
+005228  .dc.b 00 01 3F 88 00 01 41 08 00 BA 08 03 20 00 00 01 ; ..?...A..... ...
+005238  .dc.b 41 88 00 01 43 08 00 BA 08 03 20 00 00 01 43 88 ; A...C..... ...C.
+005248  .dc.b 00 01 45 08 00 BA 08 03 20 00 00 01 3D 88 00 01 ; ..E..... ...=...
+005258  .dc.b 3F 08 00 BA 08 03 20 01 FF F6 00 01 3F 84 00 01 ; ?..... .....?...
+005268  .dc.b 3F 88 00 01 41 08 00 BA 08 03 20 01 FF F6 00 01 ; ?...A..... .....
+005278  .dc.b 41 84 00 01 39 88 00 01 3B 08 00 BA 08 03 20 01 ; A...9...;..... .
+005288  .dc.b FF F6 00 01 3B 84 00 01 3B 88 00 01 3D 08 00 BA ; ....;...;...=...
+005298  .dc.b 08 03 20 01 FF F6 00 01 3D 84 00 01 35 88 00 01 ; .. .....=...5...
+0052A8  .dc.b 37 08 00 BA 08 03 20 01 FF F6 00 01 37 84 00 01 ; 7..... .....7...
+0052B8  .dc.b 37 88 00 01 39 08 00 BA 08 03 20 01 FF F6 00 01 ; 7...9..... .....
+0052C8  .dc.b 39 84 00 01 31 C8 00 01 33 30 00 BA 07 83 1E 01 ; 9...1...30......
+0052D8  .dc.b FF F6 00 01 33 A4 00 01 33 A8 00 01 35 10 00 BA ; ....3...3...5...
+0052E8  .dc.b 07 83 1E 01 FF F6 00 01 35 84 00 01 2E A8 00 01 ; ........5.......
+0052F8  .dc.b 2F D4 00 BA 06 43 19 01 FF F6 00 01 30 34 00 01 ; /....C......04..
+005308  .dc.b 30 38 00 01 31 64 00 BA 06 43 19 01 FF F6 00 01 ; 08..1d...C......
+005318  .dc.b 31 C4 00 01 2B E8 00 01 2C F0 00 BA 05 83 16 01 ; 1...+...,.......
+005328  .dc.b FF F6 00 01 2D 44 00 01 2D 48 00 01 2E 50 00 BA ; ....-D..-H...P..
+005338  .dc.b 05 83 16 01 FF F6 00 01 2E A4 00 01 29 A8 00 01 ; ............)...
+005348  .dc.b 2A 80 00 BA 04 83 12 01 FF F6 00 01 2A C4 00 01 ; *...........*...
+005358  .dc.b 2A C8 00 01 2B A0 00 BA 04 83 12 01 FF F6 00 01 ; *...+...........
+005368  .dc.b 2B E4 00 01 13 D8 00 01 14 38 00 BC 04 02 10 00 ; +........8......
+005378  .dc.b 00 01 14 58 00 01 14 B8 00 BC 04 02 10 00 00 01 ; ...X............
+005388  .dc.b 45 88 00 01 47 08 00 BA 08 03 20 00 00 01 47 88 ; E...G..... ...G.
+005398  .dc.b 00 01 49 08 00 BA 08 03 20 00 00 01 49 88 00 01 ; ..I..... ...I...
+0053A8  .dc.b 4B 08 00 BA 08 03 20 00 FF F3 00 06 00 20 00 06 ; K..... ...... ..
+0053B8  .dc.b FF F2 00 0F 00 21 00 0F FF F3 00 06 FF F4 00 06 ; .....!..........
+0053C8  .dc.b FF F5 00 06 FF F6 00 06 FF F7 00 05 FF F8 00 05 ; ................
+0053D8  .dc.b FF F8 00 05 FF F9 00 06 FF F8 00 06 FF F8 00 06 ; ................
+0053E8  .dc.b FF F7 00 05 FF F6 00 05 FF F5 00 05 FF F4 00 05 ; ................
+0053F8  .dc.b 00 20 00 06 00 1F 00 06 00 1E 00 06 00 1D 00 05 ; . ..............
+005408  .dc.b 00 1C 00 05 00 1B 00 05 00 1B 00 05 00 1A 00 06 ; ................
+005418  .dc.b 00 1B 00 06 00 1B 00 06 00 1C 00 05 00 1D 00 05 ; ................
+005428  .dc.b 00 1E 00 05 00 1F 00 05 FF F3 00 06 00 20 00 06 ; ............. ..
+005438  .dc.b 00 10 00 13 00 10 00 13 00 10 00 13 00 10 00 13 ; ................
+005448  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+005458  .dc.b 00 00 00 00 00 00 00 00 11 FC 00 0F 01 35 21 FC ; .............5!.
+005468  .dc.b 00 00 72 D8 02 3E 21 FC 00 00 19 D0 02 42 31 FC ; ..r..>!......B1.
+005478  .dc.b 00 1E 02 46 11 FC 00 01 02 48 41 F9 00 00 72 D8 ; ...F.....HA...r.
+005488  .dc.b 70 1E 31 41 00 02 58 48 51 C8 FF F8 4E 75       ; p.1A..XHQ...Nu
 
 ; ==== sub_005496 (1 caller) ====
 005496  53 38 54 51                   SUBQ.b #1,$5451.w
@@ -3359,11 +4565,21 @@
 0055FC  41 F8 48 30                   LEA $4830.w,a0
 005600  60 04                         BRA $005606
 005602  41 F8 48 3E                   LEA $483E.w,a0
-005606  4C B8                         .dc.w $4CB8
-005608  .dc.b 00 03 01 04 34 38 02 5C D4 42 D4 42 4B F8 53 B0 ; ....48.\.B.BK.S.
-005618  .dc.b D0 75 20 00 D2 75 20 02 2D 7C FF FE FF FE 00 62 ; .u ..u .-|.....b
-005628  .dc.b 2D 7C FF FF 00 00 00 44 22 78 02 0E 24 78 01 C2 ; -|.....D"x..$x..
-005638  .dc.b 26 6A 00 14 28 78 74 F2 7A 30 60 00 09 F6       ; &j..(xt.z0`...
+005606  4C B8 00 03 01 04             MOVEM.w $104.w,d0-d1
+00560C  34 38 02 5C                   MOVE.w $25C.w,d2
+005610  D4 42                         ADD.w d2,d2
+005612  D4 42                         ADD.w d2,d2
+005614  4B F8 53 B0                   LEA $53B0.w,a5
+005618  D0 75 20 00                   ADD.w $0(a5,d2.w),d0
+00561C  D2 75 20 02                   ADD.w $2(a5,d2.w),d1
+005620  2D 7C FF FE FF FE 00 62       MOVE.l #$FFFEFFFE,$62(a6)
+005628  2D 7C FF FF 00 00 00 44       MOVE.l #$FFFF0000,$44(a6)
+005630  22 78 02 0E                   MOVEA.l $20E.w,a1
+005634  24 78 01 C2                   MOVEA.l $1C2.w,a2
+005638  26 6A 00 14                   MOVEA.l $14(a2),a3
+00563C  28 78 74 F2                   MOVEA.l $74F2.w,a4
+005640  7A 30                         MOVEQ #$30,d5
+005642  60 00 09 F6                   BRA $00603A
 
 ; ==== sub_005646 (1 caller) ====
 005646  10 38 54 4E                   MOVE.b $544E.w,d0
@@ -3372,12 +4588,27 @@
 005650  41 F8 4C 3A                   LEA $4C3A.w,a0
 005654  20 70 00 00                   MOVEA.l $0(a0,d0.w),a0
 005658  70 00                         MOVEQ #$0,d0
-00565A  4C B8                         .dc.w $4CB8
-00565C  .dc.b 00 03 54 5C 90 78 01 20 6B 3E B0 7C 01 50 6C 38 ; ..T\.x. k>.|.Pl8
-00566C  .dc.b 92 78 01 22 6B 32 B2 7C 00 D4 6C 2C 48 B8 00 03 ; .x."k2.|..l,H...
-00567C  .dc.b 54 5C 2D 7C FF FE FF FE 00 62 2D 7C FF FF 00 00 ; T\-|.....b-|....
-00568C  .dc.b 00 44 22 78 02 0E 24 78 01 C2 26 6A 00 14 28 78 ; .D"x..$x..&j..(x
-00569C  .dc.b 74 F2 7A 30 60 00 09 98 42 38 54 4E 4E 75 00 00 ; t.z0`...B8TNNu..
+00565A  4C B8 00 03 54 5C             MOVEM.w $545C.w,d0-d1
+005660  90 78 01 20                   SUB.w $120.w,d0
+005664  6B 3E                         BMI $0056A4
+005666  B0 7C 01 50                   CMP.w #$150,d0
+00566A  6C 38                         BGE $0056A4
+00566C  92 78 01 22                   SUB.w $122.w,d1
+005670  6B 32                         BMI $0056A4
+005672  B2 7C 00 D4                   CMP.w #$D4,d1
+005676  6C 2C                         BGE $0056A4
+005678  48 B8 00 03 54 5C             MOVEM.w d0-d1,$545C.w
+00567E  2D 7C FF FE FF FE 00 62       MOVE.l #$FFFEFFFE,$62(a6)
+005686  2D 7C FF FF 00 00 00 44       MOVE.l #$FFFF0000,$44(a6)
+00568E  22 78 02 0E                   MOVEA.l $20E.w,a1
+005692  24 78 01 C2                   MOVEA.l $1C2.w,a2
+005696  26 6A 00 14                   MOVEA.l $14(a2),a3
+00569A  28 78 74 F2                   MOVEA.l $74F2.w,a4
+00569E  7A 30                         MOVEQ #$30,d5
+0056A0  60 00 09 98                   BRA $00603A
+0056A4  42 38 54 4E                   CLR.b $544E.w
+0056A8  4E 75                         RTS
+0056AA  .dc.b 00 00                                           ; ..
 
 ; ==== sub_0056AC (1 caller) ====
 0056AC  0C 78 00 14 01 EA             CMPI.w #$14,$1EA.w
@@ -3410,43 +4641,158 @@
 005714  2F 30 30 00                   MOVE.l $0(a0,d3.w),-(a7)
 005718  21 F0 30 00 59 44             MOVE.l $0(a0,d3.w),$5944.w
 00571E  70 00                         MOVEQ #$0,d0
-005720  4C B8                         .dc.w $4CB8
-005722  .dc.b 00 03 01 04 34 38 02 5C D4 42 D4 42 41 F8 53 B0 ; ....48.\.B.BA.S.
-005732  .dc.b D0 70 20 00 D2 70 20 02 48 A7 C0 00 41 F8 4D D6 ; .p ..p .H...A.M.
-005742  .dc.b D0 70 30 00 D2 70 30 02 4A 38 02 6C 66 04 D0 7C ; .p0..p0.J8.lf..|
-005752  .dc.b 00 10 5E 41 48 B8 00 03 59 40 42 78 59 48 41 F8 ; ..^AH...Y@BxYHA.
-005762  .dc.b 4F D6 20 70 30 00 21 D8 59 50 21 D8 59 54 21 D8 ; O. p0.!.YP!.YT!.
-005772  .dc.b 59 58 D6 43 4B F8 4C CA C6 7C 00 7F DA C3 2D 7C ; YX.CK.L..|....-|
-005782  .dc.b FF FE FF FE 00 62 2D 7C FF FF 00 00 00 44 22 78 ; .....b-|.....D"x
-005792  .dc.b 02 0E 24 78 01 C2 26 6A 00 14 28 78 74 F2 7A 30 ; ..$x..&j..(xt.z0
-0057A2  .dc.b 1E 38 59 4C CE 7C 00 07 54 47 3C 38 59 3E 20 75 ; .8YL.|..TG<8Y> u
-0057B2  .dc.b 60 00 0A 46 00 04 48 A7 C0 00 61 00 08 7C 52 78 ; `..F..H...a..|Rx
-0057C2  .dc.b 59 48 70 00 4C 97 00 03 D0 78 59 50 D2 78 59 52 ; YHp.L....xYP.xYR
-0057D2  .dc.b 48 A7 C0 00 61 00 DD D6 66 34 58 4F 4C 97 00 03 ; H...a...f4XOL...
-0057E2  .dc.b D0 78 59 54 D2 78 59 56 48 A7 C0 00 61 00 DD BE ; .xYT.xYVH...a...
-0057F2  .dc.b 66 1C 58 4F 4C 97 00 03 D0 78 59 58 D2 78 59 5A ; f.XOL....xYX.xYZ
-005802  .dc.b 48 A7 C0 00 61 00 DD A6 66 04 58 4F 60 56 4C 9F ; H...a...f.XO`VL.
-005812  .dc.b 00 06 B0 3C 00 7F 66 14 61 00 0B 92 2D 7C FF FE ; ...<..f.a...-|..
-005822  .dc.b FF FE 00 62 2D 7C FF FF 00 00 00 44 70 00 4C 9F ; ...b-|.....Dp.L.
-005832  .dc.b 00 03 14 38 59 4B C4 7C 00 1F 41 F8 50 56 D4 42 ; ...8YK.|..A.PV.B
-005842  .dc.b D4 42 D0 70 20 00 D2 70 20 02 41 F8 4D 4A 14 38 ; .B.p ..p .A.MJ.8
-005852  .dc.b 59 4E C4 7C 00 0C 20 70 20 00 24 78 01 C2 61 00 ; YN.|.. p .$x..a.
-005862  .dc.b 07 D8 60 5E 24 78 01 C2 4C 9F 00 03 D0 6F 00 04 ; ..`^$x..L....o..
-005872  .dc.b 6B 00 00 9E D2 6F 00 06 6B 00 00 9A B0 7C 01 50 ; k....o..k....|.P
-005882  .dc.b 6C 40 B2 7C 00 D4 6C 3A 51 CF FF 24 90 6F 00 04 ; l@.|..l:Q..$.o..
-005892  .dc.b 92 6F 00 06 41 F8 50 D6 14 38 59 4B C4 7C 00 1F ; .o..A.P..8YK.|..
-0058A2  .dc.b D4 42 D4 42 D0 70 20 00 D2 70 20 02 08 38 00 02 ; .B.B.p ..p ..8..
-0058B2  .dc.b 59 4E 67 06 41 F8 53 78 60 04 41 F8 53 6A 61 00 ; YNg.A.Sx`.A.Sja.
-0058C2  .dc.b 07 78 70 00 4C 9F 00 03 58 4F 4A 38 02 6C 67 04 ; .xp.L...XOJ8.lg.
-0058D2  .dc.b 51 40 60 02 50 40 4A 78 59 3E 67 06 41 F8 53 6A ; Q@`.P@JxY>g.A.Sj
-0058E2  .dc.b 60 04 41 F8 53 78 61 00 07 50 59 38 59 4E 6A 06 ; `.A.Sxa..PY8YNj.
-0058F2  .dc.b 11 FC 00 08 59 4E 4A 38 59 4D 67 06 53 38 59 4D ; ....YNJ8YMg.S8YM
-005902  .dc.b 4E 75 11 FC 00 02 59 4D 0A 78 00 04 59 3E 4E 75 ; Nu....YM.x..Y>Nu
-005912  .dc.b D2 6F 00 06 B0 7C FF F0 6D A8 B2 7C FF F0 6D A2 ; .o...|..m..|..m.
-005922  .dc.b 20 75 60 00 0A 46 00 04 48 A7 C0 00 61 00 07 0A ;  u`..F..H...a...
-005932  .dc.b 52 78 59 48 70 00 4C 9F 00 03 60 86 00 00 00 00 ; RxYHp.L...`.....
-005942  .dc.b 00 00 00 00 00 00 00 00 00 00 04 00 00 00 00 00 ; ................
-005952  .dc.b 00 00 00 00 00 00 00 00 00 00                   ; ..........
+005720  4C B8 00 03 01 04             MOVEM.w $104.w,d0-d1
+005726  34 38 02 5C                   MOVE.w $25C.w,d2
+00572A  D4 42                         ADD.w d2,d2
+00572C  D4 42                         ADD.w d2,d2
+00572E  41 F8 53 B0                   LEA $53B0.w,a0
+005732  D0 70 20 00                   ADD.w $0(a0,d2.w),d0
+005736  D2 70 20 02                   ADD.w $2(a0,d2.w),d1
+00573A  48 A7 C0 00                   MOVEM.w d0-d1,-(a7)
+00573E  41 F8 4D D6                   LEA $4DD6.w,a0
+005742  D0 70 30 00                   ADD.w $0(a0,d3.w),d0
+005746  D2 70 30 02                   ADD.w $2(a0,d3.w),d1
+00574A  4A 38 02 6C                   TST.b $26C.w
+00574E  66 04                         BNE $005754
+005750  D0 7C 00 10                   ADD.w #$10,d0
+005754  5E 41                         ADDQ.w #7,d1
+005756  48 B8 00 03 59 40             MOVEM.w d0-d1,$5940.w
+00575C  42 78 59 48                   CLR.w $5948.w
+005760  41 F8 4F D6                   LEA $4FD6.w,a0
+005764  20 70 30 00                   MOVEA.l $0(a0,d3.w),a0
+005768  21 D8 59 50                   MOVE.l (a0)+,$5950.w
+00576C  21 D8 59 54                   MOVE.l (a0)+,$5954.w
+005770  21 D8 59 58                   MOVE.l (a0)+,$5958.w
+005774  D6 43                         ADD.w d3,d3
+005776  4B F8 4C CA                   LEA $4CCA.w,a5
+00577A  C6 7C 00 7F                   AND.w #$7F,d3
+00577E  DA C3                         ADDA.w d3,a5
+005780  2D 7C FF FE FF FE 00 62       MOVE.l #$FFFEFFFE,$62(a6)
+005788  2D 7C FF FF 00 00 00 44       MOVE.l #$FFFF0000,$44(a6)
+005790  22 78 02 0E                   MOVEA.l $20E.w,a1
+005794  24 78 01 C2                   MOVEA.l $1C2.w,a2
+005798  26 6A 00 14                   MOVEA.l $14(a2),a3
+00579C  28 78 74 F2                   MOVEA.l $74F2.w,a4
+0057A0  7A 30                         MOVEQ #$30,d5
+0057A2  1E 38 59 4C                   MOVE.b $594C.w,d7
+0057A6  CE 7C 00 07                   AND.w #$7,d7
+0057AA  54 47                         ADDQ.w #2,d7
+0057AC  3C 38 59 3E                   MOVE.w $593E.w,d6
+0057B0  20 75 60 00                   MOVEA.l $0(a5,d6.w),a0
+0057B4  0A 46 00 04                   EORI.w #$4,d6
+0057B8  48 A7 C0 00                   MOVEM.w d0-d1,-(a7)
+0057BC  61 00 08 7C                   BSR $00603A
+0057C0  52 78 59 48                   ADDQ.w #1,$5948.w
+0057C4  70 00                         MOVEQ #$0,d0
+0057C6  4C 97 00 03                   MOVEM.w (a7),d0-d1
+0057CA  D0 78 59 50                   ADD.w $5950.w,d0
+0057CE  D2 78 59 52                   ADD.w $5952.w,d1
+0057D2  48 A7 C0 00                   MOVEM.w d0-d1,-(a7)
+0057D6  61 00 DD D6                   BSR $0035AE
+0057DA  66 34                         BNE $005810
+0057DC  58 4F                         ADDQ.w #4,a7
+0057DE  4C 97 00 03                   MOVEM.w (a7),d0-d1
+0057E2  D0 78 59 54                   ADD.w $5954.w,d0
+0057E6  D2 78 59 56                   ADD.w $5956.w,d1
+0057EA  48 A7 C0 00                   MOVEM.w d0-d1,-(a7)
+0057EE  61 00 DD BE                   BSR $0035AE
+0057F2  66 1C                         BNE $005810
+0057F4  58 4F                         ADDQ.w #4,a7
+0057F6  4C 97 00 03                   MOVEM.w (a7),d0-d1
+0057FA  D0 78 59 58                   ADD.w $5958.w,d0
+0057FE  D2 78 59 5A                   ADD.w $595A.w,d1
+005802  48 A7 C0 00                   MOVEM.w d0-d1,-(a7)
+005806  61 00 DD A6                   BSR $0035AE
+00580A  66 04                         BNE $005810
+00580C  58 4F                         ADDQ.w #4,a7
+00580E  60 56                         BRA $005866
+005810  4C 9F 00 06                   MOVEM.w (a7)+,d1-d2
+005814  B0 3C 00 7F                   CMP.b #$7F,d0
+005818  66 14                         BNE $00582E
+00581A  61 00 0B 92                   BSR $0063AE
+00581E  2D 7C FF FE FF FE 00 62       MOVE.l #$FFFEFFFE,$62(a6)
+005826  2D 7C FF FF 00 00 00 44       MOVE.l #$FFFF0000,$44(a6)
+00582E  70 00                         MOVEQ #$0,d0
+005830  4C 9F 00 03                   MOVEM.w (a7)+,d0-d1
+005834  14 38 59 4B                   MOVE.b $594B.w,d2
+005838  C4 7C 00 1F                   AND.w #$1F,d2
+00583C  41 F8 50 56                   LEA $5056.w,a0
+005840  D4 42                         ADD.w d2,d2
+005842  D4 42                         ADD.w d2,d2
+005844  D0 70 20 00                   ADD.w $0(a0,d2.w),d0
+005848  D2 70 20 02                   ADD.w $2(a0,d2.w),d1
+00584C  41 F8 4D 4A                   LEA $4D4A.w,a0
+005850  14 38 59 4E                   MOVE.b $594E.w,d2
+005854  C4 7C 00 0C                   AND.w #$C,d2
+005858  20 70 20 00                   MOVEA.l $0(a0,d2.w),a0
+00585C  24 78 01 C2                   MOVEA.l $1C2.w,a2
+005860  61 00 07 D8                   BSR $00603A
+005864  60 5E                         BRA $0058C4
+005866  24 78 01 C2                   MOVEA.l $1C2.w,a2
+00586A  4C 9F 00 03                   MOVEM.w (a7)+,d0-d1
+00586E  D0 6F 00 04                   ADD.w $4(a7),d0
+005872  6B 00 00 9E                   BMI $005912
+005876  D2 6F 00 06                   ADD.w $6(a7),d1
+00587A  6B 00 00 9A                   BMI $005916
+00587E  B0 7C 01 50                   CMP.w #$150,d0
+005882  6C 40                         BGE $0058C4
+005884  B2 7C 00 D4                   CMP.w #$D4,d1
+005888  6C 3A                         BGE $0058C4
+00588A  51 CF FF 24                   DBRA d7,$0057B0
+00588E  90 6F 00 04                   SUB.w $4(a7),d0
+005892  92 6F 00 06                   SUB.w $6(a7),d1
+005896  41 F8 50 D6                   LEA $50D6.w,a0
+00589A  14 38 59 4B                   MOVE.b $594B.w,d2
+00589E  C4 7C 00 1F                   AND.w #$1F,d2
+0058A2  D4 42                         ADD.w d2,d2
+0058A4  D4 42                         ADD.w d2,d2
+0058A6  D0 70 20 00                   ADD.w $0(a0,d2.w),d0
+0058AA  D2 70 20 02                   ADD.w $2(a0,d2.w),d1
+0058AE  08 38 00 02 59 4E             BTST.b #$2,$594E.w
+0058B4  67 06                         BEQ $0058BC
+0058B6  41 F8 53 78                   LEA $5378.w,a0
+0058BA  60 04                         BRA $0058C0
+0058BC  41 F8 53 6A                   LEA $536A.w,a0
+0058C0  61 00 07 78                   BSR $00603A
+0058C4  70 00                         MOVEQ #$0,d0
+0058C6  4C 9F 00 03                   MOVEM.w (a7)+,d0-d1
+0058CA  58 4F                         ADDQ.w #4,a7
+0058CC  4A 38 02 6C                   TST.b $26C.w
+0058D0  67 04                         BEQ $0058D6
+0058D2  51 40                         SUBQ.w #8,d0
+0058D4  60 02                         BRA $0058D8
+0058D6  50 40                         ADDQ.w #8,d0
+0058D8  4A 78 59 3E                   TST.w $593E.w
+0058DC  67 06                         BEQ $0058E4
+0058DE  41 F8 53 6A                   LEA $536A.w,a0
+0058E2  60 04                         BRA $0058E8
+0058E4  41 F8 53 78                   LEA $5378.w,a0
+0058E8  61 00 07 50                   BSR $00603A
+0058EC  59 38 59 4E                   SUBQ.b #4,$594E.w
+0058F0  6A 06                         BPL $0058F8
+0058F2  11 FC 00 08 59 4E             MOVE.b #$8,$594E.w
+0058F8  4A 38 59 4D                   TST.b $594D.w
+0058FC  67 06                         BEQ $005904
+0058FE  53 38 59 4D                   SUBQ.b #1,$594D.w
+005902  4E 75                         RTS
+005904  11 FC 00 02 59 4D             MOVE.b #$2,$594D.w
+00590A  0A 78 00 04 59 3E             EORI.w #$4,$593E.w
+005910  4E 75                         RTS
+005912  D2 6F 00 06                   ADD.w $6(a7),d1
+005916  B0 7C FF F0                   CMP.w #$FFF0,d0
+00591A  6D A8                         BLT $0058C4
+00591C  B2 7C FF F0                   CMP.w #$FFF0,d1
+005920  6D A2                         BLT $0058C4
+005922  20 75 60 00                   MOVEA.l $0(a5,d6.w),a0
+005926  0A 46 00 04                   EORI.w #$4,d6
+00592A  48 A7 C0 00                   MOVEM.w d0-d1,-(a7)
+00592E  61 00 07 0A                   BSR $00603A
+005932  52 78 59 48                   ADDQ.w #1,$5948.w
+005936  70 00                         MOVEQ #$0,d0
+005938  4C 9F 00 03                   MOVEM.w (a7)+,d0-d1
+00593C  60 86                         BRA $0058C4
+00593E  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 04 00 ; ................
+00594E  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00       ; ..............
 
 ; ==== sub_00595C (1 caller) ====
 00595C  4A 38 5A B2                   TST.b $5AB2.w
@@ -3467,28 +4813,72 @@
 005988  4E B9 00 01 A2 DC             JSR $1A2DC.l
 00598E  50 F8 5A B2                   ST $5AB2.w
 005992  51 F8 01 C7                   SF $1C7.w
-005996  4C B8                         .dc.w $4CB8
-005998  .dc.b 00 03 01 04 34 38 02 5C D4 42 D4 42 4B F8 53 B0 ; ....48.\.B.BK.S.
-0059A8  .dc.b D0 75 20 00 D2 75 20 02 5A 41 48 B8 00 03 5A B4 ; .u ..u .ZAH...Z.
-0059B8  .dc.b 11 FC 00 04 54 4D 70 08 4A 38 02 6C 66 02 44 40 ; ....TMp.J8.lf.D@
-0059C8  .dc.b 31 C0 5A B8                                     ; 1.Z.
+005996  4C B8 00 03 01 04             MOVEM.w $104.w,d0-d1
+00599C  34 38 02 5C                   MOVE.w $25C.w,d2
+0059A0  D4 42                         ADD.w d2,d2
+0059A2  D4 42                         ADD.w d2,d2
+0059A4  4B F8 53 B0                   LEA $53B0.w,a5
+0059A8  D0 75 20 00                   ADD.w $0(a5,d2.w),d0
+0059AC  D2 75 20 02                   ADD.w $2(a5,d2.w),d1
+0059B0  5A 41                         ADDQ.w #5,d1
+0059B2  48 B8 00 03 5A B4             MOVEM.w d0-d1,$5AB4.w
+0059B8  11 FC 00 04 54 4D             MOVE.b #$4,$544D.w
+0059BE  70 08                         MOVEQ #$8,d0
+0059C0  4A 38 02 6C                   TST.b $26C.w
+0059C4  66 02                         BNE $0059C8
+0059C6  44 40                         NEG.w d0
+0059C8  31 C0 5A B8                   MOVE.w d0,$5AB8.w
 0059CC  4E 75                         RTS
 0059CE  4A 38 01 C7                   TST.b $1C7.w
 0059D2  66 00 00 CA                   BNE $005A9E
-0059D6  4C B8                         .dc.w $4CB8
-0059D8  .dc.b 00 03 5A B4 D0 78 5A B8 90 78 01 20 6B 50 B0 7C ; ..Z..xZ..x. kP.|
-0059E8  .dc.b 01 50 6C 4A 92 78 01 22 6B 44 B2 7C 00 D4 6C 3E ; .PlJ.x."kD.|..l>
-0059F8  .dc.b 48 B8 00 03 5A B4 61 00 DB AE 66 38 70 00 4C B8 ; H...Z.a...f8p.L.
-005A08  .dc.b 00 03 5A B4 2D 7C FF FE FF FE 00 62 2D 7C FF FF ; ..Z.-|.....b-|..
-005A18  .dc.b 00 00 00 44 22 78 02 0E 24 78 01 C2 26 6A 00 14 ; ...D"x..$x..&j..
-005A28  .dc.b 28 78 74 F2 7A 30 41 F8 4C 08 60 00 06 06 51 F8 ; (xt.z0A.L.`...Q.
-005A38  .dc.b 5A B2 4E 75 50 F8 01 C7 4C B8 00 03 5A B4 51 40 ; Z.NuP...L...Z.Q@
-005A48  .dc.b 92 7C 00 10 48 B8 00 03 54 5C 11 FC 00 F0 54 4E ; .|..H...T\....TN
-005A58  .dc.b 41 F9 00 00 72 D8 70 1E 31 7C 0F FF 00 02 58 48 ; A...r.p.1|....XH
-005A68  .dc.b 51 C8 FF F6 50 F8 5A B3 11 FC 00 0F 01 35 21 FC ; Q...P.Z......5!.
-005A78  .dc.b 00 00 72 D8 02 3E 21 FC 00 00 19 D0 02 42 31 FC ; ..r..>!......B1.
-005A88  .dc.b 00 1E 02 46 11 FC 00 01 02 48 70 06 4E B9 00 01 ; ...F.....Hp.N...
-005A98  .dc.b A2 DC 60 00 D3 92                               ; ..`...
+0059D6  4C B8 00 03 5A B4             MOVEM.w $5AB4.w,d0-d1
+0059DC  D0 78 5A B8                   ADD.w $5AB8.w,d0
+0059E0  90 78 01 20                   SUB.w $120.w,d0
+0059E4  6B 50                         BMI $005A36
+0059E6  B0 7C 01 50                   CMP.w #$150,d0
+0059EA  6C 4A                         BGE $005A36
+0059EC  92 78 01 22                   SUB.w $122.w,d1
+0059F0  6B 44                         BMI $005A36
+0059F2  B2 7C 00 D4                   CMP.w #$D4,d1
+0059F6  6C 3E                         BGE $005A36
+0059F8  48 B8 00 03 5A B4             MOVEM.w d0-d1,$5AB4.w
+0059FE  61 00 DB AE                   BSR $0035AE
+005A02  66 38                         BNE $005A3C
+005A04  70 00                         MOVEQ #$0,d0
+005A06  4C B8 00 03 5A B4             MOVEM.w $5AB4.w,d0-d1
+005A0C  2D 7C FF FE FF FE 00 62       MOVE.l #$FFFEFFFE,$62(a6)
+005A14  2D 7C FF FF 00 00 00 44       MOVE.l #$FFFF0000,$44(a6)
+005A1C  22 78 02 0E                   MOVEA.l $20E.w,a1
+005A20  24 78 01 C2                   MOVEA.l $1C2.w,a2
+005A24  26 6A 00 14                   MOVEA.l $14(a2),a3
+005A28  28 78 74 F2                   MOVEA.l $74F2.w,a4
+005A2C  7A 30                         MOVEQ #$30,d5
+005A2E  41 F8 4C 08                   LEA $4C08.w,a0
+005A32  60 00 06 06                   BRA $00603A
+005A36  51 F8 5A B2                   SF $5AB2.w
+005A3A  4E 75                         RTS
+
+; ==== sub_005A3C (1 caller) ====
+005A3C  50 F8 01 C7                   ST $1C7.w
+005A40  4C B8 00 03 5A B4             MOVEM.w $5AB4.w,d0-d1
+005A46  51 40                         SUBQ.w #8,d0
+005A48  92 7C 00 10                   SUB.w #$10,d1
+005A4C  48 B8 00 03 54 5C             MOVEM.w d0-d1,$545C.w
+005A52  11 FC 00 F0 54 4E             MOVE.b #$F0,$544E.w
+005A58  41 F9 00 00 72 D8             LEA $72D8.l,a0
+005A5E  70 1E                         MOVEQ #$1E,d0
+005A60  31 7C 0F FF 00 02             MOVE.w #$FFF,$2(a0)
+005A66  58 48                         ADDQ.w #4,a0
+005A68  51 C8 FF F6                   DBRA d0,$005A60
+005A6C  50 F8 5A B3                   ST $5AB3.w
+005A70  11 FC 00 0F 01 35             MOVE.b #$F,$135.w
+005A76  21 FC 00 00 72 D8 02 3E       MOVE.l #$72D8,$23E.w
+005A7E  21 FC 00 00 19 D0 02 42       MOVE.l #$19D0,$242.w
+005A86  31 FC 00 1E 02 46             MOVE.w #$1E,$246.w
+005A8C  11 FC 00 01 02 48             MOVE.b #$1,$248.w
+005A92  70 06                         MOVEQ #$6,d0
+005A94  4E B9 00 01 A2 DC             JSR $1A2DC.l
+005A9A  60 00 D3 92                   BRA $002E2E
 005A9E  4A 38 01 35                   TST.b $135.w
 005AA2  67 02                         BEQ $005AA6
 005AA4  4E 75                         RTS
@@ -3503,9 +4893,12 @@
 005AC6  6B 00 00 26                   BMI $005AEE
 005ACA  70 04                         MOVEQ #$4,d0
 005ACC  4E B9 00 01 A2 DC             JSR $1A2DC.l
-005AD2  4C B8                         .dc.w $4CB8
-005AD4  .dc.b 00 03 01 04 50 40 D2 7C 00 1E 48 B8 00 03 5B A0 ; ....P@.|..H...[.
-005AE4  .dc.b 11 FC 00 48 5B 9F 50 F8 5B 9E                   ; ...H[.P.[.
+005AD2  4C B8 00 03 01 04             MOVEM.w $104.w,d0-d1
+005AD8  50 40                         ADDQ.w #8,d0
+005ADA  D2 7C 00 1E                   ADD.w #$1E,d1
+005ADE  48 B8 00 03 5B A0             MOVEM.w d0-d1,$5BA0.w
+005AE4  11 FC 00 48 5B 9F             MOVE.b #$48,$5B9F.w
+005AEA  50 F8 5B 9E                   ST $5B9E.w
 005AEE  4E 75                         RTS
 
 ; ==== sub_005AF0 (1 caller) ====
@@ -3515,17 +4908,38 @@
 005AFA  66 00 00 8E                   BNE $005B8A
 005AFE  53 38 5B 9F                   SUBQ.b #1,$5B9F.w
 005B02  66 26                         BNE $005B2A
-005B04  4C B8                         .dc.w $4CB8
-005B06  .dc.b 00 03 5B A0 51 40 92 7C 00 0A 48 B8 00 03 54 5C ; ..[.Q@.|..H...T\
-005B16  .dc.b 11 FC 00 F0 54 4E 50 F8 01 34 11 FC 00 14 5B 9F ; ....TNP..4....[.
-005B26  .dc.b 60 00 D3 16                                     ; `...
-005B2A  4C B8                         .dc.w $4CB8
-005B2C  .dc.b 00 03 5B A0 90 78 01 20 6B 4E B0 7C 01 50 6C 48 ; ..[..x. kN.|.PlH
-005B3C  .dc.b 92 78 01 22 6B 42 B2 7C 00 D4 6C 3C 48 B8 00 03 ; .x."kB.|..l<H...
-005B4C  .dc.b 5B A0 41 F8 4C 16 14 38 5B 9F C4 7C 00 04 20 70 ; [.A.L..8[..|.. p
-005B5C  .dc.b 20 00 2D 7C FF FE FF FE 00 62 2D 7C FF FF 00 00 ;  .-|.....b-|....
-005B6C  .dc.b 00 44 22 78 02 0E 24 78 01 C2 26 6A 00 14 28 78 ; .D"x..$x..&j..(x
-005B7C  .dc.b 74 F2 7A 30 60 00 04 B8 51 F8 5B 9E 4E 75       ; t.z0`...Q.[.Nu
+005B04  4C B8 00 03 5B A0             MOVEM.w $5BA0.w,d0-d1
+005B0A  51 40                         SUBQ.w #8,d0
+005B0C  92 7C 00 0A                   SUB.w #$A,d1
+005B10  48 B8 00 03 54 5C             MOVEM.w d0-d1,$545C.w
+005B16  11 FC 00 F0 54 4E             MOVE.b #$F0,$544E.w
+005B1C  50 F8 01 34                   ST $134.w
+005B20  11 FC 00 14 5B 9F             MOVE.b #$14,$5B9F.w
+005B26  60 00 D3 16                   BRA $002E3E
+005B2A  4C B8 00 03 5B A0             MOVEM.w $5BA0.w,d0-d1
+005B30  90 78 01 20                   SUB.w $120.w,d0
+005B34  6B 4E                         BMI $005B84
+005B36  B0 7C 01 50                   CMP.w #$150,d0
+005B3A  6C 48                         BGE $005B84
+005B3C  92 78 01 22                   SUB.w $122.w,d1
+005B40  6B 42                         BMI $005B84
+005B42  B2 7C 00 D4                   CMP.w #$D4,d1
+005B46  6C 3C                         BGE $005B84
+005B48  48 B8 00 03 5B A0             MOVEM.w d0-d1,$5BA0.w
+005B4E  41 F8 4C 16                   LEA $4C16.w,a0
+005B52  14 38 5B 9F                   MOVE.b $5B9F.w,d2
+005B56  C4 7C 00 04                   AND.w #$4,d2
+005B5A  20 70 20 00                   MOVEA.l $0(a0,d2.w),a0
+005B5E  2D 7C FF FE FF FE 00 62       MOVE.l #$FFFEFFFE,$62(a6)
+005B66  2D 7C FF FF 00 00 00 44       MOVE.l #$FFFF0000,$44(a6)
+005B6E  22 78 02 0E                   MOVEA.l $20E.w,a1
+005B72  24 78 01 C2                   MOVEA.l $1C2.w,a2
+005B76  26 6A 00 14                   MOVEA.l $14(a2),a3
+005B7A  28 78 74 F2                   MOVEA.l $74F2.w,a4
+005B7E  7A 30                         MOVEQ #$30,d5
+005B80  60 00 04 B8                   BRA $00603A
+005B84  51 F8 5B 9E                   SF $5B9E.w
+005B88  4E 75                         RTS
 005B8A  53 38 5B 9F                   SUBQ.b #1,$5B9F.w
 005B8E  66 0C                         BNE $005B9C
 005B90  51 F8 5B 9E                   SF $5B9E.w
@@ -3544,12 +4958,28 @@
 005BBE  31 FC 00 10 54 56             MOVE.w #$10,$5456.w
 005BC4  60 06                         BRA $005BCC
 005BC6  31 FC FF F0 54 56             MOVE.w #$FFF0,$5456.w
-005BCC  4C B8                         .dc.w $4CB8
-005BCE  .dc.b 00 03 01 04 34 38 02 5C D4 42 D4 42 41 F8 53 B0 ; ....48.\.B.BA.S.
-005BDE  .dc.b D0 70 20 00 D2 70 20 02 5A 41 14 38 54 52 C4 7C ; .p ..p .ZA.8TR.|
-005BEE  .dc.b 00 07 52 42 E7 4A 76 20 4A 78 54 56 6A 04 44 42 ; ..RB.Jv JxTVj.DB
-005BFE  .dc.b 44 43 90 42 90 43 48 B8 00 03 54 58 11 FC 00 03 ; DC.B.CH...TX....
-005C0E  .dc.b 54 55 4E 75                                     ; TUNu
+005BCC  4C B8 00 03 01 04             MOVEM.w $104.w,d0-d1
+005BD2  34 38 02 5C                   MOVE.w $25C.w,d2
+005BD6  D4 42                         ADD.w d2,d2
+005BD8  D4 42                         ADD.w d2,d2
+005BDA  41 F8 53 B0                   LEA $53B0.w,a0
+005BDE  D0 70 20 00                   ADD.w $0(a0,d2.w),d0
+005BE2  D2 70 20 02                   ADD.w $2(a0,d2.w),d1
+005BE6  5A 41                         ADDQ.w #5,d1
+005BE8  14 38 54 52                   MOVE.b $5452.w,d2
+005BEC  C4 7C 00 07                   AND.w #$7,d2
+005BF0  52 42                         ADDQ.w #1,d2
+005BF2  E7 4A                         LSL.w #3,d2
+005BF4  76 20                         MOVEQ #$20,d3
+005BF6  4A 78 54 56                   TST.w $5456.w
+005BFA  6A 04                         BPL $005C00
+005BFC  44 42                         NEG.w d2
+005BFE  44 43                         NEG.w d3
+005C00  90 42                         SUB.w d2,d0
+005C02  90 43                         SUB.w d3,d0
+005C04  48 B8 00 03 54 58             MOVEM.w d0-d1,$5458.w
+005C0A  11 FC 00 03 54 55             MOVE.b #$3,$5455.w
+005C10  4E 75                         RTS
 005C12  10 38 54 51                   MOVE.b $5451.w,d0
 005C16  C0 7C 00 03                   AND.w #$3,d0
 005C1A  4A 38 02 52                   TST.b $252.w
@@ -3578,13 +5008,40 @@
 005C5E  4A 38 02 6C                   TST.b $26C.w
 005C62  67 02                         BEQ $005C66
 005C64  5A 40                         ADDQ.w #5,d0
-005C66  4C B8                         .dc.w $4CB8
-005C68  .dc.b 00 06 01 04 38 38 02 5C D8 44 D8 44 4B F8 53 B0 ; ....88.\.D.DK.S.
-005C78  .dc.b D2 75 40 00 D4 75 40 02 5A 42 4A 38 02 6C 66 04 ; .u@..u@.ZBJ8.lf.
-005C88  .dc.b 50 41 60 02 51 41 41 F9 00 00 9E 54 78 0E 61 00 ; PA`.QAA....Tx.a.
-005C98  .dc.b 00 0A 52 40 51 CB FF F8 4E 75 4A 50 66 12 48 90 ; ..R@Q...NuJPf.H.
-005CA8  .dc.b 00 07 5C 48 52 79 00 00 54 48 53 44 6B 08 4E 75 ; ..\HRy..THSDk.Nu
-005CB8  .dc.b 5C 48 51 CC FF E6 5D 48 78 00 4E 75             ; \HQ...]Hx.Nu
+005C66  4C B8 00 06 01 04             MOVEM.w $104.w,d1-d2
+005C6C  38 38 02 5C                   MOVE.w $25C.w,d4
+005C70  D8 44                         ADD.w d4,d4
+005C72  D8 44                         ADD.w d4,d4
+005C74  4B F8 53 B0                   LEA $53B0.w,a5
+005C78  D2 75 40 00                   ADD.w $0(a5,d4.w),d1
+005C7C  D4 75 40 02                   ADD.w $2(a5,d4.w),d2
+005C80  5A 42                         ADDQ.w #5,d2
+005C82  4A 38 02 6C                   TST.b $26C.w
+005C86  66 04                         BNE $005C8C
+005C88  50 41                         ADDQ.w #8,d1
+005C8A  60 02                         BRA $005C8E
+005C8C  51 41                         SUBQ.w #8,d1
+005C8E  41 F9 00 00 9E 54             LEA $9E54.l,a0
+005C94  78 0E                         MOVEQ #$E,d4
+005C96  61 00 00 0A                   BSR $005CA2
+005C9A  52 40                         ADDQ.w #1,d0
+005C9C  51 CB FF F8                   DBRA d3,$005C96
+005CA0  4E 75                         RTS
+
+; ==== sub_005CA2 (2 callers) ====
+005CA2  4A 50                         TST.w (a0)
+005CA4  66 12                         BNE $005CB8
+005CA6  48 90 00 07                   MOVEM.w d0-d2,(a0)
+005CAA  5C 48                         ADDQ.w #6,a0
+005CAC  52 79 00 00 54 48             ADDQ.w #1,$5448.l
+005CB2  53 44                         SUBQ.w #1,d4
+005CB4  6B 08                         BMI $005CBE
+005CB6  4E 75                         RTS
+005CB8  5C 48                         ADDQ.w #6,a0
+005CBA  51 CC FF E6                   DBRA d4,$005CA2
+005CBE  5D 48                         SUBQ.w #6,a0
+005CC0  78 00                         MOVEQ #$0,d4
+005CC2  4E 75                         RTS
 
 ; ==== sub_005CC4 (1 caller) ====
 005CC4  4B F9 00 00 9E 54             LEA $9E54.l,a5
@@ -3598,36 +5055,100 @@
 005CDC  5C 4D                         ADDQ.w #6,a5
 005CDE  60 F8                         BRA $005CD8
 005CE0  6A 30                         BPL $005D12
-005CE2  4C AD                         .dc.w $4CAD
-005CE4  .dc.b 00 03 00 02 90 78 01 20 6B 6E 92 78 01 22 6B 68 ; .....x. kn.x."kh
-005CF4  .dc.b B0 7C 01 50 6E 62 B2 7C 00 D4 6E 5C 48 AD 00 03 ; .|.Pnb.|..n\H...
-005D04  .dc.b 00 02 52 55 67 52 0C 55 FF F6 67 4C 60 42       ; ..RUgR.U..gL`B
-005D12  4C AD                         .dc.w $4CAD
-005D14  .dc.b 00 03 00 02 3F 02 61 00 D8 92 66 00 00 44 34 1F ; ....?.a...f..D4.
-005D24  .dc.b D4 42 D4 42 4C AD 00 03 00 02 D0 74 20 00 90 78 ; .B.BL......t ..x
-005D34  .dc.b 01 20 6B 24 D2 74 20 02 92 78 01 22 6B 1A B0 7C ; . k$.t ..x."k..|
-005D44  .dc.b 01 50 6E 14 B2 7C 00 D4 6E 0E 48 AD 00 03 00 02 ; .Pn..|..n.H.....
-005D54  .dc.b 5C 4D 51 CF FF 80 4E 75 42 55 53 78 54 48 60 F0 ; \MQ...NuBUSxTH`.
-005D64  .dc.b 54 4F 4C AD 00 06 00 02 B0 3C 00 7F 66 2C 61 00 ; TOL......<..f,a.
-005D74  .dc.b 06 3A 3A BC FF EC 4C AD 00 03 00 02 4C B8 00 0C ; .::...L.....L...
-005D84  .dc.b 01 72 90 42 92 43 C0 7C FF F0 C2 7C FF F0 D0 42 ; .r.B.C.|...|...B
-005D94  .dc.b D2 43 48 AD 00 03 00 02 60 B6 3A BC FF F6 59 6D ; .CH.....`.:...Ym
-005DA4  .dc.b 00 02 6B B4 5D 6D 00 04 6B AE 60 A4 00 03 00 00 ; ..k.]m..k.`.....
-005DB4  .dc.b 00 02 00 02 00 01 00 04 00 01 00 04 00 00 00 1D ; ................
-005DC4  .dc.b 00 1E 00 00 00 00 FF F8 FF FC FF F8 FF FE FF F8 ; ................
-005DD4  .dc.b 00 00 FF F8 00 02 FF F8 00 04 00 08 FF FC 00 08 ; ................
-005DE4  .dc.b FF FE 00 08 00 00 00 08 00 02 00 08 00 04       ; ..............
+005CE2  4C AD 00 03 00 02             MOVEM.w $2(a5),d0-d1
+005CE8  90 78 01 20                   SUB.w $120.w,d0
+005CEC  6B 6E                         BMI $005D5C
+005CEE  92 78 01 22                   SUB.w $122.w,d1
+005CF2  6B 68                         BMI $005D5C
+005CF4  B0 7C 01 50                   CMP.w #$150,d0
+005CF8  6E 62                         BGT $005D5C
+005CFA  B2 7C 00 D4                   CMP.w #$D4,d1
+005CFE  6E 5C                         BGT $005D5C
+005D00  48 AD 00 03 00 02             MOVEM.w d0-d1,$2(a5)
+005D06  52 55                         ADDQ.w #1,(a5)
+005D08  67 52                         BEQ $005D5C
+005D0A  0C 55 FF F6                   CMPI.w #$FFF6,(a5)
+005D0E  67 4C                         BEQ $005D5C
+005D10  60 42                         BRA $005D54
+005D12  4C AD 00 03 00 02             MOVEM.w $2(a5),d0-d1
+005D18  3F 02                         MOVE.w d2,-(a7)
+005D1A  61 00 D8 92                   BSR $0035AE
+005D1E  66 00 00 44                   BNE $005D64
+005D22  34 1F                         MOVE.w (a7)+,d2
+005D24  D4 42                         ADD.w d2,d2
+005D26  D4 42                         ADD.w d2,d2
+005D28  4C AD 00 03 00 02             MOVEM.w $2(a5),d0-d1
+005D2E  D0 74 20 00                   ADD.w $0(a4,d2.w),d0
+005D32  90 78 01 20                   SUB.w $120.w,d0
+005D36  6B 24                         BMI $005D5C
+005D38  D2 74 20 02                   ADD.w $2(a4,d2.w),d1
+005D3C  92 78 01 22                   SUB.w $122.w,d1
+005D40  6B 1A                         BMI $005D5C
+005D42  B0 7C 01 50                   CMP.w #$150,d0
+005D46  6E 14                         BGT $005D5C
+005D48  B2 7C 00 D4                   CMP.w #$D4,d1
+005D4C  6E 0E                         BGT $005D5C
+005D4E  48 AD 00 03 00 02             MOVEM.w d0-d1,$2(a5)
+005D54  5C 4D                         ADDQ.w #6,a5
+005D56  51 CF FF 80                   DBRA d7,$005CD8
+005D5A  4E 75                         RTS
+005D5C  42 55                         CLR.w (a5)
+005D5E  53 78 54 48                   SUBQ.w #1,$5448.w
+005D62  60 F0                         BRA $005D54
+005D64  54 4F                         ADDQ.w #2,a7
+005D66  4C AD 00 06 00 02             MOVEM.w $2(a5),d1-d2
+005D6C  B0 3C 00 7F                   CMP.b #$7F,d0
+005D70  66 2C                         BNE $005D9E
+005D72  61 00 06 3A                   BSR $0063AE
+005D76  3A BC FF EC                   MOVE.w #$FFEC,(a5)
+005D7A  4C AD 00 03 00 02             MOVEM.w $2(a5),d0-d1
+005D80  4C B8 00 0C 01 72             MOVEM.w $172.w,d2-d3
+005D86  90 42                         SUB.w d2,d0
+005D88  92 43                         SUB.w d3,d1
+005D8A  C0 7C FF F0                   AND.w #$FFF0,d0
+005D8E  C2 7C FF F0                   AND.w #$FFF0,d1
+005D92  D0 42                         ADD.w d2,d0
+005D94  D2 43                         ADD.w d3,d1
+005D96  48 AD 00 03 00 02             MOVEM.w d0-d1,$2(a5)
+005D9C  60 B6                         BRA $005D54
+005D9E  3A BC FF F6                   MOVE.w #$FFF6,(a5)
+005DA2  59 6D 00 02                   SUBQ.w #4,$2(a5)
+005DA6  6B B4                         BMI $005D5C
+005DA8  5D 6D 00 04                   SUBQ.w #6,$4(a5)
+005DAC  6B AE                         BMI $005D5C
+005DAE  60 A4                         BRA $005D54
+005DB0  .dc.b 00 03 00 00 00 02 00 02 00 01 00 04 00 01 00 04 ; ................
+005DC0  .dc.b 00 00 00 1D 00 1E 00 00 00 00 FF F8 FF FC FF F8 ; ................
+005DD0  .dc.b FF FE FF F8 00 00 FF F8 00 02 FF F8 00 04 00 08 ; ................
+005DE0  .dc.b FF FC 00 08 FF FE 00 08 00 00 00 08 00 02 00 08 ; ................
+005DF0  .dc.b 00 04                                           ; ..
 
 ; ==== sub_005DF2 (1 caller) ====
 005DF2  4A 38 54 53                   TST.b $5453.w
 005DF6  66 02                         BNE $005DFA
 005DF8  4E 75                         RTS
-005DFA  4C B8                         .dc.w $4CB8
-005DFC  .dc.b 00 03 54 58 14 38 54 52 C4 7C 00 07 52 42 E7 4A ; ..TX.8TR.|..RB.J
-005E0C  .dc.b D4 7C 00 10 4A 78 54 56 6A 02 44 42 D0 42 90 78 ; .|..JxTVj.DB.B.x
-005E1C  .dc.b 01 20 6B 1A 92 78 01 22 6B 14 B0 7C 01 50 6C 0E ; . k..x."k..|.Pl.
-005E2C  .dc.b B2 7C 00 D4 6C 08 48 B8 00 03 54 58 4E 75 51 F8 ; .|..l.H...TXNuQ.
-005E3C  .dc.b 54 53 4E 75                                     ; TSNu
+005DFA  4C B8 00 03 54 58             MOVEM.w $5458.w,d0-d1
+005E00  14 38 54 52                   MOVE.b $5452.w,d2
+005E04  C4 7C 00 07                   AND.w #$7,d2
+005E08  52 42                         ADDQ.w #1,d2
+005E0A  E7 4A                         LSL.w #3,d2
+005E0C  D4 7C 00 10                   ADD.w #$10,d2
+005E10  4A 78 54 56                   TST.w $5456.w
+005E14  6A 02                         BPL $005E18
+005E16  44 42                         NEG.w d2
+005E18  D0 42                         ADD.w d2,d0
+005E1A  90 78 01 20                   SUB.w $120.w,d0
+005E1E  6B 1A                         BMI $005E3A
+005E20  92 78 01 22                   SUB.w $122.w,d1
+005E24  6B 14                         BMI $005E3A
+005E26  B0 7C 01 50                   CMP.w #$150,d0
+005E2A  6C 0E                         BGE $005E3A
+005E2C  B2 7C 00 D4                   CMP.w #$D4,d1
+005E30  6C 08                         BGE $005E3A
+005E32  48 B8 00 03 54 58             MOVEM.w d0-d1,$5458.w
+005E38  4E 75                         RTS
+005E3A  51 F8 54 53                   SF $5453.w
+005E3E  4E 75                         RTS
 
 ; ==== blit_obj_restore  $005E40  (4 callers) — Erase pass: drains the restore queue (list.$10 of the $1C2 structure, entries written by draw_object_bob as dest/modulo/BLTSIZE) with a straight BLTCON0=$9F0 copy (A->D) — blits the saved background back over last frame's BOB rectangles. Clears the queue's count ($4 of the slot) when done. ====
 005E40  3D 7C 09 F0 00 40             MOVE.w #$9F0,$40(a6)
@@ -3644,9 +5165,15 @@
 005E6E  2D 42 00 54                   MOVE.l d2,$54(a6)
 005E72  D4 80                         ADD.l d0,d2
 005E74  2D 42 00 50                   MOVE.l d2,$50(a6)
-005E78  4C 9A                         .dc.w $4C9A
-005E7A  .dc.b 00 0C 94 41 3D 42 00 64 3D 42 00 66 D6 43 D6 43 ; ...A=B.d=B.f.C.C
-005E8A  .dc.b E4 0B 3D 43 00 58 60 D4                         ; ..=C.X`.
+005E78  4C 9A 00 0C                   MOVEM.w (a2)+,d2-d3
+005E7C  94 41                         SUB.w d1,d2
+005E7E  3D 42 00 64                   MOVE.w d2,$64(a6)
+005E82  3D 42 00 66                   MOVE.w d2,$66(a6)
+005E86  D6 43                         ADD.w d3,d3
+005E88  D6 43                         ADD.w d3,d3
+005E8A  E4 0B                         LSR.b #2,d3
+005E8C  3D 43 00 58                   MOVE.w d3,$58(a6)
+005E90  60 D4                         BRA $005E66
 005E92  24 69 00 10                   MOVEA.l $10(a1),a2
 005E96  42 6A 00 04                   CLR.w $4(a2)
 005E9A  4E 75                         RTS
@@ -3672,28 +5199,49 @@
 005EDE  41 F8 4B FA                   LEA $4BFA.w,a0
 005EE2  4B F8 4B EC                   LEA $4BEC.w,a5
 005EE6  50 F8 54 54                   ST $5454.w
-005EEA  4C B8                         .dc.w $4CB8
-005EEC  .dc.b 00 03 54 58 61 00 00 30 41 F8 4B DE 53 47 6B 00 ; ..TXa..0A.K.SGk.
-005EFC  .dc.b 00 14 D0 46 6B 1E B0 7C 01 50 6C 18 61 00 00 18 ; ...Fk..|.Pl.a...
-005F0C  .dc.b 51 CF FF F0 20 4D D0 46 6B 0A B0 7C 01 50 6C 04 ; Q... M.Fk..|.Pl.
-005F1C  .dc.b 60 00 00 04 4E 75                               ; `...Nu
+005EEA  4C B8 00 03 54 58             MOVEM.w $5458.w,d0-d1
+005EF0  61 00 00 30                   BSR $005F22
+005EF4  41 F8 4B DE                   LEA $4BDE.w,a0
+005EF8  53 47                         SUBQ.w #1,d7
+005EFA  6B 00 00 14                   BMI $005F10
+005EFE  D0 46                         ADD.w d6,d0
+005F00  6B 1E                         BMI $005F20
+005F02  B0 7C 01 50                   CMP.w #$150,d0
+005F06  6C 18                         BGE $005F20
+005F08  61 00 00 18                   BSR $005F22
+005F0C  51 CF FF F0                   DBRA d7,$005EFE
+005F10  20 4D                         MOVEA.l a5,a0
+005F12  D0 46                         ADD.w d6,d0
+005F14  6B 0A                         BMI $005F20
+005F16  B0 7C 01 50                   CMP.w #$150,d0
+005F1A  6C 04                         BGE $005F20
+005F1C  60 00 00 04                   BRA $005F22
+005F20  4E 75                         RTS
 
-; --- object_draw_dispatch  $005F22 — Per-object: read the object's type byte ($1 of its slot); type 0 -> draw_object_bob; type $7F -> a multi-part / linked sub-object draw (via $63AE), decrementing the sub counters $5455. Saves regs to the $5FA8 scratch around the call. ---
+; ==== object_draw_dispatch  $005F22  (2 callers) — Per-object: read the object's type byte ($1 of its slot); type 0 -> draw_object_bob; type $7F -> a multi-part / linked sub-object draw (via $63AE), decrementing the sub counters $5455. Saves regs to the $5FA8 scratch around the call. ====
 005F22  48 A7 C0 00                   MOVEM.w d0-d1,-(a7)
 005F26  58 41                         ADDQ.w #4,d1
 005F28  61 00 D6 84                   BSR $0035AE
 005F2C  66 1C                         BNE $005F4A
 005F2E  10 32 10 01                   MOVE.b $1(a2,d1.w),d0
 005F32  66 4A                         BNE $005F7E
-005F34  4C 97                         .dc.w $4C97
-005F36  .dc.b 00 03 24 78 01 C2 61 00 00 FC 51 F8 54 54 4C 9F ; ..$x..a...Q.TTL.
-005F46  .dc.b 00 03 4E 75                                     ; ..Nu
+005F34  4C 97 00 03                   MOVEM.w (a7),d0-d1
+005F38  24 78 01 C2                   MOVEA.l $1C2.w,a2
+005F3C  61 00 00 FC                   BSR $00603A
+005F40  51 F8 54 54                   SF $5454.w
+005F44  4C 9F 00 03                   MOVEM.w (a7)+,d0-d1
+005F48  4E 75                         RTS
 005F4A  B0 3C 00 7F                   CMP.b #$7F,d0
 005F4E  66 22                         BNE $005F72
 005F50  48 F8 3F FE 5F A8             MOVEM.l d1-d7/a0-a5,$5FA8.w
-005F56  4C 97                         .dc.w $4C97
-005F58  .dc.b 00 06 4A 38 54 55 67 16 53 38 54 55 58 42 61 00 ; ..J8TUg.S8TUXBa.
-005F68  .dc.b 04 46 4C F8 3F FE 5F A8 60 BC                   ; .FL.?._.`.
+005F56  4C 97 00 06                   MOVEM.w (a7),d1-d2
+005F5A  4A 38 54 55                   TST.b $5455.w
+005F5E  67 16                         BEQ $005F76
+005F60  53 38 54 55                   SUBQ.b #1,$5455.w
+005F64  58 42                         ADDQ.w #4,d2
+005F66  61 00 04 46                   BSR $0063AE
+005F6A  4C F8 3F FE 5F A8             MOVEM.l $5FA8.w,d1-d7/a0-a5
+005F70  60 BC                         BRA $005F2E
 005F72  4A 38 54 54                   TST.b $5454.w
 005F76  57 F8 54 53                   SEQ $5453.w
 005F7A  50 4F                         ADDQ.w #8,a7
@@ -3701,13 +5249,19 @@
 005F7E  B0 3C 00 7F                   CMP.b #$7F,d0
 005F82  66 EE                         BNE $005F72
 005F84  48 F8 3F FE 5F A8             MOVEM.l d1-d7/a0-a5,$5FA8.w
-005F8A  4C 97                         .dc.w $4C97
-005F8C  .dc.b 00 06 50 41 4A 38 54 55 67 E0 53 38 54 55 58 42 ; ..PAJ8TUg.S8TUXB
-005F9C  .dc.b 61 00 04 10 4C F8 3F FE 5F A8 60 8C 00 00 00 00 ; a...L.?._.`.....
-005FAC  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-005FBC  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-005FCC  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-005FDC  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00             ; ............
+005F8A  4C 97 00 06                   MOVEM.w (a7),d1-d2
+005F8E  50 41                         ADDQ.w #8,d1
+005F90  4A 38 54 55                   TST.b $5455.w
+005F94  67 E0                         BEQ $005F76
+005F96  53 38 54 55                   SUBQ.b #1,$5455.w
+005F9A  58 42                         ADDQ.w #4,d2
+005F9C  61 00 04 10                   BSR $0063AE
+005FA0  4C F8 3F FE 5F A8             MOVEM.l $5FA8.w,d1-d7/a0-a5
+005FA6  60 8C                         BRA $005F34
+005FA8  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+005FB8  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+005FC8  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+005FD8  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
 
 ; ==== sub_005FE8 (1 caller) ====
 005FE8  4B F9 00 00 9E 54             LEA $9E54.l,a5
@@ -3729,11 +5283,13 @@
 006022  E9 4A                         LSL.w #4,d2
 006024  41 F8 49 8C                   LEA $498C.w,a0
 006028  D0 C2                         ADDA.w d2,a0
-00602A  4C AD                         .dc.w $4CAD
-00602C  .dc.b 00 03 00 02 61 08 5C 4D 51 CF FF E4             ; ....a.\MQ...
+00602A  4C AD 00 03 00 02             MOVEM.w $2(a5),d0-d1
+006030  61 08                         BSR $00603A
+006032  5C 4D                         ADDQ.w #6,a5
+006034  51 CF FF E4                   DBRA d7,$00601A
 006038  4E 75                         RTS
 
-; --- draw_object_bob  $00603A — The BOB renderer (cookie-cut blit). Transforms the object position to screen space (x-$172+$40, y-$174-$1C0, both masked), rejects off-screen, looks up the destination word via a per-row screen-offset table (a1), and sets BLTCON0 = (x&15)<<12 | $FCA (cookie-cut: A=mask, B=bitmap, C/D=dest, minterm $CA) and BLTCON1 = the shift. It then reads the BOB DESCRIPTOR at a0 and runs the blit, and appends {dest, modulo, BLTSIZE} to the restore queue (a3) for blit_obj_restore. ---
+; ==== draw_object_bob  $00603A  (8 callers) — The BOB renderer (cookie-cut blit). Transforms the object position to screen space (x-$172+$40, y-$174-$1C0, both masked), rejects off-screen, looks up the destination word via a per-row screen-offset table (a1), and sets BLTCON0 = (x&15)<<12 | $FCA (cookie-cut: A=mask, B=bitmap, C/D=dest, minterm $CA) and BLTCON1 = the shift. It then reads the BOB DESCRIPTOR at a0 and runs the blit, and appends {dest, modulo, BLTSIZE} to the restore queue (a3) for blit_obj_restore. ====
 00603A  90 78 01 72                   SUB.w $172.w,d0
 00603E  D0 7C 00 40                   ADD.w #$40,d0
 006042  48 C0                         EXT.L d0
@@ -3978,6 +5534,8 @@
 0063A2  2D 7C FF FE FF FE 00 62       MOVE.l #$FFFEFFFE,$62(a6)
 0063AA  4E 75                         RTS
 0063AC  4E 75                         RTS
+
+; ==== sub_0063AE (5 callers) ====
 0063AE  92 78 01 72                   SUB.w $172.w,d1
 0063B2  6B F8                         BMI $0063AC
 0063B4  94 78 01 74                   SUB.w $174.w,d2
@@ -4024,12 +5582,29 @@
 00645E  2D 42 00 50                   MOVE.l d2,$50(a6)
 006462  2D 41 00 54                   MOVE.l d1,$54(a6)
 006466  3D 7C 10 01 00 58             MOVE.w #$1001,$58(a6)
-00646C  4C 9F                         .dc.w $4C9F
-00646E  .dc.b 00 03 34 01 D4 42 D2 42 E6 48 D2 40 20 78 02 12 ; ..4..B.B.H.@ x..
-00647E  .dc.b 42 30 10 00 42 30 10 01 42 30 10 30 42 30 10 31 ; B0..B0..B0.0B0.1
-00648E  .dc.b 4C 9F 00 03 EA 48 D0 78 01 F6 D0 40 EA 49 D2 78 ; L....H.x...@.I.x
-00649E  .dc.b 01 F8 20 78 02 2E D2 70 00 00 20 78 02 2A 42 30 ; .. x...p.. x.*B0
-0064AE  .dc.b 10 00 70 19 4E F9 00 01 A2 DC                   ; ..p.N.....
+00646C  4C 9F 00 03                   MOVEM.w (a7)+,d0-d1
+006470  34 01                         MOVE.w d1,d2
+006472  D4 42                         ADD.w d2,d2
+006474  D2 42                         ADD.w d2,d1
+006476  E6 48                         LSR.w #3,d0
+006478  D2 40                         ADD.w d0,d1
+00647A  20 78 02 12                   MOVEA.l $212.w,a0
+00647E  42 30 10 00                   CLR.b $0(a0,d1.w)
+006482  42 30 10 01                   CLR.b $1(a0,d1.w)
+006486  42 30 10 30                   CLR.b $30(a0,d1.w)
+00648A  42 30 10 31                   CLR.b $31(a0,d1.w)
+00648E  4C 9F 00 03                   MOVEM.w (a7)+,d0-d1
+006492  EA 48                         LSR.w #5,d0
+006494  D0 78 01 F6                   ADD.w $1F6.w,d0
+006498  D0 40                         ADD.w d0,d0
+00649A  EA 49                         LSR.w #5,d1
+00649C  D2 78 01 F8                   ADD.w $1F8.w,d1
+0064A0  20 78 02 2E                   MOVEA.l $22E.w,a0
+0064A4  D2 70 00 00                   ADD.w $0(a0,d0.w),d1
+0064A8  20 78 02 2A                   MOVEA.l $22A.w,a0
+0064AC  42 30 10 00                   CLR.b $0(a0,d1.w)
+0064B0  70 19                         MOVEQ #$19,d0
+0064B2  4E F9 00 01 A2 DC             JMP $1A2DC.l
 
 ; ==== sub_0064B8 (4 callers) ====
 0064B8  4A B8 02 36                   TST.l $236.w
@@ -4047,53 +5622,149 @@
 0064E2  34 2D 00 0C                   MOVE.w $C(a5),d2
 0064E6  E7 4A                         LSL.w #3,d2
 0064E8  D8 C2                         ADDA.w d2,a4
-0064EA  4C AD                         .dc.w $4CAD
-0064EC  .dc.b 00 03 00 18 D0 5C D2 5C 34 00 36 01 D4 5C D6 54 ; .....\.\4.6..\.T
-0064FC  .dc.b 3C 07 41 F9 00 00 9E 54 4A 50 66 04 5C 48 60 F8 ; <.A....TJPf.\H`.
-00650C  .dc.b 6B 3C 4C A8 00 30 00 02 B4 44 6D 32 B6 45 6D 2E ; k<L..0...Dm2.Em.
-00651C  .dc.b 50 44 5C 45 B0 44 6E 26 B2 45 6E 22 52 2D 00 1D ; PD\E.Dn&.En"R-..
-00652C  .dc.b 42 50 4A 38 01 5C 67 0E 30 BC FF F6 59 68 00 02 ; BPJ8.\g.0...Yh..
-00653C  .dc.b 5D 68 00 04 60 08 53 79 00 00 54 48 67 14 5C 48 ; ]h..`.Sy..THg.\H
-00654C  .dc.b 51 CE FF B6                                     ; Q...
+0064EA  4C AD 00 03 00 18             MOVEM.w $18(a5),d0-d1
+0064F0  D0 5C                         ADD.w (a4)+,d0
+0064F2  D2 5C                         ADD.w (a4)+,d1
+0064F4  34 00                         MOVE.w d0,d2
+0064F6  36 01                         MOVE.w d1,d3
+0064F8  D4 5C                         ADD.w (a4)+,d2
+0064FA  D6 54                         ADD.w (a4),d3
+0064FC  3C 07                         MOVE.w d7,d6
+0064FE  41 F9 00 00 9E 54             LEA $9E54.l,a0
+006504  4A 50                         TST.w (a0)
+006506  66 04                         BNE $00650C
+006508  5C 48                         ADDQ.w #6,a0
+00650A  60 F8                         BRA $006504
+00650C  6B 3C                         BMI $00654A
+00650E  4C A8 00 30 00 02             MOVEM.w $2(a0),d4-d5
+006514  B4 44                         CMP.w d4,d2
+006516  6D 32                         BLT $00654A
+006518  B6 45                         CMP.w d5,d3
+00651A  6D 2E                         BLT $00654A
+00651C  50 44                         ADDQ.w #8,d4
+00651E  5C 45                         ADDQ.w #6,d5
+006520  B0 44                         CMP.w d4,d0
+006522  6E 26                         BGT $00654A
+006524  B2 45                         CMP.w d5,d1
+006526  6E 22                         BGT $00654A
+006528  52 2D 00 1D                   ADDQ.b #1,$1D(a5)
+00652C  42 50                         CLR.w (a0)
+00652E  4A 38 01 5C                   TST.b $15C.w
+006532  67 0E                         BEQ $006542
+006534  30 BC FF F6                   MOVE.w #$FFF6,(a0)
+006538  59 68 00 02                   SUBQ.w #4,$2(a0)
+00653C  5D 68 00 04                   SUBQ.w #6,$4(a0)
+006540  60 08                         BRA $00654A
+006542  53 79 00 00 54 48             SUBQ.w #1,$5448.l
+006548  67 14                         BEQ $00655E
+00654A  5C 48                         ADDQ.w #6,a0
+00654C  51 CE FF B6                   DBRA d6,$006504
 006550  4A AD 00 00                   TST.l $0(a5)
 006554  67 08                         BEQ $00655E
 006556  2A 6D 00 00                   MOVEA.l $0(a5),a5
 00655A  60 00 FF 72                   BRA $0064CE
 00655E  4A 39 00 00 54 53             TST.b $5453.l
 006564  67 00 00 7E                   BEQ $0065E4
-006568  4C B8                         .dc.w $4CB8
-00656A  .dc.b 00 03 54 58 36 01 D6 7C 00 06 18 38 54 52 C8 7C ; ..TX6..|...8TR.|
-00657A  .dc.b 00 07 54 44 E9 4C 4A 78 54 56 6A 0A D0 7C 00 10 ; ..TD.LJxTVj..|..
-00658A  .dc.b 34 00 90 44 60 04 34 00 D4 44 2A 78 02 36 4A 2D ; 4..D`.4..D*x.6J-
-00659A  .dc.b 00 1F 66 00 00 3A 4A 2D 00 1E 6B 00 00 32 4C AD ; ..f..:J-..k..2L.
-0065AA  .dc.b 00 30 00 18 28 6D 00 08 3C 2D 00 0C E7 4E D8 C6 ; .0..(m..<-...N..
-0065BA  .dc.b D8 5C B4 44 6D 18 DA 5C B6 45 6D 12 D8 5C B0 44 ; .\.Dm..\.Em..\.D
-0065CA  .dc.b 6E 0C DA 5C B2 45 6E 06 06 2D 00 06 00 1D 4A AD ; n..\.En..-....J.
-0065DA  .dc.b 00 00 67 06 2A 6D 00 00 60 B4                   ; ..g.*m..`.
+006568  4C B8 00 03 54 58             MOVEM.w $5458.w,d0-d1
+00656E  36 01                         MOVE.w d1,d3
+006570  D6 7C 00 06                   ADD.w #$6,d3
+006574  18 38 54 52                   MOVE.b $5452.w,d4
+006578  C8 7C 00 07                   AND.w #$7,d4
+00657C  54 44                         ADDQ.w #2,d4
+00657E  E9 4C                         LSL.w #4,d4
+006580  4A 78 54 56                   TST.w $5456.w
+006584  6A 0A                         BPL $006590
+006586  D0 7C 00 10                   ADD.w #$10,d0
+00658A  34 00                         MOVE.w d0,d2
+00658C  90 44                         SUB.w d4,d0
+00658E  60 04                         BRA $006594
+006590  34 00                         MOVE.w d0,d2
+006592  D4 44                         ADD.w d4,d2
+006594  2A 78 02 36                   MOVEA.l $236.w,a5
+006598  4A 2D 00 1F                   TST.b $1F(a5)
+00659C  66 00 00 3A                   BNE $0065D8
+0065A0  4A 2D 00 1E                   TST.b $1E(a5)
+0065A4  6B 00 00 32                   BMI $0065D8
+0065A8  4C AD 00 30 00 18             MOVEM.w $18(a5),d4-d5
+0065AE  28 6D 00 08                   MOVEA.l $8(a5),a4
+0065B2  3C 2D 00 0C                   MOVE.w $C(a5),d6
+0065B6  E7 4E                         LSL.w #3,d6
+0065B8  D8 C6                         ADDA.w d6,a4
+0065BA  D8 5C                         ADD.w (a4)+,d4
+0065BC  B4 44                         CMP.w d4,d2
+0065BE  6D 18                         BLT $0065D8
+0065C0  DA 5C                         ADD.w (a4)+,d5
+0065C2  B6 45                         CMP.w d5,d3
+0065C4  6D 12                         BLT $0065D8
+0065C6  D8 5C                         ADD.w (a4)+,d4
+0065C8  B0 44                         CMP.w d4,d0
+0065CA  6E 0C                         BGT $0065D8
+0065CC  DA 5C                         ADD.w (a4)+,d5
+0065CE  B2 45                         CMP.w d5,d1
+0065D0  6E 06                         BGT $0065D8
+0065D2  06 2D 00 06 00 1D             ADDI.b #$6,$1D(a5)
+0065D8  4A AD 00 00                   TST.l $0(a5)
+0065DC  67 06                         BEQ $0065E4
+0065DE  2A 6D 00 00                   MOVEA.l $0(a5),a5
+0065E2  60 B4                         BRA $006598
 0065E4  4A 38 01 5C                   TST.b $15C.w
 0065E8  67 30                         BEQ $00661A
 0065EA  4A 38 5A B2                   TST.b $5AB2.w
 0065EE  67 2A                         BEQ $00661A
 0065F0  4A 38 01 C7                   TST.b $1C7.w
 0065F4  66 24                         BNE $00661A
-0065F6  4C B8                         .dc.w $4CB8
-0065F8  .dc.b 00 30 5A B4 4C B8 00 0F 01 6A B4 44 6D 14 B6 45 ; .0Z.L....j.Dm..E
-006608  .dc.b 6D 10 5C 44 5C 45 B0 44 6E 08 B2 45 6E 04 61 00 ; m.\D\E.Dn..En.a.
-006618  .dc.b F4 24                                           ; .$
+0065F6  4C B8 00 30 5A B4             MOVEM.w $5AB4.w,d4-d5
+0065FC  4C B8 00 0F 01 6A             MOVEM.w $16A.w,d0-d3
+006602  B4 44                         CMP.w d4,d2
+006604  6D 14                         BLT $00661A
+006606  B6 45                         CMP.w d5,d3
+006608  6D 10                         BLT $00661A
+00660A  5C 44                         ADDQ.w #6,d4
+00660C  5C 45                         ADDQ.w #6,d5
+00660E  B0 44                         CMP.w d4,d0
+006610  6E 08                         BGT $00661A
+006612  B2 45                         CMP.w d5,d1
+006614  6E 04                         BGT $00661A
+006616  61 00 F4 24                   BSR $005A3C
 00661A  4A 38 5A B2                   TST.b $5AB2.w
 00661E  67 00 00 74                   BEQ $006694
 006622  4A 38 01 C7                   TST.b $1C7.w
 006626  67 08                         BEQ $006630
 006628  4A 38 5A B3                   TST.b $5AB3.w
 00662C  67 00 00 66                   BEQ $006694
-006630  4C B8                         .dc.w $4CB8
-006632  .dc.b 00 03 5A B4 4C B8 00 0C 5A B4 58 42 58 43 2A 78 ; ..Z.L...Z.XBXC*x
-006642  .dc.b 02 36 4A 2D 00 1F 66 3E 4A 2D 00 1E 6B 00 00 38 ; .6J-..f>J-..k..8
-006652  .dc.b 4A 38 5A B3 66 2A 4C AD 00 30 00 18 28 6D 00 08 ; J8Z.f*L..0..(m..
-006662  .dc.b 3C 2D 00 0C E7 4E D8 C6 D8 5C B4 44 6D 18 DA 5C ; <-...N...\.Dm..\
-006672  .dc.b B6 45 6D 12 D8 5C B0 44 6E 0C DA 5C B2 45 6E 06 ; .Em..\.Dn..\.En.
-006682  .dc.b 06 2D 00 64 00 1D 4A AD 00 00 67 06 2A 6D 00 00 ; .-.d..J...g.*m..
-006692  .dc.b 60 B0                                           ; `.
+006630  4C B8 00 03 5A B4             MOVEM.w $5AB4.w,d0-d1
+006636  4C B8 00 0C 5A B4             MOVEM.w $5AB4.w,d2-d3
+00663C  58 42                         ADDQ.w #4,d2
+00663E  58 43                         ADDQ.w #4,d3
+006640  2A 78 02 36                   MOVEA.l $236.w,a5
+006644  4A 2D 00 1F                   TST.b $1F(a5)
+006648  66 3E                         BNE $006688
+00664A  4A 2D 00 1E                   TST.b $1E(a5)
+00664E  6B 00 00 38                   BMI $006688
+006652  4A 38 5A B3                   TST.b $5AB3.w
+006656  66 2A                         BNE $006682
+006658  4C AD 00 30 00 18             MOVEM.w $18(a5),d4-d5
+00665E  28 6D 00 08                   MOVEA.l $8(a5),a4
+006662  3C 2D 00 0C                   MOVE.w $C(a5),d6
+006666  E7 4E                         LSL.w #3,d6
+006668  D8 C6                         ADDA.w d6,a4
+00666A  D8 5C                         ADD.w (a4)+,d4
+00666C  B4 44                         CMP.w d4,d2
+00666E  6D 18                         BLT $006688
+006670  DA 5C                         ADD.w (a4)+,d5
+006672  B6 45                         CMP.w d5,d3
+006674  6D 12                         BLT $006688
+006676  D8 5C                         ADD.w (a4)+,d4
+006678  B0 44                         CMP.w d4,d0
+00667A  6E 0C                         BGT $006688
+00667C  DA 5C                         ADD.w (a4)+,d5
+00667E  B2 45                         CMP.w d5,d1
+006680  6E 06                         BGT $006688
+006682  06 2D 00 64 00 1D             ADDI.b #$64,$1D(a5)
+006688  4A AD 00 00                   TST.l $0(a5)
+00668C  67 06                         BEQ $006694
+00668E  2A 6D 00 00                   MOVEA.l $0(a5),a5
+006692  60 B0                         BRA $006644
 006694  51 F8 5A B3                   SF $5AB3.w
 006698  4A 38 59 4A                   TST.b $594A.w
 00669C  67 00 00 9E                   BEQ $00673C
@@ -4113,13 +5784,34 @@
 0066D0  3C 2D 00 0C                   MOVE.w $C(a5),d6
 0066D4  E7 4E                         LSL.w #3,d6
 0066D6  D8 C6                         ADDA.w d6,a4
-0066D8  4C AD                         .dc.w $4CAD
-0066DA  .dc.b 00 0C 00 18 D4 5C D6 5C 38 02 3A 03 D8 5C DA 54 ; .....\.\8.:..\.T
-0066EA  .dc.b 3E 38 59 48 4C 97 00 03 D0 68 00 00 D2 68 00 02 ; >8YHL....h...h..
-0066FA  .dc.b B8 40 6D 1E BA 41 6D 1A D0 68 00 04 D2 68 00 06 ; .@m..Am..h...h..
-00670A  .dc.b B4 40 6E 0E B6 41 6E 00 00 0A 06 2D 00 01 00 1D ; .@n..An....-....
-00671A  .dc.b 60 10 4C B8 00 03 59 44 D1 57 D3 6F 00 02 51 CF ; `.L...YD.W.o..Q.
-00672A  .dc.b FF C4 58 4F                                     ; ..XO
+0066D8  4C AD 00 0C 00 18             MOVEM.w $18(a5),d2-d3
+0066DE  D4 5C                         ADD.w (a4)+,d2
+0066E0  D6 5C                         ADD.w (a4)+,d3
+0066E2  38 02                         MOVE.w d2,d4
+0066E4  3A 03                         MOVE.w d3,d5
+0066E6  D8 5C                         ADD.w (a4)+,d4
+0066E8  DA 54                         ADD.w (a4),d5
+0066EA  3E 38 59 48                   MOVE.w $5948.w,d7
+0066EE  4C 97 00 03                   MOVEM.w (a7),d0-d1
+0066F2  D0 68 00 00                   ADD.w $0(a0),d0
+0066F6  D2 68 00 02                   ADD.w $2(a0),d1
+0066FA  B8 40                         CMP.w d0,d4
+0066FC  6D 1E                         BLT $00671C
+0066FE  BA 41                         CMP.w d1,d5
+006700  6D 1A                         BLT $00671C
+006702  D0 68 00 04                   ADD.w $4(a0),d0
+006706  D2 68 00 06                   ADD.w $6(a0),d1
+00670A  B4 40                         CMP.w d0,d2
+00670C  6E 0E                         BGT $00671C
+00670E  B6 41                         CMP.w d1,d3
+006710  6E 00 00 0A                   BGT $00671C
+006714  06 2D 00 01 00 1D             ADDI.b #$1,$1D(a5)
+00671A  60 10                         BRA $00672C
+00671C  4C B8 00 03 59 44             MOVEM.w $5944.w,d0-d1
+006722  D1 57                         ADD.w d0,(a7)
+006724  D3 6F 00 02                   ADD.w d1,$2(a7)
+006728  51 CF FF C4                   DBRA d7,$0066EE
+00672C  58 4F                         ADDQ.w #4,a7
 00672E  4A AD 00 00                   TST.l $0(a5)
 006732  67 08                         BEQ $00673C
 006734  2A 6D 00 00                   MOVEA.l $0(a5),a5
@@ -4139,14 +5831,44 @@
 006768  66 00 00 6E                   BNE $0067D8
 00676C  4A 2D 00 1E                   TST.b $1E(a5)
 006770  6B 00 00 66                   BMI $0067D8
-006774  4C AD                         .dc.w $4CAD
-006776  .dc.b 00 30 00 18 28 6D 00 08 3C 2D 00 0C E7 4E D8 C6 ; .0..(m..<-...N..
-006786  .dc.b D8 5C DA 5C 3C 04 DC 5C B6 44 6D 00 00 46 B4 46 ; .\.\<..\.Dm..F.F
-006796  .dc.b 6E 1E E6 4D 59 45 3C 14 4A 31 50 00 66 08 52 45 ; n..MYE<.J1P.f.RE
-0067A6  .dc.b 51 46 6A F4 60 2C 06 2D 00 05 00 1D 60 00 00 24 ; QFj.`,.-....`..$
-0067B6  .dc.b B0 46 6E 1E B2 44 6D 1A E6 4D 59 45 3C 14 4A 30 ; .Fn..Dm..MYE<.J0
-0067C6  .dc.b 50 00 66 08 52 45 51 46 6A F4 60 06 06 2D 00 05 ; P.f.REQFj.`..-..
-0067D6  .dc.b 00 1D                                           ; ..
+006774  4C AD 00 30 00 18             MOVEM.w $18(a5),d4-d5
+00677A  28 6D 00 08                   MOVEA.l $8(a5),a4
+00677E  3C 2D 00 0C                   MOVE.w $C(a5),d6
+006782  E7 4E                         LSL.w #3,d6
+006784  D8 C6                         ADDA.w d6,a4
+006786  D8 5C                         ADD.w (a4)+,d4
+006788  DA 5C                         ADD.w (a4)+,d5
+00678A  3C 04                         MOVE.w d4,d6
+00678C  DC 5C                         ADD.w (a4)+,d6
+00678E  B6 44                         CMP.w d4,d3
+006790  6D 00 00 46                   BLT $0067D8
+006794  B4 46                         CMP.w d6,d2
+006796  6E 1E                         BGT $0067B6
+006798  E6 4D                         LSR.w #3,d5
+00679A  59 45                         SUBQ.w #4,d5
+00679C  3C 14                         MOVE.w (a4),d6
+00679E  4A 31 50 00                   TST.b $0(a1,d5.w)
+0067A2  66 08                         BNE $0067AC
+0067A4  52 45                         ADDQ.w #1,d5
+0067A6  51 46                         SUBQ.w #8,d6
+0067A8  6A F4                         BPL $00679E
+0067AA  60 2C                         BRA $0067D8
+0067AC  06 2D 00 05 00 1D             ADDI.b #$5,$1D(a5)
+0067B2  60 00 00 24                   BRA $0067D8
+0067B6  B0 46                         CMP.w d6,d0
+0067B8  6E 1E                         BGT $0067D8
+0067BA  B2 44                         CMP.w d4,d1
+0067BC  6D 1A                         BLT $0067D8
+0067BE  E6 4D                         LSR.w #3,d5
+0067C0  59 45                         SUBQ.w #4,d5
+0067C2  3C 14                         MOVE.w (a4),d6
+0067C4  4A 30 50 00                   TST.b $0(a0,d5.w)
+0067C8  66 08                         BNE $0067D2
+0067CA  52 45                         ADDQ.w #1,d5
+0067CC  51 46                         SUBQ.w #8,d6
+0067CE  6A F4                         BPL $0067C4
+0067D0  60 06                         BRA $0067D8
+0067D2  06 2D 00 05 00 1D             ADDI.b #$5,$1D(a5)
 0067D8  4A AD 00 00                   TST.l $0(a5)
 0067DC  67 06                         BEQ $0067E4
 0067DE  2A 6D 00 00                   MOVEA.l $0(a5),a5
@@ -4181,17 +5903,40 @@
 0068DE  38 15                         MOVE.w (a5),d4
 0068E0  67 64                         BEQ $006946
 0068E2  CD 8C                         EXG d6,a4
-0068E4  4C B4                         .dc.w $4CB4
-0068E6  .dc.b 00 0C 40 00 CD 8C 4C AD 00 03 00 02 D0 42 D2 43 ; ..@...L......B.C
-0068F6  .dc.b 90 78 01 20 6B 52 92 78 01 22 6B 4C B0 7C 01 50 ; .x. kR.x."kL.|.P
-006906  .dc.b 6E 46 B2 7C 00 D4 6E 40 48 AD 00 03 00 02 24 78 ; nF.|..n@H.....$x
-006916  .dc.b 01 C2 61 00 F7 20 4C AD 00 03 00 02 61 00 CC 8A ; ..a.. L.....a...
-006926  .dc.b 67 1E 41 F9 00 00 9E 54 78 0E 70 F6 4C AD 00 06 ; g.A....Tx.p.L...
-006936  .dc.b 00 02 59 41 59 42 61 00 F3 64 42 55 41 F8 4A AC ; ..YAYBa..dBUA.J.
+0068E4  4C B4 00 0C 40 00             MOVEM.w $0(a4,d4.w),d2-d3
+0068EA  CD 8C                         EXG d6,a4
+0068EC  4C AD 00 03 00 02             MOVEM.w $2(a5),d0-d1
+0068F2  D0 42                         ADD.w d2,d0
+0068F4  D2 43                         ADD.w d3,d1
+0068F6  90 78 01 20                   SUB.w $120.w,d0
+0068FA  6B 52                         BMI $00694E
+0068FC  92 78 01 22                   SUB.w $122.w,d1
+006900  6B 4C                         BMI $00694E
+006902  B0 7C 01 50                   CMP.w #$150,d0
+006906  6E 46                         BGT $00694E
+006908  B2 7C 00 D4                   CMP.w #$D4,d1
+00690C  6E 40                         BGT $00694E
+00690E  48 AD 00 03 00 02             MOVEM.w d0-d1,$2(a5)
+006914  24 78 01 C2                   MOVEA.l $1C2.w,a2
+006918  61 00 F7 20                   BSR $00603A
+00691C  4C AD 00 03 00 02             MOVEM.w $2(a5),d0-d1
+006922  61 00 CC 8A                   BSR $0035AE
+006926  67 1E                         BEQ $006946
+006928  41 F9 00 00 9E 54             LEA $9E54.l,a0
+00692E  78 0E                         MOVEQ #$E,d4
+006930  70 F6                         MOVEQ #$F6,d0
+006932  4C AD 00 06 00 02             MOVEM.w $2(a5),d1-d2
+006938  59 41                         SUBQ.w #4,d1
+00693A  59 42                         SUBQ.w #4,d2
+00693C  61 00 F3 64                   BSR $005CA2
+006940  42 55                         CLR.w (a5)
+006942  41 F8 4A AC                   LEA $4AAC.w,a0
 006946  5C 4D                         ADDQ.w #6,a5
 006948  51 CF FF 94                   DBRA d7,$0068DE
 00694C  4E 75                         RTS
-00694E  .dc.b 42 55 51 CF FF 8C 4E 75                         ; BUQ...Nu
+00694E  42 55                         CLR.w (a5)
+006950  51 CF FF 8C                   DBRA d7,$0068DE
+006954  4E 75                         RTS
 
 ; ==== sub_006956 (1 caller) ====
 006956  4A 38 02 29                   TST.b $229.w
@@ -4525,11 +6270,20 @@
 006E44  .dc.b 00 71 32 3C E0 00 E2 48 64 04 08 C1 00 00 80 7C ; .q2<...Hd......|
 006E54  .dc.b 2C 00 48 B8 00 03 74 58 30 38 02 98 D0 7C 00 71 ; ,.H...tX08...|.q
 006E64  .dc.b 32 3C E0 00 E2 48 64 04 08 C1 00 00 80 7C 2C 00 ; 2<...Hd......|,.
-006E74  .dc.b 48 B8 00 03 74 60 4E 75 4A 39 00 00 02 52 67 18 ; H...t`NuJ9...Rg.
-006E84  .dc.b 61 16 41 F8 73 78 43 F8 73 A8 45 F8 73 84 47 F8 ; a.A.sxC.s.E.s.G.
-006E94  .dc.b 73 B4 28 78 02 70 4E D4                         ; s.(x.pN.
+006E74  .dc.b 48 B8 00 03 74 60 4E 75                         ; H...t`Nu
 
-; ==== sub_006E9C (1 caller) ====
+; ==== sub_006E7C (2 callers) ====
+006E7C  4A 39 00 00 02 52             TST.b $252.l
+006E82  67 18                         BEQ $006E9C
+006E84  61 16                         BSR $006E9C
+006E86  41 F8 73 78                   LEA $7378.w,a0
+006E8A  43 F8 73 A8                   LEA $73A8.w,a1
+006E8E  45 F8 73 84                   LEA $7384.w,a2
+006E92  47 F8 73 B4                   LEA $73B4.w,a3
+006E96  28 78 02 70                   MOVEA.l $270.w,a4
+006E9A  4E D4                         JMP (a4)
+
+; ==== sub_006E9C (3 callers) ====
 006E9C  70 02                         MOVEQ #$2,d0
 006E9E  32 38 01 72                   MOVE.w $172.w,d1
 006EA2  B2 7C 00 10                   CMP.w #$10,d1
@@ -4755,13 +6509,24 @@
 007214  42 78 74 52                   CLR.w $7452.w
 007218  41 F8 1A 0E                   LEA $1A0E.w,a0
 00721C  43 F9 00 00 19 DE             LEA $19DE.l,a1
-007222  4C D0                         .dc.w $4CD0
-007224  .dc.b 00 FF 48 D1 00 FF 4C A8 00 FF 00 20 48 A9 00 FF ; ..H...L.... H...
-007234  .dc.b 00 20 4A 38 19 4B 67 20 41 F8 1A 40 43 F8 73 E8 ; . J8.Kg A..@C.s.
-007244  .dc.b 70 0E 33 58 00 02 58 49 51 C8 FF F8 31 FC 01 D2 ; p.3X..XIQ...1...
-007254  .dc.b 74 52 41 F8 19 CE 60 02 4E 75                   ; tRA...`.Nu
+007222  4C D0 00 FF                   MOVEM.l (a0),d0-d7
+007226  48 D1 00 FF                   MOVEM.l d0-d7,(a1)
+00722A  4C A8 00 FF 00 20             MOVEM.w $20(a0),d0-d7
+007230  48 A9 00 FF 00 20             MOVEM.w d0-d7,$20(a1)
+007236  4A 38 19 4B                   TST.b $194B.w
+00723A  67 20                         BEQ $00725C
+00723C  41 F8 1A 40                   LEA $1A40.w,a0
+007240  43 F8 73 E8                   LEA $73E8.w,a1
+007244  70 0E                         MOVEQ #$E,d0
+007246  33 58 00 02                   MOVE.w (a0)+,$2(a1)
+00724A  58 49                         ADDQ.w #4,a1
+00724C  51 C8 FF F8                   DBRA d0,$007246
+007250  31 FC 01 D2 74 52             MOVE.w #$1D2,$7452.w
+007256  41 F8 19 CE                   LEA $19CE.w,a0
+00725A  60 02                         BRA $00725E
+00725C  4E 75                         RTS
 
-; ==== sub_00725E (1 caller) ====
+; ==== sub_00725E (3 callers) ====
 00725E  43 F8 72 D4                   LEA $72D4.w,a1
 007262  70 1F                         MOVEQ #$1F,d0
 007264  33 58 00 02                   MOVE.w (a0)+,$2(a1)
@@ -4800,8 +6565,17 @@
 007440  .dc.b 01 56 00 00 01 5C 00 00 01 5E 00 00 EE F1 FF FE ; .V...\...^......
 007450  .dc.b 01 90 01 D2 FF FF FF FE 00 00 00 00 00 00 00 00 ; ................
 007460  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-007470  .dc.b 00 00 00 00 00 00 00 00 2E 38 35 D8 26 47 28 47 ; .........85.&G(G
-007480  .dc.b D9 D3 DF 9B B9 CB 6E FA 4E 75                   ; ......n.Nu
+007470  .dc.b 00 00 00 00 00 00 00 00                         ; ........
+
+; ==== sub_007478 (1 caller) ====
+007478  2E 38 35 D8                   MOVE.l $35D8.w,d7
+00747C  26 47                         MOVEA.l d7,a3
+00747E  28 47                         MOVEA.l d7,a4
+007480  D9 D3                         ADDA.l (a3),a4
+007482  DF 9B                         ADD.l d7,(a3)+
+007484  B9 CB                         CMPA.l a3,a4
+007486  6E FA                         BGT $007482
+007488  4E 75                         RTS
 
 ; ==== init_object_table  $00748A  (1 caller) — Zero-fill the object tables pointed to by $20A/$20E, laying out per-object slots on a $C0-byte stride. ====
 00748A  24 78 02 0A                   MOVEA.l $20A.w,a2
@@ -4905,7 +6679,7 @@
 0075AC  51 C9 FF F4                   DBRA d1,$0075A2
 0075B0  4E 75                         RTS
 
-; ==== sub_0075B2 (1 caller) ====
+; ==== sub_0075B2 (2 callers) ====
 0075B2  20 3C 00 01 7A F0             MOVE.l #$17AF0,d0
 0075B8  22 38 01 7A                   MOVE.l $17A.w,d1
 0075BC  D2 BC 00 00 18 04             ADD.l #$1804,d1
@@ -4927,12 +6701,29 @@
 0075FC  54 81                         ADDQ.l #2,d1
 0075FE  51 CA FF E2                   DBRA d2,$0075E2
 007602  4E 75                         RTS
-007604  .dc.b 20 3C 00 01 7A F0 22 38 01 92 D2 BC 00 00 18 04 ;  <..z."8........
-007614  .dc.b 38 3C 0F 01 3D 7C 09 F0 00 40 42 6E 00 42 42 6E ; 8<..=|...@Bn.BBn
-007624  .dc.b 00 64 3D 7C 00 2E 00 66 74 FF 2D 42 00 44 74 13 ; .d=|...ft.-B.Dt.
-007634  .dc.b 76 0B 2D 41 00 54 2D 40 00 50 3D 44 00 58 08 2E ; v.-A.T-@.P=D.X..
-007644  .dc.b 00 0E 00 02 66 F8 51 CB FF EE 54 81 51 CA FF E2 ; ....f.Q...T.Q...
-007654  .dc.b 4E 75                                           ; Nu
+
+; ==== sub_007604 (1 caller) ====
+007604  20 3C 00 01 7A F0             MOVE.l #$17AF0,d0
+00760A  22 38 01 92                   MOVE.l $192.w,d1
+00760E  D2 BC 00 00 18 04             ADD.l #$1804,d1
+007614  38 3C 0F 01                   MOVE.w #$F01,d4
+007618  3D 7C 09 F0 00 40             MOVE.w #$9F0,$40(a6)
+00761E  42 6E 00 42                   CLR.w $42(a6)
+007622  42 6E 00 64                   CLR.w $64(a6)
+007626  3D 7C 00 2E 00 66             MOVE.w #$2E,$66(a6)
+00762C  74 FF                         MOVEQ #$FF,d2
+00762E  2D 42 00 44                   MOVE.l d2,$44(a6)
+007632  74 13                         MOVEQ #$13,d2
+007634  76 0B                         MOVEQ #$B,d3
+007636  2D 41 00 54                   MOVE.l d1,$54(a6)
+00763A  2D 40 00 50                   MOVE.l d0,$50(a6)
+00763E  3D 44 00 58                   MOVE.w d4,$58(a6)
+007642  08 2E 00 0E 00 02             BTST.b #$E,$2(a6)
+007648  66 F8                         BNE $007642
+00764A  51 CB FF EE                   DBRA d3,$00763A
+00764E  54 81                         ADDQ.l #2,d1
+007650  51 CA FF E2                   DBRA d2,$007634
+007654  4E 75                         RTS
 
 ; ==== sub_007656 (3 callers) ====
 007656  41 F9 00 01 74 AE             LEA $174AE.l,a0
@@ -4968,11 +6759,15 @@
 007714  .dc.b 13 40 00 26 13 40 00 4C 13 40 00 72 13 40 00 98 ; .@.&.@.L.@.r.@..
 007724  4E 75                         RTS
 007726  .dc.b 00 00                                           ; ..
+
+; ==== sub_007728 (1 caller) ====
 007728  72 01                         MOVEQ #$1,d1
 00772A  60 22                         BRA $00774E
 00772C  .dc.b 4A 39 00 00 7A C8 67 08 31 FC 00 14 77 26 4E 75 ; J9..z.g.1...w&Nu
 00773C  .dc.b 52 78 77 26 41 F8 7A C8 70 00 10 28 00 01 76 D3 ; Rxw&A.z.p..(..v.
 00774C  .dc.b 60 90                                           ; `.
+
+; ==== sub_00774E (1 caller) ====
 00774E  4A 38 02 76                   TST.b $276.w
 007752  67 02                         BEQ $007756
 007754  4E 75                         RTS
@@ -4990,10 +6785,21 @@
 007774  4E F9 00 01 A2 DC             JMP $1A2DC.l
 00777A  31 FC 00 01 77 26             MOVE.w #$1,$7726.w
 007780  4E 75                         RTS
-007782  .dc.b 70 00 10 39 00 00 7A AE 6B 26 41 F9 00 01 6A 07 ; p..9..z.k&A...j.
-007792  .dc.b D0 C0 04 39 00 01 00 00 7A AE 70 07 10 BC 00 00 ; ...9....z.p.....
-0077A2  .dc.b 11 7C 00 FF 05 32 D0 FC 00 26 51 C8 FF F0 70 00 ; .|...2...&Q...p.
-0077B2  .dc.b 4E 75                                           ; Nu
+
+; ==== sub_007782 (1 caller) ====
+007782  70 00                         MOVEQ #$0,d0
+007784  10 39 00 00 7A AE             MOVE.b $7AAE.l,d0
+00778A  6B 26                         BMI $0077B2
+00778C  41 F9 00 01 6A 07             LEA $16A07.l,a0
+007792  D0 C0                         ADDA.w d0,a0
+007794  04 39 00 01 00 00 7A AE       SUBI.b #$1,$7AAE.l
+00779C  70 07                         MOVEQ #$7,d0
+00779E  10 BC 00 00                   MOVE.b #$0,(a0)
+0077A2  11 7C 00 FF 05 32             MOVE.b #$FF,$532(a0)
+0077A8  D0 FC 00 26                   ADDA.w #$26,a0
+0077AC  51 C8 FF F0                   DBRA d0,$00779E
+0077B0  70 00                         MOVEQ #$0,d0
+0077B2  4E 75                         RTS
 
 ; ==== sub_0077B4 (1 caller) ====
 0077B4  13 FC 00 02 00 00 7A AE       MOVE.b #$2,$7AAE.l
@@ -5010,7 +6816,7 @@
 0077F0  51 C8 FF D8                   DBRA d0,$0077CA
 0077F4  4E 75                         RTS
 
-; ==== sub_0077F6 (2 callers) ====
+; ==== sub_0077F6 (3 callers) ====
 0077F6  45 F9 00 00 7B 0C             LEA $7B0C.l,a2
 0077FC  34 00                         MOVE.w d0,d2
 0077FE  D0 40                         ADD.w d0,d0
@@ -5079,7 +6885,7 @@
 0078C6  51 C8 FF F0                   DBRA d0,$0078B8
 0078CA  60 4E                         BRA $00791A
 
-; ==== sub_0078CC (1 caller) ====
+; ==== sub_0078CC (2 callers) ====
 0078CC  45 F8 7A C0                   LEA $7AC0.w,a2
 0078D0  15 80 10 00                   MOVE.b d0,$0(a2,d1.w)
 0078D4  45 F8 7A B2                   LEA $7AB2.w,a2
@@ -5304,18 +7110,52 @@
 007F2A  3B 7C 00 18 00 32             MOVE.w #$18,$32(a5)
 007F30  61 00 C4 5A                   BSR $00438C
 007F34  66 00 00 AE                   BNE $007FE4
-007F38  4C AD                         .dc.w $4CAD
-007F3A  .dc.b 00 03 00 18 90 78 01 20 92 78 01 22 0C 6D 00 08 ; .....x. .x.".m..
-007F4A  .dc.b 00 0C 6D 00 00 3E 48 A7 C0 00 D2 7C 00 0F 0C 6D ; ..m..>H....|...m
-007F5A  .dc.b 00 08 00 0C 66 02 58 41 D0 7C 00 10 61 00 B6 46 ; ....f.XA.|..a..F
-007F6A  .dc.b 4C 9F 00 03 66 18 38 2D 00 32 41 FA 02 76 D2 70 ; L...f.8-.2A..v.p
-007F7A  .dc.b 40 00 55 6D 00 32 6A 00 00 36 42 6D 00 32 60 00 ; @.Um.2j..6Bm.2`.
-007F8A  .dc.b 00 2E 38 2D 00 32 C8 7C 00 03 66 00 00 1E 53 41 ; ..8-.2.|..f...SA
-007F9A  .dc.b 34 01 94 78 01 74 6B 12 48 A7 C0 00 50 40 61 00 ; 4..x.tk.H...P@a.
-007FAA  .dc.b B6 04 4C 9F 00 03 67 02 52 41 52 6D 00 32 B0 7C ; ..L...g.RARm.2.|
-007FBA  .dc.b FF E0 6F 00 00 22 B2 7C FF E0 6F 00 00 1A B0 7C ; ..o..".|..o....|
-007FCA  .dc.b 01 90 6C 00 00 12 B2 7C 01 14 6C 00 00 0A 48 AD ; ..l....|..l...H.
-007FDA  .dc.b 00 03 00 18 4E 75 60 00 9B 9C                   ; ....Nu`...
+007F38  4C AD 00 03 00 18             MOVEM.w $18(a5),d0-d1
+007F3E  90 78 01 20                   SUB.w $120.w,d0
+007F42  92 78 01 22                   SUB.w $122.w,d1
+007F46  0C 6D 00 08 00 0C             CMPI.w #$8,$C(a5)
+007F4C  6D 00 00 3E                   BLT $007F8C
+007F50  48 A7 C0 00                   MOVEM.w d0-d1,-(a7)
+007F54  D2 7C 00 0F                   ADD.w #$F,d1
+007F58  0C 6D 00 08 00 0C             CMPI.w #$8,$C(a5)
+007F5E  66 02                         BNE $007F62
+007F60  58 41                         ADDQ.w #4,d1
+007F62  D0 7C 00 10                   ADD.w #$10,d0
+007F66  61 00 B6 46                   BSR $0035AE
+007F6A  4C 9F 00 03                   MOVEM.w (a7)+,d0-d1
+007F6E  66 18                         BNE $007F88
+007F70  38 2D 00 32                   MOVE.w $32(a5),d4
+007F74  41 FA 02 76                   LEA $0081EC(pc),a0
+007F78  D2 70 40 00                   ADD.w $0(a0,d4.w),d1
+007F7C  55 6D 00 32                   SUBQ.w #2,$32(a5)
+007F80  6A 00 00 36                   BPL $007FB8
+007F84  42 6D 00 32                   CLR.w $32(a5)
+007F88  60 00 00 2E                   BRA $007FB8
+007F8C  38 2D 00 32                   MOVE.w $32(a5),d4
+007F90  C8 7C 00 03                   AND.w #$3,d4
+007F94  66 00 00 1E                   BNE $007FB4
+007F98  53 41                         SUBQ.w #1,d1
+007F9A  34 01                         MOVE.w d1,d2
+007F9C  94 78 01 74                   SUB.w $174.w,d2
+007FA0  6B 12                         BMI $007FB4
+007FA2  48 A7 C0 00                   MOVEM.w d0-d1,-(a7)
+007FA6  50 40                         ADDQ.w #8,d0
+007FA8  61 00 B6 04                   BSR $0035AE
+007FAC  4C 9F 00 03                   MOVEM.w (a7)+,d0-d1
+007FB0  67 02                         BEQ $007FB4
+007FB2  52 41                         ADDQ.w #1,d1
+007FB4  52 6D 00 32                   ADDQ.w #1,$32(a5)
+007FB8  B0 7C FF E0                   CMP.w #$FFE0,d0
+007FBC  6F 00 00 22                   BLE $007FE0
+007FC0  B2 7C FF E0                   CMP.w #$FFE0,d1
+007FC4  6F 00 00 1A                   BLE $007FE0
+007FC8  B0 7C 01 90                   CMP.w #$190,d0
+007FCC  6C 00 00 12                   BGE $007FE0
+007FD0  B2 7C 01 14                   CMP.w #$114,d1
+007FD4  6C 00 00 0A                   BGE $007FE0
+007FD8  48 AD 00 03 00 18             MOVEM.w d0-d1,$18(a5)
+007FDE  4E 75                         RTS
+007FE0  60 00 9B 9C                   BRA $001B7E
 007FE4  70 03                         MOVEQ #$3,d0
 007FE6  72 04                         MOVEQ #$4,d1
 007FE8  61 00 F8 E2                   BSR $0078CC
@@ -10045,7 +11885,7 @@
 01A2CC  60 00 0E 88                   BRA $01B156
 01A2D0  .dc.b 60 00 0F 60 60 00 0F 5C 60 00 0F 58             ; `..``..\`..X
 
-; ==== sub_01A2DC (21 callers) ====
+; ==== sub_01A2DC (25 callers) ====
 01A2DC  60 00 0E 96                   BRA $01B174
 01A2E0  .dc.b 60 00 0F 3A 60 00 0F 4C 60 00 0F 48 60 00 0F 44 ; `..:`..L`..H`..D
 01A2F0  .dc.b 60 00 0F 40 60 00 0F 3C                         ; `..@`..<
@@ -10066,8 +11906,8 @@
 01A320  60 00 00 08                   BRA $01A32A
 01A324  61 0A                         BSR $01A330
 01A326  61 00 05 4E                   BSR $01A876
-01A32A  4C DF                         .dc.w $4CDF
-01A32C  .dc.b 7F FF 4E 75                                     ; ..Nu
+01A32A  4C DF 7F FF                   MOVEM.l (a7)+,d0-d7/a0-a6
+01A32E  4E 75                         RTS
 
 ; ==== sub_01A330 (1 caller) ====
 01A330  4B FA 11 74                   LEA $01B4A6(pc),a5
@@ -10300,21 +12140,22 @@
 01A786  2B 40 00 44                   MOVE.l d0,$44(a5)
 01A78A  42 AD 00 84                   CLR.l $84(a5)
 01A78E  3B 7C FF FF 00 66             MOVE.w #$FFFF,$66(a5)
-01A794  4C DF                         .dc.w $4CDF
-01A796  .dc.b 03 01 4E 75 61 00 09 C0 42 2E 00 2E 43 FA 0E 4A ; ..Nua...B...C..J
-01A7A6  .dc.b 33 7C 00 02 00 02 4C DF 03 01 4E 75 3B 50 00 04 ; 3|....L...Nu;P..
-01A7B6  .dc.b 60 00 FE 90 3B 50 00 06 3D 50 00 2C 1D 6E 00 5C ; `...;P..=P.,.n.\
-01A7C6  .dc.b 00 4A 30 28 00 02 6B 00 00 20 02 40 01 FF 4A 40 ; .J0(..k.. .@..J@
-01A7D6  .dc.b 67 00 00 16 22 3C 00 00 1C 00 82 C0 13 C1 00 BF ; g..."<..........
-01A7E6  .dc.b D7 00 1D 7C 00 01 00 4A 06 6D 00 01 00 04 60 00 ; ...|...J.m....`.
-01A7F6  .dc.b FE 52 3D 50 00 3E 06 6D 00 01 00 04 60 00 FE 44 ; .R=P.>.m....`..D
-01A806  .dc.b 06 6D 00 01 00 04 43 FA 0D E0 4A 69 00 00 66 00 ; .m....C...Ji..f.
-01A816  .dc.b FE 32 33 7C 00 01 00 00 1D 68 00 03 00 51 1D 68 ; .23|.....h...Q.h
-01A826  .dc.b 00 01 00 52 1D 68 00 01 00 53 67 1C 1D 7C 00 01 ; ...R.h...Sg..|..
-01A836  .dc.b 00 1C 10 2E 00 50 B0 2E 00 51 67 12 65 00 FE 04 ; .....P...Qg.e...
-01A846  .dc.b 44 2E 00 1C 60 00 FD FC 1D 6E 00 51 00 50 1D 7C ; D...`....n.Q.P.|
-01A856  .dc.b 00 00 00 1C 42 69 00 00 60 00 FD E8 00 00 04 FE ; ....Bi..`.......
-01A866  .dc.b 00 00 05 12 00 00 05 1A 00 00 05 58 00 00 05 66 ; ...........X...f
+01A794  4C DF 03 01                   MOVEM.l (a7)+,d0/a0-a1
+01A798  4E 75                         RTS
+01A79A  .dc.b 61 00 09 C0 42 2E 00 2E 43 FA 0E 4A 33 7C 00 02 ; a...B...C..J3|..
+01A7AA  .dc.b 00 02 4C DF 03 01 4E 75 3B 50 00 04 60 00 FE 90 ; ..L...Nu;P..`...
+01A7BA  .dc.b 3B 50 00 06 3D 50 00 2C 1D 6E 00 5C 00 4A 30 28 ; ;P..=P.,.n.\.J0(
+01A7CA  .dc.b 00 02 6B 00 00 20 02 40 01 FF 4A 40 67 00 00 16 ; ..k.. .@..J@g...
+01A7DA  .dc.b 22 3C 00 00 1C 00 82 C0 13 C1 00 BF D7 00 1D 7C ; "<.............|
+01A7EA  .dc.b 00 01 00 4A 06 6D 00 01 00 04 60 00 FE 52 3D 50 ; ...J.m....`..R=P
+01A7FA  .dc.b 00 3E 06 6D 00 01 00 04 60 00 FE 44 06 6D 00 01 ; .>.m....`..D.m..
+01A80A  .dc.b 00 04 43 FA 0D E0 4A 69 00 00 66 00 FE 32 33 7C ; ..C...Ji..f..23|
+01A81A  .dc.b 00 01 00 00 1D 68 00 03 00 51 1D 68 00 01 00 52 ; .....h...Q.h...R
+01A82A  .dc.b 1D 68 00 01 00 53 67 1C 1D 7C 00 01 00 1C 10 2E ; .h...Sg..|......
+01A83A  .dc.b 00 50 B0 2E 00 51 67 12 65 00 FE 04 44 2E 00 1C ; .P...Qg.e...D...
+01A84A  .dc.b 60 00 FD FC 1D 6E 00 51 00 50 1D 7C 00 00 00 1C ; `....n.Q.P.|....
+01A85A  .dc.b 42 69 00 00 60 00 FD E8 00 00 04 FE 00 00 05 12 ; Bi..`...........
+01A86A  .dc.b 00 00 05 1A 00 00 05 58 00 00 05 66             ; .......X...f
 
 ; ==== sound_update_voices  $01A876  (1 caller) — Update the three voices (sound_update_voice x3, a5 walks voice_table $1B332). ====
 01A876  4D FA 0A 60                   LEA $01B2D8(pc),a6
@@ -10585,8 +12426,8 @@
 01AF60  3B 7C 00 01 00 02             MOVE.w #$1,$2(a5)
 01AF66  1B 7C 00 01 00 D2             MOVE.b #$1,$D2(a5)
 01AF6C  2D 5F 00 28                   MOVE.l (a7)+,$28(a6)
-01AF70  4C DF                         .dc.w $4CDF
-01AF72  .dc.b 70 01 4E 75                                     ; p.Nu
+01AF70  4C DF 70 01                   MOVEM.l (a7)+,d0/a4-a6
+01AF74  4E 75                         RTS
 01AF76  2F 01                         MOVE.l d1,-(a7)
 01AF78  1B 6E 00 29 00 82             MOVE.b $29(a6),$82(a5)
 01AF7E  1B 7C 00 01 00 83             MOVE.b #$1,$83(a5)
@@ -10609,8 +12450,8 @@
 01AFC0  33 ED 00 52 00 DF F0 96       MOVE.w $52(a5),$DFF096.l
 01AFC8  42 6D 00 02                   CLR.w $2(a5)
 01AFCC  42 2D 01 23                   CLR.b $123(a5)
-01AFD0  4C DF                         .dc.w $4CDF
-01AFD2  .dc.b 20 00 4E 75                                     ;  .Nu
+01AFD0  4C DF 20 00                   MOVEM.l (a7)+,a5
+01AFD4  4E 75                         RTS
 
 ; ==== sub_01AFD6 (1 caller) ====
 01AFD6  08 2E 00 05 00 3D             BTST.b #$5,$3D(a6)
@@ -10699,8 +12540,8 @@
 01B140  1D 6E 00 51 00 50             MOVE.b $51(a6),$50(a6)
 01B146  1D 7C 00 00 00 1C             MOVE.b #$0,$1C(a6)
 01B14C  42 6D 00 00                   CLR.w $0(a5)
-01B150  4C DF                         .dc.w $4CDF
-01B152  .dc.b 60 00 4E 75                                     ; `.Nu
+01B150  4C DF 60 00                   MOVEM.l (a7)+,a5-a6
+01B154  4E 75                         RTS
 01B156  41 FA 04 96                   LEA $01B5EE(pc),a0
 01B15A  4E 75                         RTS
 01B15C  .dc.b 2F 08 41 FA 04 8E 31 7C 00 01 00 02 42 68 00 00 ; /.A...1|....Bh..
@@ -10742,15 +12583,17 @@
 01B1EC  19 75 20 05 01 03             MOVE.b $5(a5,d2.w),$103(a4)
 01B1F2  39 75 20 06 01 00             MOVE.w $6(a5,d2.w),$100(a4)
 01B1F8  19 42 01 02                   MOVE.b d2,$102(a4)
-01B1FC  4C DF                         .dc.w $4CDF
-01B1FE  .dc.b 70 0E 4E 75 08 C0 00 05                         ; p.Nu....
+01B1FC  4C DF 70 0E                   MOVEM.l (a7)+,d1-d3/a4-a6
+01B200  4E 75                         RTS
+01B202  .dc.b 08 C0 00 05                                     ; ....
 01B206  48 E7 00 06                   MOVEM.l a5-a6,-(a7)
 01B20A  4D FA 00 CC                   LEA $01B2D8(pc),a6
 01B20E  3D 40 00 3C                   MOVE.w d0,$3C(a6)
 01B212  42 2E 00 4A                   CLR.b $4A(a6)
-01B216  4C DF                         .dc.w $4CDF
-01B218  .dc.b 60 00 4E 75 48 E7 00 06 4D FA 00 B6 08 C0 00 06 ; `.NuH...M.......
-01B228  .dc.b 3D 40 00 3C 4C DF 60 00 4E 75                   ; =@.<L.`.Nu
+01B216  4C DF 60 00                   MOVEM.l (a7)+,a5-a6
+01B21A  4E 75                         RTS
+01B21C  .dc.b 48 E7 00 06 4D FA 00 B6 08 C0 00 06 3D 40 00 3C ; H...M.......=@.<
+01B22C  .dc.b 4C DF 60 00 4E 75                               ; L.`.Nu
 
 ; ==== sound_silence  $01B232  (1 caller) — Zero the four AUDxVOL registers ($DFF0A8/B8/C8/D8); the default sound_api slot. ====
 01B232  48 E7 80 0E                   MOVEM.l d0/a4-a6,-(a7)
@@ -10770,8 +12613,8 @@
 01B276  42 2D 01 27                   CLR.b $127(a5)
 01B27A  42 2D 01 2B                   CLR.b $12B(a5)
 01B27E  42 2D 01 2F                   CLR.b $12F(a5)
-01B282  4C DF                         .dc.w $4CDF
-01B284  .dc.b 70 01 4E 75                                     ; p.Nu
+01B282  4C DF 70 01                   MOVEM.l (a7)+,d0/a4-a6
+01B286  4E 75                         RTS
 01B288  48 E7 00 0E                   MOVEM.l a4-a6,-(a7)
 01B28C  4D FA 00 4A                   LEA $01B2D8(pc),a6
 01B290  2D 7C 40 40 00 00 00 50       MOVE.l #$40400000,$50(a6)
@@ -10789,8 +12632,8 @@
 01B2C4  51 C8 FF F8                   DBRA d0,$01B2BE
 01B2C8  49 FA F7 60                   LEA $01AA2A(pc),a4
 01B2CC  23 CC 00 00 00 70             MOVE.l a4,$70.l
-01B2D2  4C DF                         .dc.w $4CDF
-01B2D4  .dc.b 70 00 4E 75                                     ; p.Nu
+01B2D2  4C DF 70 00                   MOVEM.l (a7)+,a4-a6
+01B2D6  4E 75                         RTS
 
 ; --- sound_state  $01B2D8 — Resident sound-driver state struct (counterpart of the overlay's player_state $1CC22). (data) ---
 01B2D8  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................

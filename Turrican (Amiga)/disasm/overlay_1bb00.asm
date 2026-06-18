@@ -52,8 +52,8 @@
 01BBB2  60 00 00 08                   BRA $01BBBC
 01BBB6  61 0A                         BSR $01BBC2
 01BBB8  61 00 05 4E                   BSR $01C108
-01BBBC  4C DF                         .dc.w $4CDF
-01BBBE  .dc.b 7F FF 4E 75                                     ; ..Nu
+01BBBC  4C DF 7F FF                   MOVEM.l (a7)+,d0-d7/a0-a6
+01BBC0  4E 75                         RTS
 
 ; ==== seq_step  $01BBC2  (1 caller) — Song/pattern sequencer step: counts down player.$2C (reloaded from voice_table.$6), and on expiry reads the next sequence commands via $1BC54, updating the active note/voice state. ====
 01BBC2  4B FA 12 2C                   LEA $01CDF0(pc),a5
@@ -286,21 +286,22 @@
 01C018  2B 40 00 44                   MOVE.l d0,$44(a5)
 01C01C  42 AD 00 84                   CLR.l $84(a5)
 01C020  3B 7C FF FF 00 66             MOVE.w #$FFFF,$66(a5)
-01C026  4C DF                         .dc.w $4CDF
-01C028  .dc.b 03 01 4E 75 61 00 0A 00 42 2E 00 2E 43 FA 0F 02 ; ..Nua...B...C...
-01C038  .dc.b 33 7C 00 02 00 02 4C DF 03 01 4E 75 3B 50 00 04 ; 3|....L...Nu;P..
-01C048  .dc.b 60 00 FE 90 3B 50 00 06 3D 50 00 2C 1D 6E 00 5C ; `...;P..=P.,.n.\
-01C058  .dc.b 00 4A 30 28 00 02 6B 00 00 20 02 40 01 FF 4A 40 ; .J0(..k.. .@..J@
-01C068  .dc.b 67 00 00 16 22 3C 00 00 1C 00 82 C0 13 C1 00 BF ; g..."<..........
-01C078  .dc.b D7 00 1D 7C 00 01 00 4A 06 6D 00 01 00 04 60 00 ; ...|...J.m....`.
-01C088  .dc.b FE 52 3D 50 00 3E 06 6D 00 01 00 04 60 00 FE 44 ; .R=P.>.m....`..D
-01C098  .dc.b 06 6D 00 01 00 04 43 FA 0E 98 4A 69 00 00 66 00 ; .m....C...Ji..f.
-01C0A8  .dc.b FE 32 33 7C 00 01 00 00 1D 68 00 03 00 51 1D 68 ; .23|.....h...Q.h
-01C0B8  .dc.b 00 01 00 52 1D 68 00 01 00 53 67 1C 1D 7C 00 01 ; ...R.h...Sg..|..
-01C0C8  .dc.b 00 1C 10 2E 00 50 B0 2E 00 51 67 12 65 00 FE 04 ; .....P...Qg.e...
-01C0D8  .dc.b 44 2E 00 1C 60 00 FD FC 1D 6E 00 51 00 50 1D 7C ; D...`....n.Q.P.|
-01C0E8  .dc.b 00 00 00 1C 42 69 00 00 60 00 FD E8 00 00 05 10 ; ....Bi..`.......
-01C0F8  .dc.b 00 00 05 24 00 00 05 2C 00 00 05 6A 00 00 05 78 ; ...$...,...j...x
+01C026  4C DF 03 01                   MOVEM.l (a7)+,d0/a0-a1
+01C02A  4E 75                         RTS
+01C02C  .dc.b 61 00 0A 00 42 2E 00 2E 43 FA 0F 02 33 7C 00 02 ; a...B...C...3|..
+01C03C  .dc.b 00 02 4C DF 03 01 4E 75 3B 50 00 04 60 00 FE 90 ; ..L...Nu;P..`...
+01C04C  .dc.b 3B 50 00 06 3D 50 00 2C 1D 6E 00 5C 00 4A 30 28 ; ;P..=P.,.n.\.J0(
+01C05C  .dc.b 00 02 6B 00 00 20 02 40 01 FF 4A 40 67 00 00 16 ; ..k.. .@..J@g...
+01C06C  .dc.b 22 3C 00 00 1C 00 82 C0 13 C1 00 BF D7 00 1D 7C ; "<.............|
+01C07C  .dc.b 00 01 00 4A 06 6D 00 01 00 04 60 00 FE 52 3D 50 ; ...J.m....`..R=P
+01C08C  .dc.b 00 3E 06 6D 00 01 00 04 60 00 FE 44 06 6D 00 01 ; .>.m....`..D.m..
+01C09C  .dc.b 00 04 43 FA 0E 98 4A 69 00 00 66 00 FE 32 33 7C ; ..C...Ji..f..23|
+01C0AC  .dc.b 00 01 00 00 1D 68 00 03 00 51 1D 68 00 01 00 52 ; .....h...Q.h...R
+01C0BC  .dc.b 1D 68 00 01 00 53 67 1C 1D 7C 00 01 00 1C 10 2E ; .h...Sg..|......
+01C0CC  .dc.b 00 50 B0 2E 00 51 67 12 65 00 FE 04 44 2E 00 1C ; .P...Qg.e...D...
+01C0DC  .dc.b 60 00 FD FC 1D 6E 00 51 00 50 1D 7C 00 00 00 1C ; `....n.Q.P.|....
+01C0EC  .dc.b 42 69 00 00 60 00 FD E8 00 00 05 10 00 00 05 24 ; Bi..`..........$
+01C0FC  .dc.b 00 00 05 2C 00 00 05 6A 00 00 05 78             ; ...,...j...x
 
 ; ==== update_voices  $01C108  (1 caller) — Per-frame voice synthesis: runs update_voice for each of the three voice slots (a5 walks voice_table $1CC7C in $4 steps). ====
 01C108  4D FA 0B 18                   LEA $01CC22(pc),a6
@@ -571,8 +572,8 @@
 01C7F2  3B 7C 00 01 00 02             MOVE.w #$1,$2(a5)
 01C7F8  1B 7C 00 01 00 D2             MOVE.b #$1,$D2(a5)
 01C7FE  2D 5F 00 28                   MOVE.l (a7)+,$28(a6)
-01C802  4C DF                         .dc.w $4CDF
-01C804  .dc.b 70 01 4E 75                                     ; p.Nu
+01C802  4C DF 70 01                   MOVEM.l (a7)+,d0/a4-a6
+01C806  4E 75                         RTS
 01C808  2F 01                         MOVE.l d1,-(a7)
 01C80A  1B 6E 00 29 00 82             MOVE.b $29(a6),$82(a5)
 01C810  1B 7C 00 01 00 83             MOVE.b #$1,$83(a5)
@@ -595,8 +596,8 @@
 01C852  33 ED 00 52 00 DF F0 96       MOVE.w $52(a5),$DFF096.l
 01C85A  42 6D 00 02                   CLR.w $2(a5)
 01C85E  42 2D 01 23                   CLR.b $123(a5)
-01C862  4C DF                         .dc.w $4CDF
-01C864  .dc.b 20 00 4E 75                                     ;  .Nu
+01C862  4C DF 20 00                   MOVEM.l (a7)+,a5
+01C866  4E 75                         RTS
 
 ; ==== sub_01C868 (1 caller) ====
 01C868  08 2E 00 05 00 3D             BTST.b #$5,$3D(a6)
@@ -644,8 +645,8 @@
 01C926  13 FC 00 00 00 BF D6 00       MOVE.b #$0,$BFD600.l
 01C92E  1D 7C 00 01 00 5C             MOVE.b #$1,$5C(a6)
 01C934  1D 7C 00 01 00 4A             MOVE.b #$1,$4A(a6)
-01C93A  4C DF                         .dc.w $4CDF
-01C93C  .dc.b 00 03 60 00 00 14                               ; ..`...
+01C93A  4C DF 00 03                   MOVEM.l (a7)+,d0-d1
+01C93E  60 00 00 14                   BRA $01C954
 01C942  3D 7C 00 01 00 3E             MOVE.w #$1,$3E(a6)
 01C948  04 6D 00 10 00 06             SUBI.w #$10,$6(a5)
 01C94E  3D 7C 00 02 00 44             MOVE.w #$2,$44(a6)
@@ -698,8 +699,8 @@
 01CA12  1D 6E 00 51 00 50             MOVE.b $51(a6),$50(a6)
 01CA18  1D 7C 00 00 00 1C             MOVE.b #$0,$1C(a6)
 01CA1E  42 6D 00 00                   CLR.w $0(a5)
-01CA22  4C DF                         .dc.w $4CDF
-01CA24  .dc.b 60 00 4E 75                                     ; `.Nu
+01CA22  4C DF 60 00                   MOVEM.l (a7)+,a5-a6
+01CA26  4E 75                         RTS
 01CA28  41 FA 05 0E                   LEA $01CF38(pc),a0
 01CA2C  4E 75                         RTS
 01CA2E  .dc.b 2F 08 41 FA 05 06 31 7C 00 01 00 02 42 68 00 00 ; /.A...1|....Bh..
@@ -741,22 +742,23 @@
 01CABE  19 75 20 05 01 03             MOVE.b $5(a5,d2.w),$103(a4)
 01CAC4  39 75 20 06 01 00             MOVE.w $6(a5,d2.w),$100(a4)
 01CACA  19 42 01 02                   MOVE.b d2,$102(a4)
-01CACE  4C DF                         .dc.w $4CDF
-01CAD0  .dc.b 70 0E 4E 75 08 C0 00 05                         ; p.Nu....
+01CACE  4C DF 70 0E                   MOVEM.l (a7)+,d1-d3/a4-a6
+01CAD2  4E 75                         RTS
+01CAD4  .dc.b 08 C0 00 05                                     ; ....
 01CAD8  48 E7 00 06                   MOVEM.l a5-a6,-(a7)
 01CADC  61 00 00 D4                   BSR $01CBB2
 01CAE0  4D FA 01 40                   LEA $01CC22(pc),a6
 01CAE4  3D 40 00 3C                   MOVE.w d0,$3C(a6)
 01CAE8  42 2E 00 4A                   CLR.b $4A(a6)
-01CAEC  4C DF                         .dc.w $4CDF
-01CAEE  .dc.b 60 00 4E 75                                     ; `.Nu
+01CAEC  4C DF 60 00                   MOVEM.l (a7)+,a5-a6
+01CAF0  4E 75                         RTS
 01CAF2  48 E7 00 06                   MOVEM.l a5-a6,-(a7)
 01CAF6  61 00 00 BA                   BSR $01CBB2
 01CAFA  4D FA 01 26                   LEA $01CC22(pc),a6
 01CAFE  08 C0 00 06                   BSET.l #$6,d0
 01CB02  3D 40 00 3C                   MOVE.w d0,$3C(a6)
-01CB06  4C DF                         .dc.w $4CDF
-01CB08  .dc.b 60 00 4E 75                                     ; `.Nu
+01CB06  4C DF 60 00                   MOVEM.l (a7)+,a5-a6
+01CB0A  4E 75                         RTS
 
 ; ==== audio_silence  $01CB0C  (1 caller) — Stop all sound: clear player.$2E and zero the four AUDxVOL registers ($DFF0A8/B8/C8/D8). The default api_table target for inactive slots. ====
 01CB0C  48 E7 80 0E                   MOVEM.l d0/a4-a6,-(a7)
@@ -776,8 +778,8 @@
 01CB50  42 2D 01 27                   CLR.b $127(a5)
 01CB54  42 2D 01 2B                   CLR.b $12B(a5)
 01CB58  42 2D 01 2F                   CLR.b $12F(a5)
-01CB5C  4C DF                         .dc.w $4CDF
-01CB5E  .dc.b 70 01 4E 75                                     ; p.Nu
+01CB5C  4C DF 70 01                   MOVEM.l (a7)+,d0/a4-a6
+01CB60  4E 75                         RTS
 01CB62  48 E7 00 0E                   MOVEM.l a4-a6,-(a7)
 01CB66  4D FA 00 BA                   LEA $01CC22(pc),a6
 01CB6A  2D 7C 40 40 00 00 00 50       MOVE.l #$40400000,$50(a6)
@@ -795,8 +797,8 @@
 01CB9E  51 C8 FF F8                   DBRA d0,$01CB98
 01CBA2  49 FA F7 18                   LEA $01C2BC(pc),a4
 01CBA6  23 CC 00 00 00 70             MOVE.l a4,$70.l
-01CBAC  4C DF                         .dc.w $4CDF
-01CBAE  .dc.b 70 00 4E 75                                     ; p.Nu
+01CBAC  4C DF 70 00                   MOVEM.l (a7)+,a4-a6
+01CBB0  4E 75                         RTS
 
 ; ==== sub_01CBB2 (2 callers) ====
 01CBB2  48 E7 00 06                   MOVEM.l a5-a6,-(a7)
@@ -811,10 +813,11 @@
 01CBE0  23 CE 00 00 00 78             MOVE.l a6,$78.l
 01CBE6  13 FC 00 11 00 BF DF 00       MOVE.b #$11,$BFDF00.l
 01CBEE  13 FC 00 82 00 BF DD 00       MOVE.b #$82,$BFDD00.l
-01CBF6  4C DF                         .dc.w $4CDF
-01CBF8  .dc.b 60 00 4E 75 48 E7 80 02 10 39 00 BF DD 00 4D FA ; `.NuH....9....M.
-01CC08  .dc.b 00 1A 4A 2E 00 4A 67 04 61 00 EF 78 33 FC 20 00 ; ..J..Jg.a..x3. .
-01CC18  .dc.b 00 DF F0 9C 4C DF 40 01 4E 73                   ; ....L.@.Ns
+01CBF6  4C DF 60 00                   MOVEM.l (a7)+,a5-a6
+01CBFA  4E 75                         RTS
+01CBFC  .dc.b 48 E7 80 02 10 39 00 BF DD 00 4D FA 00 1A 4A 2E ; H....9....M...J.
+01CC0C  .dc.b 00 4A 67 04 61 00 EF 78 33 FC 20 00 00 DF F0 9C ; .Jg.a..x3. .....
+01CC1C  .dc.b 4C DF 40 01 4E 73                               ; L.@.Ns
 
 ; --- player_state  $01CC22 — Music driver state struct; routines do LEA $1CC22(pc),a6 and work a6-relative. Fields seen: $0/$4 song & sample data ptrs (from api_init), $8/$A/$2C/$3C song-position & timer counters, $2E/$3D/$3E/$44/$4A mode/pause flags, $50 fixed-point tempo, $51/$52 config. (data) ---
 01CC22  .dc.b 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................

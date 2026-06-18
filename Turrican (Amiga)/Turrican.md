@@ -471,15 +471,18 @@ split itself in two:
 
 So the image has **two segments**:
 
-* **Work RAM** — image `$43890…$5F000` — copied down to **`$10…$1B780`**. This is
-  *not* code: it starts zeroed (the vector table, buffers, the screen/state area)
-  and is just the running game's scratch memory.
+* **The resident game engine** — image `$43890…$5F000` — copied down to
+  **`$10…$1B780`** and run there (subtract `$43880` for runtime addresses).
+  `$10…$FF` is the 68000 exception vector table; `$100` is the engine's internal
+  BRA jump table, entered at `game_start` (`$CB4`). This ~112 KB segment is the
+  bulk of the game. It is disassembled (runtime-based) in
+  `disasm/resident_core.{asm,annotations.txt}` — see §4.
 * **The setup / init / ISR + data** — image `$5F500…$77E00` — runs **in place**
   (the image sits at `$43880`, so image address = run address). `turrican.asm`
-  covers this segment.
+  covers this segment (§3).
 
-The actual game logic is in *neither* — it is an overlay streamed off the floppy
-(§4).
+The engine then pulls in more code as streamed modules (§5): the music driver,
+a loader-sound player, and a PowerPacker block.
 
 ## 3. The in-place setup segment
 
@@ -505,10 +508,44 @@ What runs before the game proper takes over, all from `turrican.asm`:
   (`disk_read $604FA` / `disk_setup_sync $6056E`, `DSKSYNC = $4489`) that streams
   level data off the disk during play.
 
-## 4. The streamed overlays, and the music driver at `$1BB00`
+## 4. The resident game engine (`$100…$1B780`)
 
-The resident image holds neither the game logic nor the sound code — `game_init`
-streams those off the floppy. `load_block_1BB00` reads the packed block at
+`game_init`'s last act is `JMP $100`, into the relocated segment. `$100` is the
+engine's internal **BRA jump table**; slot 0 is `game_start` (`$CB4`):
+
+```
+000CB4  game_start:
+        MOVE #$2000,sr ; LEA $89DC,a7 ; LEA $DFF000,a6
+        … stash trainer-option regs ($CAA/$CAC) ; BSR init_early …
+        JSR  $30000                 ; run the PowerPacker engine module
+        BSR  init_object_table ; BSR init_map_grid ; BSR init_54BC ; BSR setup_irq_display
+        BRA  main_loop ($D4C)
+```
+
+`main_loop` (`$D4C`) drives the **blitter** (writes `BLTSIZE`, spins on `BBUSY`)
+to build the playfield, primes the level/game state, and runs the game. The
+engine is disassembled — runtime-based — in
+`disasm/resident_core.{asm,annotations.txt}` (`game_start`, `main_loop`, the init
+routines, `setup_irq_display`). Coverage is still partial: most per-frame logic is
+reached through object/state dispatch tables not yet seeded, so this is where the
+analysis continues.
+
+## 5. The streamed modules
+
+The engine doesn't ship complete in the resident image — `game_init` and
+`game_start` stream three more modules in:
+
+* **the music driver** at `$1BB00` (below);
+* **a loader-sound player** at `$50000` — `game_init` copies image `$703EA…$77DF0`
+  there (raw, unpacked) and `JSR $50000`s it; it installs its own vblank handler
+  and plays a sample on AUD0/1 (the disk-access sound) during loading;
+* **a PowerPacker module** at `$30000` — `game_init` `pp20_decrunch`s image
+  `$6C186…$703EA` there, and `game_start` `JSR $30000`s it (the graphics/engine
+  code; recovering it needs a Go PowerPacker reimplementation — TODO).
+
+### The music driver at `$1BB00`
+
+`load_block_1BB00` reads the packed block at
 **ADF `$26000`** (length `$C268`) to `$1BB00` and `huff_decode`s it; the numbers
 are self-consistent (`huff_decode`'s source window is `$1BB00…$27D68` = exactly
 `$C268` bytes). Because the in-game decoder is the *same three passes* as the
@@ -545,10 +582,11 @@ It is disassembled into its own pair, `disasm/overlay_1bb00.{asm,annotations.txt
 (`player_state $1CC22`, `update_voices`, `voice_vibrato/portamento/envelope`).
 This matches the cabinet credit — the music is a **Chris Hülsbeck** score.
 
-> **Next.** The game logic proper is a *further* streamed module — the `$30000`
-> (`PowerPacker "PP20"`) and `$50000` loads `game_init` runs before the sound
-> driver. Decode those next (the same `cmd/block`/PowerPacker route), then the
-> level/graphics formats (Parts IV–V).
+> **Next.** Two threads: (a) grow `resident_core` outward from `main_loop` by
+> seeding the object/state dispatch tables, toward the player, enemies and level
+> handling (Parts IV–V); and (b) recover the `$30000` PowerPacker module — the
+> graphics/engine code `game_start` calls — which needs a Go PowerPacker (`PP20`)
+> reimplementation.
 
 # Part IV — Graphics and data formats
 

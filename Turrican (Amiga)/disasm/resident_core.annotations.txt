@@ -1,0 +1,38 @@
+# Turrican (Amiga) — resident game engine ($10..$1B780) annotations.
+# Consumed by codetrace68k -annotate; format: ADDR  name  description
+#   ADDR is hex; '#' starts a comment line.
+#
+# WHAT THIS IS
+# game_entry ($5F500) copies image $43890..$5F000 down to $10..$1B780, then
+# game_init ($60000) finishes hardware setup and JMP $100. So this 112 KB segment
+# is the RESIDENT GAME ENGINE (NOT work RAM — an earlier note was wrong): $10..$FF
+# is the 68000 exception vector table, and $100 is the engine's internal BRA jump
+# table whose first slot is the real start, game_start ($CB4). The engine streams
+# the rest in: it JSRs the PP20-depacked module at $30000 and reads level/graphics
+# data off the floppy (the $74xxx+ region the routines touch).
+#
+# This disassembly is of the relocated segment, so addresses are RUNTIME ($10-based,
+# = image addr - $43880). It is produced from a trimmed copy of the decoded image:
+#   go run turrican/extract/cmd/decrunch -o /tmp/turrican.bin "Turrican (Amiga)/Turrican.adf"
+#   python3 -c "open('/tmp/lowseg.bin','wb').write(open('/tmp/turrican.bin','rb').read()[0x10:0x1B780])"
+#   go run stupidcoder.com/tools/cmd/codetrace68k -base 0x10 \
+#     -entry 0xCB4,0xD4C,0x1ABA,0x1AEC,0x1B14,0x1B38,0x35AE,0x438C,0x234C,0x7728,0x78CC,0x7EFC \
+#     -annotate "Turrican (Amiga)/disasm/resident_core.annotations.txt" \
+#     -o "Turrican (Amiga)/disasm/resident_core.asm" /tmp/lowseg.bin
+# Coverage is partial — much of the per-frame logic is reached through object/state
+# dispatch tables not yet seeded. a6 is usually the $DFF000 custom-chip base.
+# Names are from observed behaviour.
+
+10   cpu_vectors        68000 exception vector table (runtime $0-$FF; reset SSP/PC at $0/$4 set by game_entry, the rest filled during init). Not code.
+
+100  entry_table        The engine's internal entry vectors — a table of BRA stubs. game_init's JMP $100 falls through slot 0 to game_start; other slots ($108..$138) are engine sub-entries ($1ABA/$1AEC/$1B14/$1B38/$35AE/$438C/$234C/$7728/$78CC/$7EFC).
+
+CB4  game_start         Real game start (entry_table slot 0). Supervisor mode, stack $89DC, a6=$DFF000; stash the trainer-option regs ($CAA/$CAC); init_early; JSR $30000 (the PP20 graphics/engine module); init_object_table, init_map_grid, init_54BC, setup_irq_display; then fall into main_loop.
+
+D4C  main_loop          Main loop / level setup. Drives the blitter (writes BLTSIZE $58(a6) and spins on BBUSY in DMACONR $2(a6)) to clear the playfield, primes level/game variables ($1938/$193A/$7AAF/$194B/$217/$284 …) and sets up the object/coordinate tables at $1A0E/$19DE.
+
+9D0  init_early         Early init: BSR chain ($8BE, $910, $AF2) then reads packed/interleaved data from the streamed region ($74002+) and deinterleaves it (AND #$55555555 — even/odd bitplane split).
+748A init_object_table  Zero-fill the object tables pointed to by $20A/$20E, laying out per-object slots on a $C0-byte stride.
+74C0 init_map_grid      Initialise a 32-wide tile/coordinate grid via the buffer pointer at $35F4.
+54BC init_54BC          Set the $544F flag and clear the 31-entry table at $9E54 (some per-level state array).
+D14  setup_irq_display  Interrupt/display bring-up: INTENA/INTREQ/DMACON off, DMACON #$8240 (SET|DMAEN|BLTEN), BSR $6D4A/$706C/$712A (copper/sprite/playfield setup), INTENA #$C018 (SET|INTEN|VERTB|COPER).

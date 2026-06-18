@@ -124,7 +124,7 @@ AIReverseEngineering/
     ├── Turrican.adf             # raw disk image (pinned by MD5 in Image files)
     ├── Turrican.md              # writeup (Parts I-II done; III in progress; IV-V stubbed)
     ├── extract/                 # pure-Go 3-pass decoder; cmd/decrunch (main part), cmd/block (disk overlays)
-    └── disasm/                  # annotated 68000 disassembly (resident image + $1BB00 game overlay)
+    └── disasm/                  # annotated 68000 disasm: resident engine, in-place setup, $1BB00 sound driver
 ```
 
 Per-game folder contract: `<Game>.<ext>` raw image, a markdown writeup of the

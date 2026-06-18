@@ -17,6 +17,8 @@ import { Application, Container, Graphics, Rectangle, Sprite, Texture } from 'pi
 
 const TILE = 32;
 const ATLAS_COLS = 16;
+const ATLAS_GUTTER = 1; // each atlas tile is extruded by a 1px border (see webexport)
+const ATLAS_CELL = TILE + 2 * ATLAS_GUTTER; // 34
 const DATA = 'public/turrican/';
 const NATIVE_W = 320; // Amiga playfield width (~10 tiles) — the 1:1 reference
 const ZOOM_STEP = Math.pow(1.15, 0.25);
@@ -67,8 +69,8 @@ export class TurricanViewer {
     const cols = ATLAS_COLS;
     const tiles = [];
     for (let n = 0; n < nTiles; n++) {
-      const sx = (n % cols) * TILE;
-      const sy = ((n / cols) | 0) * TILE;
+      const sx = (n % cols) * ATLAS_CELL + ATLAS_GUTTER;
+      const sy = ((n / cols) | 0) * ATLAS_CELL + ATLAS_GUTTER;
       tiles.push(new Texture({ source: tex.source, frame: new Rectangle(sx, sy, TILE, TILE) }));
     }
     const entry = { source: tex.source, tiles };

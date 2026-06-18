@@ -33,10 +33,12 @@ import (
 
 const (
 	blockBase = 0x1B980
-	tileSide  = 32
-	tileBytes = tileSide * 4 * (tileSide / 8) // 512
-	atlasCols = 16
-	objAtlasW = 256 // object-atlas shelf width in pixels
+	tileSide   = 32
+	tileBytes  = tileSide * 4 * (tileSide / 8) // 512
+	atlasCols  = 16
+	tileGutter = 1                       // extruded border per tile (kills atlas bleed at fractional zoom)
+	atlasCell  = tileSide + 2*tileGutter // 34
+	objAtlasW  = 256                     // object-atlas shelf width in pixels
 )
 
 type objSprite struct {
@@ -269,15 +271,28 @@ func writeObjAtlas(path string, game *scene.Game, w int, used map[spriteKey]bool
 	return rectOf, png.Encode(f, img)
 }
 
+// writeAtlas packs the world's 32x32 tiles into a grid PNG. Each tile sits in a
+// (tileSide+2*tileGutter)-pixel cell whose 1-pixel border duplicates the tile's edge
+// pixels (extrusion): when the viewer samples a sub-pixel past a tile's edge at
+// fractional zoom, it hits the tile's own colour instead of bleeding the neighbour.
 func writeAtlas(path string, block []byte, tableOff, nTiles int, pal color.Palette) error {
 	rows := (nTiles + atlasCols - 1) / atlasCols
-	img := image.NewPaletted(image.Rect(0, 0, atlasCols*tileSide, rows*tileSide), pal)
+	img := image.NewPaletted(image.Rect(0, 0, atlasCols*atlasCell, rows*atlasCell), pal)
+	clamp := func(v int) int {
+		if v < 0 {
+			return 0
+		}
+		if v >= tileSide {
+			return tileSide - 1
+		}
+		return v
+	}
 	for n := 0; n < nTiles; n++ {
 		off := tableOff + int(binary.BigEndian.Uint32(block[tableOff+n*4:]))
 		if off+tileBytes > len(block) {
 			break
 		}
-		ox, oy := (n%atlasCols)*tileSide, (n/atlasCols)*tileSide
+		var t [tileSide][tileSide]uint8
 		for y := 0; y < tileSide; y++ {
 			var planes [4]uint32
 			for p := 0; p < 4; p++ {
@@ -288,7 +303,13 @@ func writeAtlas(path string, block []byte, tableOff, nTiles int, pal color.Palet
 				for p := 0; p < 4; p++ {
 					v |= uint8((planes[p]>>(31-uint(x)))&1) << uint(p)
 				}
-				img.SetColorIndex(ox+x, oy+y, v)
+				t[y][x] = v
+			}
+		}
+		ox, oy := (n%atlasCols)*atlasCell, (n/atlasCols)*atlasCell
+		for y := -tileGutter; y < tileSide+tileGutter; y++ {
+			for x := -tileGutter; x < tileSide+tileGutter; x++ {
+				img.SetColorIndex(ox+tileGutter+x, oy+tileGutter+y, t[clamp(y)][clamp(x)])
 			}
 		}
 	}

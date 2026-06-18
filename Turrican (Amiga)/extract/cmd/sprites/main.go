@@ -18,8 +18,13 @@
 // width (the cookie-cut shift reads an extra word), so a frame is
 // 4 * height * (width-1)*2 bytes, drawn through the 16-colour playfield palette
 // (plane 3 doubles as the mask, so opaque pixels use colours 8-15; colour 0 is
-// transparent). Frame tables are found by scanning for runs of pointers that all
-// resolve to a valid descriptor.
+// transparent).
+//
+// Per world the authoritative sprite set is the frame tables the scene's enemy-AI
+// handlers install: each handler does `MOVE.l #frametable,$12(a5)`, so we collect
+// every such table from the +$20 AI handler tables (this is exactly the set the
+// placement viewer needs to look up). A blind scan for runs of descriptor pointers
+// is unioned in to catch sprites no handler installs directly.
 package main
 
 import (
@@ -31,6 +36,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"turrican/extract/decrunch"
 )
@@ -92,13 +98,94 @@ func main() {
 		findTables(resident, residentLo, residentHi, gfxLo, residentHi))
 
 	// Per-world enemy sprites from each scene block, in the world's own palette.
+	// The set is every frame table any scene's AI handlers install, unioned with a
+	// blind descriptor-pointer scan, keyed by frame-table address.
 	for w := 0; w < numWorlds; w++ {
 		block := worldBlock(adf, res.Data, w)
 		sp := space{data: block, base: blockBase}
 		hi := blockBase + len(block)
-		emit(*out, fmt.Sprintf("world%d_sprite_%%05X.png", w), sp, worldPalette(adf, w),
-			findTables(sp, blockBase, hi, blockBase, hi))
+
+		tables := map[int]table{}
+		for _, t := range findTables(sp, blockBase, hi, blockBase, hi) {
+			tables[t.addr] = t
+		}
+		for _, ft := range aiFrameTables(sp, hi) {
+			if _, ok := tables[ft]; ok {
+				continue
+			}
+			if t, ok := tableAt(sp, ft, blockBase, hi); ok {
+				tables[t.addr] = t
+			}
+		}
+		emit(*out, fmt.Sprintf("world%d_sprite_%%05X.png", w), sp, worldPalette(adf, w), sortTables(tables))
 	}
+}
+
+// aiFrameTables returns every frame table installed by a scene's enemy-AI handlers.
+// For each scene it reads the +$20 handler table and, per handler, scans the routine
+// for `MOVE.l #frametable,$12(a5)` (opcode 2B 7C imm32 00 12).
+func aiFrameTables(sp space, hi int) []int {
+	var out []int
+	seen := map[int]bool{}
+	nScenes := sp.be16(blockBase + 0x14)
+	for s := 0; s < nScenes; s++ {
+		if !sp.has(blockBase+0x16+s*4, 4) {
+			break
+		}
+		desc := sp.be32(blockBase + 0x16 + s*4)
+		if desc < blockBase || desc >= hi {
+			continue
+		}
+		aiTbl := sp.be32(desc + 0x20)
+		for i := 0; i < 16; i++ {
+			if !sp.has(aiTbl+i*4, 4) {
+				break
+			}
+			h := sp.be32(aiTbl + i*4)
+			if h < blockBase || h >= hi {
+				break
+			}
+			o := h - sp.base
+			for j := o; j < o+260 && j+8 <= len(sp.data); j++ {
+				if sp.data[j] == 0x2B && sp.data[j+1] == 0x7C && sp.data[j+6] == 0x00 && sp.data[j+7] == 0x12 {
+					ft := int(binary.BigEndian.Uint32(sp.data[j+2:]))
+					if ft >= blockBase && ft < hi && !seen[ft] {
+						seen[ft] = true
+						out = append(out, ft)
+					}
+					break
+				}
+			}
+		}
+	}
+	return out
+}
+
+// tableAt reads the frame table at addr: descriptor pointers until one fails to
+// resolve (or a sane cap). Unlike findTables it accepts a single-frame table.
+func tableAt(sp space, addr, gfxLo, gfxHi int) (table, bool) {
+	var frames []frame
+	for a := addr; sp.has(a, 4) && len(frames) < 64; a += 4 {
+		f, ok := descAt(sp, sp.be32(a), gfxLo, gfxHi, 1)
+		if !ok {
+			break
+		}
+		frames = append(frames, f)
+	}
+	if len(frames) == 0 {
+		return table{}, false
+	}
+	return table{addr: addr, frames: frames}, true
+}
+
+// sortTables flattens the map into address order for deterministic output.
+func sortTables(m map[int]table) []table {
+	out := make([]table, 0, len(m))
+	for _, t := range m {
+		out = append(out, t)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].addr < out[j].addr })
+	return out
 }
 
 func emit(dir, nameFmt string, sp space, pal color.Palette, tables []table) {
@@ -111,28 +198,33 @@ func emit(dir, nameFmt string, sp space, pal color.Palette, tables []table) {
 	}
 }
 
+// descAt decodes the 14-byte BOB descriptor pointed to by p, validating that its
+// bitmap lies in [gfxLo,gfxHi) and its dimensions are sane. minH is the smallest
+// accepted frame height: the blind scan uses 4 to avoid false runs, but a table we
+// already trust (AI-referenced) may legitimately start with a tiny frame.
+func descAt(sp space, p, gfxLo, gfxHi, minH int) (frame, bool) {
+	if p < sp.base || !sp.has(p, 14) {
+		return frame{}, false
+	}
+	bm := sp.be32(p)
+	bs := sp.be16(p + 0xA)
+	h, w := bs>>6, bs&0x3F
+	if bm < gfxLo || bm >= gfxHi || !sp.has(bm, 4*h*(w-1)*2) || h < minH || h > 96 || w < 2 || w > 12 {
+		return frame{}, false
+	}
+	return frame{bitmap: bm, h: h, w: w - 1}, true
+}
+
 // findTables scans [scanLo,scanHi) for runs of >=3 pointers that all resolve to a
 // plausible BOB descriptor (bitmap in [gfxLo,gfxHi)).
 func findTables(sp space, scanLo, scanHi, gfxLo, gfxHi int) []table {
-	descAt := func(p int) (frame, bool) {
-		if p < sp.base || !sp.has(p, 14) {
-			return frame{}, false
-		}
-		bm := sp.be32(p)
-		bs := sp.be16(p + 0xA)
-		h, w := bs>>6, bs&0x3F
-		if bm < gfxLo || bm >= gfxHi || !sp.has(bm, 4*h*(w-1)*2) || h < 4 || h > 96 || w < 2 || w > 12 {
-			return frame{}, false
-		}
-		return frame{bitmap: bm, h: h, w: w - 1}, true
-	}
 	var out []table
 	for a := scanLo; a < scanHi-4; {
-		if f0, ok := descAt(sp.be32(a)); ok {
+		if f0, ok := descAt(sp, sp.be32(a), gfxLo, gfxHi, 4); ok {
 			frames := []frame{f0}
 			j := a + 4
 			for j < scanHi-4 {
-				f, ok := descAt(sp.be32(j))
+				f, ok := descAt(sp, sp.be32(j), gfxLo, gfxHi, 4)
 				if !ok {
 					break
 				}

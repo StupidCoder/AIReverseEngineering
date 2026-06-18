@@ -35,14 +35,34 @@ const (
 )
 
 type object struct {
-	Type int `json:"type"` // entry type byte; low nibble = enemy-AI handler index
-	X    int `json:"x"`    // tile column (x / 4)
-	Y    int `json:"y"`    // tile row (y / 4)
+	Type   int `json:"type"`   // entry type byte; low nibble = enemy-AI handler index
+	X      int `json:"x"`      // tile column (x / 4)
+	Y      int `json:"y"`      // tile row (y / 4)
+	Sprite int `json:"sprite"` // resolved frame-table address (the enemy's sprite); 0 if unknown
+}
+type aiEntry struct {
+	Handler int `json:"handler"` // +$20 table entry (the AI routine)
+	Sprite  int `json:"sprite"`  // frame table the handler installs ($12), == a sprite sheet
 }
 type sceneObjects struct {
 	World, Scene, Width, Height int
-	AIHandlers                  []int `json:"aiHandlers"` // descriptor +$20 table (type&$F -> handler)
+	AI                          []aiEntry `json:"ai"` // index by type&$F -> {handler, sprite}
 	Objects                     []object
+}
+
+// frameTableOf scans an AI handler's code for `MOVE.l #imm,$12(a5)`
+// (opcode 2B 7C imm32 00 12) — the frame table (sprite) it installs.
+func frameTableOf(block []byte, handler, base, hi int) int {
+	o := handler - base
+	for i := o; i < o+260 && i+8 <= len(block); i++ {
+		if block[i] == 0x2B && block[i+1] == 0x7C && block[i+6] == 0x00 && block[i+7] == 0x12 {
+			ft := int(binary.BigEndian.Uint32(block[i+2:]))
+			if ft >= base && ft < hi {
+				return ft
+			}
+		}
+	}
+	return 0
 }
 
 func main() {
@@ -100,6 +120,24 @@ func main() {
 				continue
 			}
 
+			// The scene's enemy-AI handler table (type & $F indexes it) and the
+			// frame table (sprite) each handler installs.
+			aiTbl := be32(desc + 0x20)
+			var ai []aiEntry
+			for i := 0; i < 16; i++ {
+				h := be32(aiTbl + i*4)
+				if h < blockBase || h >= blockHi {
+					break
+				}
+				ai = append(ai, aiEntry{Handler: h, Sprite: frameTableOf(block, h, blockBase, blockHi)})
+			}
+			spriteOf := func(ty int) int {
+				if n := ty & 0xF; n < len(ai) {
+					return ai[n].Sprite
+				}
+				return 0
+			}
+
 			var objs []object
 			for a := lo; a < hi+60 && a < blockHi-6; {
 				ty := be16(a)
@@ -113,23 +151,13 @@ func main() {
 				}
 				x, y := be16(a+2), be16(a+4)
 				if x < width*unitsTile && y < height*unitsTile {
-					objs = append(objs, object{Type: ty & 0xFF, X: x / unitsTile, Y: y / unitsTile})
+					t := ty & 0xFF
+					objs = append(objs, object{Type: t, X: x / unitsTile, Y: y / unitsTile, Sprite: spriteOf(t)})
 				}
 				a += 6
 			}
 
-			// The scene's enemy-AI handler table (type & $F indexes it).
-			aiTbl := be32(desc + 0x20)
-			var ai []int
-			for i := 0; i < 16; i++ {
-				h := be32(aiTbl + i*4)
-				if h < blockBase || h >= blockHi {
-					break
-				}
-				ai = append(ai, h)
-			}
-
-			so := sceneObjects{World: w, Scene: s, Width: width, Height: height, AIHandlers: ai, Objects: objs}
+			so := sceneObjects{World: w, Scene: s, Width: width, Height: height, AI: ai, Objects: objs}
 			name := fmt.Sprintf("world%d_scene%d.json", w, s)
 			b, _ := json.Marshal(so)
 			if err := os.WriteFile(filepath.Join(*out, name), b, 0o644); err != nil {

@@ -952,8 +952,101 @@ cleanly; the tall/vertical ones (worlds 3–5) currently over-read because the e
 grid extent the spawner derives from the level dimensions still needs pinning down
 — the last detail before the full set drives a viewer object layer.
 
+## 6. The enemy AI → sprite table
+
+A placement entry's `type & $F` is an index into the scene's `+$20` AI-handler
+table, and the handler installs its sprite by writing a frame table into the
+object node — `MOVE.l #frametable,$12(a5)` (`2B 7C <imm32> 00 12`). So the lookup
+a viewer needs is **`type → handler → sprite sheet`**, and it is fully static:
+`extract/cmd/placements` resolves it per object (each carries its `sprite` frame
+table in the JSON), and `extract/cmd/sprites` is *driven* by the same set, so every
+handler-installed frame table has a matching `world<N>_sprite_<addr>.png` sheet.
+
+The table below is that map for every scene that has an AI table (handler address
+and the sheet it installs). Some handlers reuse the same sprite (e.g. the world-0
+walker `$1E042 → 1E23E` recurs in every scene); a few scenes carry no `+$20` table
+at all and so seed no placement enemies.
+
+| World | Scene | Type | AI handler | Sprite sheet |
+|------:|------:|-----:|------------|--------------|
+| 0 | 0 | 0 | `$1E042` | `world0_sprite_1E23E.png` |
+| 0 | 0 | 1 | `$1F152` | `world0_sprite_1F30C.png` |
+| 0 | 0 | 2 | `$206AA` | `world0_sprite_20884.png` |
+| 0 | 0 | 3 | `$1EB54` | `world0_sprite_1ED90.png` |
+| 0 | 0 | 4 | `$1DE68` | `world0_sprite_1DF80.png` |
+| 0 | 0 | 5 | `$1EEB4` | `world0_sprite_1F0D0.png` |
+| 0 | 0 | 6 | `$1E6FC` | `world0_sprite_1E8D0.png` |
+| 0 | 0 | 7 | `$1E356` | `world0_sprite_1E694.png` |
+| 0 | 0 | 8 | `$1E8EA` | `world0_sprite_1EAEE.png` |
+| 0 | 1 | 0 | `$1E042` | `world0_sprite_1E23E.png` |
+| 0 | 1 | 1 | `$1F374` | `world0_sprite_1F4C8.png` |
+| 0 | 1 | 2 | `$1FECA` | `world0_sprite_1FFD6.png` |
+| 0 | 1 | 3 | `$1E8EA` | `world0_sprite_1EAEE.png` |
+| 0 | 1 | 4 | `$1F564` | `world0_sprite_1F754.png` |
+| 0 | 1 | 5 | `$1FD88` | `world0_sprite_1FEB0.png` |
+| 0 | 1 | 6 | `$1F89C` | `world0_sprite_1FB22.png` |
+| 0 | 1 | 7 | `$1EEB4` | `world0_sprite_1F0D0.png` |
+| 0 | 1 | 8 | `$20102` | `world0_sprite_201F4.png` |
+| 0 | 1 | 9 | `$1E356` | `world0_sprite_1E694.png` |
+| 0 | 2 | 0 | `$1E042` | `world0_sprite_1E23E.png` |
+| 0 | 2 | 1 | `$1DE68` | `world0_sprite_1DF80.png` |
+| 0 | 2 | 2 | `$1F564` | `world0_sprite_1F754.png` |
+| 0 | 2 | 3 | `$1E8EA` | `world0_sprite_1EAEE.png` |
+| 0 | 2 | 4 | `$20102` | `world0_sprite_201F4.png` |
+| 0 | 2 | 5 | `$2094A` | `world0_sprite_20BC4.png` |
+| 0 | 2 | 6 | `$20EA8` | `world0_sprite_20FBA.png` |
+| 0 | 2 | 7 | `$1FECA` | `world0_sprite_1FFD6.png` |
+| 0 | 2 | 8 | `$21474` | `world0_sprite_21524.png` |
+| 1 | 0 | 0 | `$1D3EA` | `world1_sprite_1D682.png` |
+| 1 | 0 | 1 | `$1D79A` | `world1_sprite_1D926.png` |
+| 1 | 0 | 2 | `$1D98E` | `world1_sprite_1DB3E.png` |
+| 1 | 1 | 0 | `$1E07A` | `world1_sprite_1E16E.png` |
+| 1 | 1 | 1 | `$1E586` | `world1_sprite_1E6D8.png` |
+| 1 | 1 | 2 | `$1E188` | `world1_sprite_1E3CC.png` |
+| 1 | 1 | 3 | `$1F3F4` | `world1_sprite_1F548.png` |
+| 1 | 1 | 4 | `$1F618` | `world1_sprite_1F736.png` |
+| 1 | 1 | 5 | `$1D79A` | `world1_sprite_1D926.png` |
+| 1 | 1 | 6 | `$1D98E` | `world1_sprite_1DB3E.png` |
+| 1 | 1 | 7 | `$1E75A` | `world1_sprite_1E8E0.png` |
+| 2 | 1 | 0 | `$1EFAC` | `world2_sprite_1F1F2.png` |
+| 2 | 1 | 1 | `$1EADA` | `world2_sprite_1EC38.png` |
+| 2 | 1 | 2 | `$1FB56` | `world2_sprite_1FC6A.png` |
+| 2 | 1 | 3 | `$2005E` | `world2_sprite_202A6.png` |
+| 2 | 1 | 4 | `$1F21E` | `world2_sprite_1F47C.png` |
+| 2 | 1 | 5 | `$1FC84` | `world2_sprite_1FF5A.png` |
+| 2 | 1 | 6 | `$1F6F2` | `world2_sprite_1F7E0.png` |
+| 2 | 1 | 7 | `$1F4FE` | `world2_sprite_1F68A.png` |
+| 2 | 1 | 8 | `$1F7FA` | `world2_sprite_1F9A4.png` |
+| 2 | 2 | 0 | `$1EA82` | `world2_sprite_1E8F6.png` |
+| 2 | 2 | 1 | `$1E598` | `world2_sprite_1E726.png` |
+| 2 | 2 | 2 | `$1E740` | `world2_sprite_1E8F6.png` |
+| 2 | 2 | 3 | `$1EAE0` | `world2_sprite_1EC38.png` |
+| 2 | 2 | 4 | `$20B68` | `world2_sprite_20E4A.png` |
+| 2 | 2 | 5 | `$207A6` | `world2_sprite_20A7A.png` |
+| 3 | 0 | 0 | `$1DCBC` | `world3_sprite_1DE3A.png` |
+| 3 | 0 | 1 | `$1E86E` | `world3_sprite_1EA26.png` |
+| 3 | 0 | 2 | `$1DF40` | `world3_sprite_1E26A.png` |
+| 3 | 0 | 3 | `$1E5D8` | `world3_sprite_1E7D2.png` |
+| 3 | 0 | 4 | `$1E36E` | `world3_sprite_1E572.png` |
+| 3 | 0 | 5 | `$1EC34` | `world3_sprite_1EDCE.png` |
+| 3 | 1 | 0 | `$1DCBC` | `world3_sprite_1DE3A.png` |
+| 3 | 1 | 1 | `$1EC34` | `world3_sprite_1EDCE.png` |
+| 3 | 1 | 2 | `$1E36E` | `world3_sprite_1E572.png` |
+| 3 | 1 | 3 | `$1E5D8` | `world3_sprite_1E7D2.png` |
+| 3 | 1 | 4 | `$1F4DE` | `world3_sprite_1F728.png` |
+| 3 | 2 | 0 | `$1DCBC` | `world3_sprite_1DE3A.png` |
+| 3 | 2 | 1 | `$1F4DE` | `world3_sprite_1F728.png` |
+| 4 | 0 | 0 | `$1CD24` | `world4_sprite_1CFB6.png` |
+| 4 | 0 | 1 | `$1D0CE` | `world4_sprite_1D278.png` |
+| 4 | 0 | 2 | `$1D988` | `world4_sprite_1DB8C.png` |
+| 4 | 0 | 3 | `$1D42A` | `world4_sprite_1D6A4.png` |
+| 4 | 0 | 4 | `$1DBF2` | `world4_sprite_1DE36.png` |
+| 4 | 0 | 5 | `$1E4EC` | `world4_sprite_1E63E.png` |
+| 4 | 1 | 0 | `$1D988` | `world4_sprite_1DB8C.png` |
+
 > **Next.** Pin the per-scene grid extent (for the vertical levels), wire the
-> object layer into the level viewer, and the collision check that reads `$3C1C4`.
+> object layer into the level viewer using this table, and the collision check
+> that reads `$3C1C4`.
 
 # Appendix A — Toolchain and reproduction
 

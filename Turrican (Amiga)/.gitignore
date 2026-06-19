@@ -1,1 +1,2 @@
-rendered/music/
+rendered/music/*.bin
+rendered/music/*.wav

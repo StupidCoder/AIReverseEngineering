@@ -169,7 +169,10 @@ func (p *player) trackCommand(sub, o int) bool {
 		if t := be16(p.mdat, o+6) & 0x1FF; t != 0 {
 			reload := (0x1C00 / t) << 8 // CIA timer B reload value
 			if reload > 0 {
-				p.tickHz = 709379.0 / float64(reload) // PAL E-clock / reload
+				hz := 709379.0 / float64(reload) // PAL E-clock / reload
+				if hz >= 12 && hz <= 120 {       // ignore implausible values
+					p.tickHz = hz
+				}
 			}
 		}
 		return false
@@ -224,7 +227,7 @@ func (p *player) stepTick() {
 			fmt.Fprintf(os.Stderr, "t%d:", p.tick)
 			for c := 0; c < 4; c++ {
 				v := &p.v[c]
-				fmt.Fprintf(os.Stderr, " ch%d[mac$%X p%d n%d per%d dma%v pl%v act%v]", c, v.macro, v.macPos, v.note, v.period, v.dma, p.p[c].playing, v.active)
+				fmt.Fprintf(os.Stderr, " ch%d[off$%X per%d vol%d]", c, v.regStart, v.period, v.vol)
 			}
 			fmt.Fprintln(os.Stderr)
 		}

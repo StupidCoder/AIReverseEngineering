@@ -611,17 +611,30 @@ func (p *player) toPaula(ch int) {
 
 // render produces interleaved stereo float32 PCM at sampleRate, for nSeconds.
 func (p *player) render(sampleRate, nSeconds int) []float32 {
-	total := sampleRate * nSeconds
+	return p.renderN(sampleRate, nSeconds, false)
+}
+
+// renderN renders up to maxSeconds; if stopAtLoop, it ends one full pass after the
+// song's trackstep loops back (p.loopedAt), with a small minimum so very short loops
+// still give something to listen to.
+func (p *player) renderN(sampleRate, maxSeconds int, stopAtLoop bool) []float32 {
+	total := sampleRate * maxSeconds
+	minSamples := sampleRate * 20
 	out := make([]float32, total*2)
 	samplesPerTick := float64(sampleRate) / p.tickHz
 	var acc float64
+	n := 0
 	for i := 0; i < total; i++ {
 		if acc <= 0 {
 			p.stepTick()
 			acc += float64(sampleRate) / p.tickHz
 			_ = samplesPerTick
+			if stopAtLoop && p.loopedAt >= 0 && p.tick > p.loopedAt && i >= minSamples {
+				break
+			}
 		}
 		acc--
+		n = i + 1
 		var l, r float64
 		for ch := 0; ch < 4; ch++ {
 			pc := &p.p[ch]
@@ -645,7 +658,7 @@ func (p *player) render(sampleRate, nSeconds int) []float32 {
 		out[i*2] = float32(clamp(l * 0.5))
 		out[i*2+1] = float32(clamp(r * 0.5))
 	}
-	return out
+	return out[:n*2]
 }
 
 func clamp(v float64) float64 {

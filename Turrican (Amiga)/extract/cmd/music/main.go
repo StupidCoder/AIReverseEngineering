@@ -29,12 +29,14 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"turrican/extract/decrunch"
+	"turrican/extract/scene"
 )
 
 const (
@@ -51,6 +53,7 @@ func main() {
 	secs := flag.Int("secs", 60, "max seconds to render")
 	traceN := flag.Int("trace", 0, "print per-tick voice state for N ticks")
 	traceSong := flag.Int("tracesong", 0, "sub-song for -trace")
+	all := flag.Bool("all", false, "render every sub-song of every TFMX module (overlay + 5 worlds) to WAVs + manifest.json")
 	flag.Parse()
 	adfPath := flag.Arg(0)
 	if adfPath == "" {
@@ -66,6 +69,11 @@ func main() {
 	}
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		fail(err)
+	}
+
+	if *all {
+		renderAll(adf, overlay, *out, *secs)
+		return
 	}
 
 	mdat := overlay[mdatAddr-soundBase : smplAddr-soundBase]
@@ -163,6 +171,137 @@ func writeWAV(path string, pcm []float32, sr int) error {
 	}
 	_, err = f.Write(buf)
 	return err
+}
+
+// tfmxModule is one TFMX song/sample bank: a runtime address for naming, the mdat
+// (song/pattern/macro/trackstep tables) and the sample bank it draws from.
+type tfmxModule struct {
+	label string // human label (where it comes from)
+	addr  int    // mdat runtime address (used in song names)
+	mdat  []byte
+	smpl  []byte
+}
+
+// modulesOf returns every TFMX module in the game: the $1BB00 sound overlay (title /
+// menu / jingle music) plus each of the 5 worlds' in-game themes. select_scene wires a
+// world's music as mdat = block+$10, smpl = block+$0C — both inside the decoded block.
+func modulesOf(adf, overlay []byte) ([]tfmxModule, error) {
+	mods := []tfmxModule{{
+		label: "sound overlay $1BB00",
+		addr:  mdatAddr,
+		mdat:  overlay[mdatAddr-soundBase : smplAddr-soundBase],
+		smpl:  overlay[smplAddr-soundBase:],
+	}}
+	g, err := scene.Load(adf)
+	if err != nil {
+		return nil, err
+	}
+	for w := 0; w < scene.NumWorlds; w++ {
+		blk := g.Block(w)
+		mAddr := int(binary.BigEndian.Uint32(blk.Data[scene.BlockBase+0x10-blk.Base:]))
+		sAddr := int(binary.BigEndian.Uint32(blk.Data[scene.BlockBase+0x0C-blk.Base:]))
+		mOff, sOff := mAddr-blk.Base, sAddr-blk.Base
+		if mOff < 0 || mOff >= len(blk.Data) || sOff < 0 || sOff >= len(blk.Data) {
+			continue
+		}
+		mods = append(mods, tfmxModule{
+			label: fmt.Sprintf("world %d", w),
+			addr:  mAddr,
+			mdat:  blk.Data[mOff:],
+			smpl:  blk.Data[sOff:],
+		})
+	}
+	return mods, nil
+}
+
+// songEntry is one renderable sub-song, written to the manifest.
+type songEntry struct {
+	File  string `json:"file"`
+	Addr  string `json:"addr"`  // mdat module address, hex
+	Song  int    `json:"song"`  // sub-song slot index
+	Start string `json:"start"` // trackstep start, hex
+	Label string `json:"label"` // source (overlay / world N)
+}
+
+// renderAll renders every distinct, audible sub-song of every module to a WAV named by
+// its module address + trackstep start, and writes manifest.json describing them.
+func renderAll(adf, overlay []byte, out string, secs int) {
+	const sr = 44100
+	mods, err := modulesOf(adf, overlay)
+	if err != nil {
+		fail(err)
+	}
+	var manifest []songEntry
+	for _, m := range mods {
+		be16 := func(o int) int { return int(binary.BigEndian.Uint16(m.mdat[o:])) }
+		// The 32-slot song table is mostly padding: api_play(any) must be safe, so unused
+		// slots point at a single "stop" step (e.g. $73-$73 / $1-$1) repeated 20+ times,
+		// and slot 31 is the $1FF terminator. Real sub-songs are the distinct entries; a
+		// song's trackstep start identifies it (tempo can be 0 — timing then comes from the
+		// in-song $EFFE command, as in world 3). Count each (start,end) to spot the filler,
+		// and keep one entry per distinct start (the widest trackstep range).
+		cnt := map[[2]int]int{}
+		for i := 0; i < 32; i++ {
+			cnt[[2]int{be16(0x100 + i*2), be16(0x140 + i*2)}]++
+		}
+		best := map[int]int{} // trackstep start -> chosen slot index
+		for i := 0; i < 32; i++ {
+			s, e := be16(0x100+i*2), be16(0x140+i*2)
+			if s > e || s >= 0x100 || e >= 0x100 { // out of range / $1FF terminator
+				continue
+			}
+			if cnt[[2]int{s, e}] >= 8 { // a repeated stop-step, not a song
+				continue
+			}
+			if cur, ok := best[s]; !ok || e-s > be16(0x140+cur*2)-s {
+				best[s] = i
+			}
+		}
+		for s := 0; s < 0x100; s++ {
+			i, ok := best[s]
+			if !ok {
+				continue
+			}
+			e, t := be16(0x140+i*2), be16(0x180+i*2)
+			_ = e
+			_ = t
+			pl := newPlayer(m.mdat, m.smpl)
+			pl.start(i)
+			pcm := pl.renderN(sr, secs, true)
+			if rms(pcm) < 0.004 { // empty stub / silence
+				continue
+			}
+			name := fmt.Sprintf("mus_%X_%02X", m.addr, s)
+			if err := writeWAV(filepath.Join(out, name+".wav"), pcm, sr); err != nil {
+				fail(err)
+			}
+			manifest = append(manifest, songEntry{
+				File:  name + ".mp3", // WAVs are intermediate; the site serves MP3
+				Addr:  fmt.Sprintf("%X", m.addr),
+				Song:  i,
+				Start: fmt.Sprintf("%X", s),
+				Label: m.label,
+			})
+			fmt.Printf("%-20s %s  song %2d (track $%02X-$%02X) %.1fs rms=%.3f\n",
+				m.label, name, i, s, e, float64(len(pcm)/2)/sr, rms(pcm))
+		}
+	}
+	j, _ := json.MarshalIndent(manifest, "", "  ")
+	if err := os.WriteFile(filepath.Join(out, "manifest.json"), j, 0o644); err != nil {
+		fail(err)
+	}
+	fmt.Printf("\n%d songs -> %s/manifest.json\n", len(manifest), out)
+}
+
+func rms(pcm []float32) float64 {
+	var sum float64
+	for _, s := range pcm {
+		sum += float64(s) * float64(s)
+	}
+	if len(pcm) == 0 {
+		return 0
+	}
+	return sqrt(sum / float64(len(pcm)))
 }
 
 func sqrt(x float64) float64 {

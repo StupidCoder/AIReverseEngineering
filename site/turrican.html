@@ -28,6 +28,13 @@
       <label><input type="checkbox" id="collision" /> Collision</label>
       <span class="hint">drag to pan · scroll or pinch to zoom</span>
     </div>
+    <div class="controls music-controls">
+      <label>Music
+        <select id="song"></select>
+      </label>
+      <audio id="player" controls preload="none"></audio>
+      <span class="hint">every TFMX sub-song, rendered by the Go synth · named by module address</span>
+    </div>
     <p class="legend">
       These are Turrican's actual playfields, rebuilt straight from the disk image. Each world
       is <b>streamed off the floppy</b> as a packed block and decompressed by the game's own
@@ -52,10 +59,48 @@
       game shows. Drag to pan, scroll to zoom from the whole level to
       a single tile. See the
       <a href="https://github.com/StupidCoder/AIReverseEngineering/blob/main/Turrican%20(Amiga)/Turrican.md">write-up</a>
-      (Part IV) for how it was decoded.
+      (Part IV) for how it was decoded. The <b>Music</b> selector plays every TFMX sub-song in
+      the game — the title/menu module in the <code>$1BB00</code> sound overlay plus each world's
+      own in-game theme module — all rendered to audio by a from-scratch Go reimplementation of
+      Chris Hülsbeck's in-game TFMX player (Part V §7), no emulator in the loop. Songs are named by
+      their module's runtime address and trackstep start.
     </p>
   </div>
 
   <script type="module" src="src/turrican/main.js"></script>
+  <script type="module">
+    // Music player: every TFMX sub-song extracted from the game (the $1BB00 sound
+    // overlay + each world's in-game module), rendered to MP3 by the Go synth. Songs
+    // are named by their module's runtime address and trackstep start.
+    const MUSIC = 'public/turrican/music/';
+    const sel = document.getElementById('song');
+    const player = document.getElementById('player');
+    fetch(MUSIC + 'manifest.json')
+      .then((r) => r.json())
+      .then((songs) => {
+        let group, lastLabel;
+        songs.forEach((s) => {
+          if (s.label !== lastLabel) {
+            group = document.createElement('optgroup');
+            group.label = s.label;
+            sel.appendChild(group);
+            lastLabel = s.label;
+          }
+          const opt = document.createElement('option');
+          opt.value = s.file;
+          opt.textContent = '$' + s.addr + ' · track $' + s.start;
+          group.appendChild(opt);
+        });
+        const play = () => {
+          player.src = MUSIC + sel.value;
+          player.play().catch(() => {});
+        };
+        sel.addEventListener('change', play);
+        if (sel.value) player.src = MUSIC + sel.value; // ready, but don't autoplay on load
+      })
+      .catch(() => {
+        sel.innerHTML = '<option>music manifest not found</option>';
+      });
+  </script>
 </body>
 </html>

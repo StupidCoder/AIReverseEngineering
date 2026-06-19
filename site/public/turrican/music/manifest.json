@@ -1,0 +1,198 @@
+[
+  {
+    "file": "mus_1CFF4_00.mp3",
+    "addr": "1CFF4",
+    "song": 2,
+    "start": "0",
+    "label": "sound overlay $1BB00"
+  },
+  {
+    "file": "mus_1CFF4_33.mp3",
+    "addr": "1CFF4",
+    "song": 1,
+    "start": "33",
+    "label": "sound overlay $1BB00"
+  },
+  {
+    "file": "mus_1CFF4_4B.mp3",
+    "addr": "1CFF4",
+    "song": 0,
+    "start": "4B",
+    "label": "sound overlay $1BB00"
+  },
+  {
+    "file": "mus_58076_00.mp3",
+    "addr": "58076",
+    "song": 0,
+    "start": "0",
+    "label": "world 0"
+  },
+  {
+    "file": "mus_58076_26.mp3",
+    "addr": "58076",
+    "song": 1,
+    "start": "26",
+    "label": "world 0"
+  },
+  {
+    "file": "mus_58076_46.mp3",
+    "addr": "58076",
+    "song": 2,
+    "start": "46",
+    "label": "world 0"
+  },
+  {
+    "file": "mus_58076_59.mp3",
+    "addr": "58076",
+    "song": 3,
+    "start": "59",
+    "label": "world 0"
+  },
+  {
+    "file": "mus_58076_74.mp3",
+    "addr": "58076",
+    "song": 4,
+    "start": "74",
+    "label": "world 0"
+  },
+  {
+    "file": "mus_5886C_00.mp3",
+    "addr": "5886C",
+    "song": 4,
+    "start": "0",
+    "label": "world 1"
+  },
+  {
+    "file": "mus_5886C_02.mp3",
+    "addr": "5886C",
+    "song": 0,
+    "start": "2",
+    "label": "world 1"
+  },
+  {
+    "file": "mus_5886C_1C.mp3",
+    "addr": "5886C",
+    "song": 1,
+    "start": "1C",
+    "label": "world 1"
+  },
+  {
+    "file": "mus_5886C_2D.mp3",
+    "addr": "5886C",
+    "song": 2,
+    "start": "2D",
+    "label": "world 1"
+  },
+  {
+    "file": "mus_5886C_2F.mp3",
+    "addr": "5886C",
+    "song": 5,
+    "start": "2F",
+    "label": "world 1"
+  },
+  {
+    "file": "mus_57BE8_00.mp3",
+    "addr": "57BE8",
+    "song": 0,
+    "start": "0",
+    "label": "world 2"
+  },
+  {
+    "file": "mus_57BE8_14.mp3",
+    "addr": "57BE8",
+    "song": 1,
+    "start": "14",
+    "label": "world 2"
+  },
+  {
+    "file": "mus_57BE8_2B.mp3",
+    "addr": "57BE8",
+    "song": 4,
+    "start": "2B",
+    "label": "world 2"
+  },
+  {
+    "file": "mus_57BE8_2C.mp3",
+    "addr": "57BE8",
+    "song": 3,
+    "start": "2C",
+    "label": "world 2"
+  },
+  {
+    "file": "mus_59372_00.mp3",
+    "addr": "59372",
+    "song": 4,
+    "start": "0",
+    "label": "world 3"
+  },
+  {
+    "file": "mus_59372_02.mp3",
+    "addr": "59372",
+    "song": 0,
+    "start": "2",
+    "label": "world 3"
+  },
+  {
+    "file": "mus_59372_04.mp3",
+    "addr": "59372",
+    "song": 3,
+    "start": "4",
+    "label": "world 3"
+  },
+  {
+    "file": "mus_59372_0C.mp3",
+    "addr": "59372",
+    "song": 6,
+    "start": "C",
+    "label": "world 3"
+  },
+  {
+    "file": "mus_59372_11.mp3",
+    "addr": "59372",
+    "song": 5,
+    "start": "11",
+    "label": "world 3"
+  },
+  {
+    "file": "mus_59372_14.mp3",
+    "addr": "59372",
+    "song": 7,
+    "start": "14",
+    "label": "world 3"
+  },
+  {
+    "file": "mus_587CE_00.mp3",
+    "addr": "587CE",
+    "song": 0,
+    "start": "0",
+    "label": "world 4"
+  },
+  {
+    "file": "mus_587CE_2A.mp3",
+    "addr": "587CE",
+    "song": 1,
+    "start": "2A",
+    "label": "world 4"
+  },
+  {
+    "file": "mus_587CE_51.mp3",
+    "addr": "587CE",
+    "song": 4,
+    "start": "51",
+    "label": "world 4"
+  },
+  {
+    "file": "mus_587CE_52.mp3",
+    "addr": "587CE",
+    "song": 2,
+    "start": "52",
+    "label": "world 4"
+  },
+  {
+    "file": "mus_587CE_5C.mp3",
+    "addr": "587CE",
+    "song": 3,
+    "start": "5C",
+    "label": "world 4"
+  }
+]

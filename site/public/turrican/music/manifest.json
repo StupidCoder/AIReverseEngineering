@@ -161,6 +161,13 @@
     "label": "world 3"
   },
   {
+    "file": "mus_59372_1A.mp3",
+    "addr": "59372",
+    "song": 2,
+    "start": "1A",
+    "label": "world 3"
+  },
+  {
     "file": "mus_587CE_00.mp3",
     "addr": "587CE",
     "song": 0,

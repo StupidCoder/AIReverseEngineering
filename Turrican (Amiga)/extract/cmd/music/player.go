@@ -109,6 +109,7 @@ type player struct {
 	tickHz                         float64
 	songOver                       bool
 	trackAdvanced                  bool // a track's $F0 advanced the trackstep this row
+	speedOverride                  int  // row speed to force (-1 = derive from the song table)
 	loopedAt                       int // tick at which the song looped (-1 until then)
 	tick                           int
 	Trace                          [][8]int // per-tick [per0,vol0,per1,vol1,...] when tracing
@@ -123,7 +124,7 @@ func newPlayer(mdat, smpl []byte) *player {
 	for i, b := range smpl {
 		s[i] = int8(b)
 	}
-	return &player{mdat: mdat, smpl: s, tickHz: stdTickHz, loopedAt: -1}
+	return &player{mdat: mdat, smpl: s, tickHz: stdTickHz, speedOverride: -1, loopedAt: -1}
 }
 
 // start prepares song number n.
@@ -143,6 +144,15 @@ func (p *player) start(n int) {
 		p.speed = t - 0x10
 	default:
 		p.speed = t
+	}
+	// The in-game (world) modules play through the resident driver; with this synth's
+	// macro-envelope timing their note durations land right at a row speed of 1 (rows
+	// every 2 ticks) — verified by ear against world 0's theme. renderAll/-mod set this.
+	if p.speedOverride >= 0 {
+		p.speed = p.speedOverride
+	}
+	if s := os.Getenv("TSPEED"); s != "" { // test override for row speed
+		fmt.Sscanf(s, "%d", &p.speed)
 	}
 	p.trackPos = p.trackStart
 	p.speedCnt = 0
@@ -285,87 +295,93 @@ func (p *player) seqStep() {
 	}
 }
 
-// readTrack reads track t's pattern up to one note, routing notes to the Paula voice
-// named by the note's byte2 (& 3). $F0-$FF are sequencer commands.
+// readTrack runs one sequencer step for track t (driver process_track $1BC54). Unlike a
+// naive one-entry-per-row reader, the driver reads *multiple* pattern entries per step
+// and only stops on certain ones — so a musical "row" can key several voices at once and
+// carry its own duration. Each note routes to the Paula voice named by its byte2 (& 3).
+//
+// Per entry (with tb = (byte0 + transpose) & $FF, the driver's post-transpose decision
+// byte): a $F0-$FF command dispatches (see below); otherwise it's a note — key the voice,
+// then CONTINUE reading if tb < $7F or tb >= $C0, else STOP this step (tb in [$7F,$C0) is
+// a row terminator). A note with byte0 in [$7F,$C0) also sets the track's note-duration
+// (wait) from byte3; $F3 sets it from byte1. tb >= $BF means a hold/portamento note
+// (change pitch, no macro/sample retrigger); tb < $BF is a fresh note (retrigger).
 func (p *player) readTrack(t int) {
 	tr := &p.tr[t]
-	if tr.wait > 0 {
+	if tr.wait > 0 { // $6A: still holding the previous step's notes
 		tr.wait--
 		return
 	}
-	for guard := 0; tr.active && guard < 256; guard++ {
+	for guard := 0; tr.active && guard < 512; guard++ {
 		o := tr.patData + tr.patPos*4
 		if o+4 > len(p.mdat) {
 			tr.active = false
 			return
 		}
-		b0 := p.mdat[o]
-		b1 := p.mdat[o+1]
-		b2 := p.mdat[o+2]
-		b3 := p.mdat[o+3]
+		b0, b1, b2, b3 := p.mdat[o], p.mdat[o+1], p.mdat[o+2], p.mdat[o+3]
+
 		if b0 >= 0xF0 {
-			if p.trackCmd(t, b0, b1, b2, b3) {
+			switch b0 {
+			case 0xF0: // end -> advance the trackstep (reloads every track), restart walk
+				p.advanceTrack()
+				p.processTrack()
+				p.trackAdvanced = true
 				return
+			case 0xF1: // pattern loop: count b1, target (b2<<8|b3); continue reading
+				if tr.loopCnt < 0 {
+					tr.loopCnt = int(b1)
+				}
+				if tr.loopCnt == 0 {
+					tr.loopCnt = -1
+					tr.patPos++
+				} else {
+					if b1 != 0xFF {
+						tr.loopCnt--
+					}
+					tr.patPos = int(b2)<<8 | int(b3)
+				}
+				continue
+			case 0xF2: // jump to pattern b1 at (b2<<8|b3); continue reading
+				tr.patData = be32(p.mdat, patTable+(int(b1)&0x7F)*4)
+				tr.patPos = int(b2)<<8 | int(b3)
+				tr.active = tr.patData != 0
+				continue
+			case 0xF3: // set the step's note duration (track wait) from b1, then stop
+				tr.wait = int(b1)
+				tr.patPos++
+				return
+			case 0xF4: // disable/stop the track
+				tr.patPos++
+				return
+			default: // F5/F6/F7 (and others): per-voice effect-note — continue (effects
+				// are approximated at the macro level for now)
+				tr.patPos++
+				continue
 			}
-			continue
 		}
-		// A note row. The driver ($1C726) picks the voice from byte2 & 3, then keys it.
-		// b0 < 0xBF: a fresh note — retrigger the instrument macro. b0 >= 0xBF: a
-		// portamento/hold note — the driver ($1C808) changes the pitch WITHOUT
-		// restarting the macro or sample, so the voice sustains (drones, glides).
-		tr.patPos++
+
+		// a note
 		ch := int(b2) & 3
+		tb := (int(b0) + int(tr.transpose)) & 0xFF
 		note := int(b0&0x3F) + int(tr.transpose)
-		if b0 >= 0xBF {
+		if tb >= 0xBF { // hold / portamento: pitch only, no retrigger
 			v := &p.v[ch]
 			v.note = note
-			v.basePer = p.noteToPeriod(note) // byte3 -> $23 field, not finetune
+			v.basePer = p.noteToPeriod(note)
 			if !v.portOn {
 				v.period = v.basePer
 			}
 		} else {
-			p.trigger(ch, note, int(b1), int(int8(b3)), false)
+			p.trigger(ch, note, int(b1), 0, false)
 		}
-		return
-	}
-}
-
-// trackCmd handles a pattern $F0-$FF command on track t. Returns true when the caller
-// should stop reading this track this row, false to keep reading.
-func (p *player) trackCmd(t int, b0, b1, b2, b3 byte) bool {
-	tr := &p.tr[t]
-	switch b0 {
-	case 0xF0: // end of pattern -> advance the global song trackstep (reloads all tracks)
-		p.advanceTrack()
-		p.processTrack()
-		p.trackAdvanced = true
-		return true
-	case 0xF1: // pattern loop: count b1, target (b2<<8|b3)
-		if tr.loopCnt < 0 {
-			tr.loopCnt = int(b1)
-		}
-		if tr.loopCnt == 0 {
-			tr.loopCnt = -1
-			tr.patPos++
-			return false
-		}
-		if b1 != 0xFF {
-			tr.loopCnt--
-		}
-		tr.patPos = int(b2)<<8 | int(b3)
-		return false
-	case 0xF2: // jump to pattern b1 at position (b2<<8|b3)
-		pn := int(b1) & 0x7F
-		tr.patData = be32(p.mdat, patTable+pn*4)
-		tr.patPos = int(b2)<<8 | int(b3)
-		tr.active = tr.patData != 0
-		return false
-	case 0xF6, 0xF7: // per-channel effect notes — skip (approximated at macro level)
 		tr.patPos++
-		return false
-	default: // F3,F4,F5,F8-FF: tempo/key/etc. — advance and stop the row
-		tr.patPos++
-		return true
+		if b0 >= 0x7F && b0 < 0xC0 { // this note carries the step's duration in byte3
+			tr.wait = int(b3)
+		}
+		if tb >= 0x7F && tb < 0xC0 { // row terminator
+			return
+		}
+		// otherwise keep reading more entries this same step
 	}
 }
 

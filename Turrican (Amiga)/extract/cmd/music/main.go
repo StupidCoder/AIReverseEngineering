@@ -54,6 +54,7 @@ func main() {
 	traceN := flag.Int("trace", 0, "print per-tick voice state for N ticks")
 	traceSong := flag.Int("tracesong", 0, "sub-song for -trace")
 	all := flag.Bool("all", false, "render every sub-song of every TFMX module (overlay + 5 worlds) to WAVs + manifest.json")
+	mod := flag.Int("mod", 0, "for -trace/-render: TFMX module mdat address (0 = $1BB00 overlay; e.g. 0x58076 = world 0)")
 	flag.Parse()
 	adfPath := flag.Arg(0)
 	if adfPath == "" {
@@ -96,8 +97,28 @@ func main() {
 		fmt.Printf("  %2d: start=$%04X end=$%04X tempo=$%04X\n", i, s, e, t)
 	}
 
+	if *mod != 0 { // select a world module instead of the overlay
+		mods, err := modulesOf(adf, overlay)
+		if err != nil {
+			fail(err)
+		}
+		found := false
+		for _, m := range mods {
+			if m.addr == *mod {
+				mdat, smpl, found = m.mdat, m.smpl, true
+				break
+			}
+		}
+		if !found {
+			fail(fmt.Errorf("no TFMX module at $%X", *mod))
+		}
+	}
+
 	if *traceN > 0 {
 		pl := newPlayer(mdat, smpl)
+		if *mod != 0 {
+			pl.speedOverride = 1
+		}
 		pl.tracing = true
 		pl.start(*traceSong)
 		for i := 0; i < *traceN; i++ {
@@ -112,6 +133,9 @@ func main() {
 	if *render >= 0 {
 		const sr = 44100
 		pl := newPlayer(mdat, smpl)
+		if *mod != 0 {
+			pl.speedOverride = 1
+		}
 		pl.start(*render)
 		pcm := pl.render(sr, *secs)
 		name := fmt.Sprintf("song%d.wav", *render)
@@ -266,6 +290,9 @@ func renderAll(adf, overlay []byte, out string, secs int) {
 			_ = e
 			_ = t
 			pl := newPlayer(m.mdat, m.smpl)
+			if m.addr != mdatAddr { // world (in-game) module: resident-driver row speed
+				pl.speedOverride = 1
+			}
 			pl.start(i)
 			pcm := pl.renderN(sr, secs, true)
 			if rms(pcm) < 0.004 { // empty stub / silence

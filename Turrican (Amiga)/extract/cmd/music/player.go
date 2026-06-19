@@ -397,6 +397,11 @@ func (p *player) runMacro(ch int) {
 			v.dma = false
 		case 0x1A: // key off + 1-tick wait
 			stop = true
+		case 0x1C: // note-split: if byte1 >= note keep going, else jump to macPos byte2-3
+			// (selects a low/high instrument macro; driver $1C310)
+			if int(b1) < v.note {
+				v.macPos = w
+			}
 		case 0x06: // set new macro (instrument)
 			v.macro = be32(p.mdat, macTable+(int(b1)&0x7F)*4)
 			v.macPos = 0

@@ -23,6 +23,13 @@ const (
 	macTable   = 0x600
 	trackTable = 0x800
 	paulaClock = 3546895 // PAL Paula sample clock (Hz)
+	// stdTickHz is the game's default music tick rate. The driver is CIA-timed: the
+	// in-game config installs CIA-B timer-B with the standard divisor $40, so the rate
+	// is 709379 / (($1C00/$40)<<8) = 709379/$7000 = 24.74 Hz. Songs that carry no in-song
+	// $EFFE tempo command (every world module) run at this rate — verified against the
+	// real driver in FS-UAE: its tempo fields read $50=$51=$40 while playing world 0.
+	// (Defaulting to 50 Hz played those songs ~2x too fast.)
+	stdTickHz = 709379.0 / float64((0x1C00/0x40)<<8)
 )
 
 // periodTab is the standard Amiga period table the driver uses (overlay $1CF6E):
@@ -116,7 +123,7 @@ func newPlayer(mdat, smpl []byte) *player {
 	for i, b := range smpl {
 		s[i] = int8(b)
 	}
-	return &player{mdat: mdat, smpl: s, tickHz: 50.0, loopedAt: -1}
+	return &player{mdat: mdat, smpl: s, tickHz: stdTickHz, loopedAt: -1}
 }
 
 // start prepares song number n.

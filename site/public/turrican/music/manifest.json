@@ -1,19 +1,5 @@
 [
   {
-    "file": "mus_1CFF4_00.mp3",
-    "addr": "1CFF4",
-    "song": 2,
-    "start": "0",
-    "label": "sound overlay $1BB00"
-  },
-  {
-    "file": "mus_1CFF4_33.mp3",
-    "addr": "1CFF4",
-    "song": 1,
-    "start": "33",
-    "label": "sound overlay $1BB00"
-  },
-  {
     "file": "mus_1CFF4_4B.mp3",
     "addr": "1CFF4",
     "song": 0,
@@ -130,6 +116,13 @@
     "addr": "59372",
     "song": 0,
     "start": "2",
+    "label": "world 3"
+  },
+  {
+    "file": "mus_59372_03.mp3",
+    "addr": "59372",
+    "song": 1,
+    "start": "3",
     "label": "world 3"
   },
   {

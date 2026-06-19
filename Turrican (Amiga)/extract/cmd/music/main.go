@@ -55,6 +55,7 @@ func main() {
 	traceSong := flag.Int("tracesong", 0, "sub-song for -trace")
 	all := flag.Bool("all", false, "render every sub-song of every TFMX module (overlay + 5 worlds) to WAVs + manifest.json")
 	mod := flag.Int("mod", 0, "for -trace/-render: TFMX module mdat address (0 = $1BB00 overlay; e.g. 0x58076 = world 0)")
+	cpu := flag.Int("cpu", -1, "render sub-song N by RUNNING the real driver code in the m68k interpreter (use with -mod)")
 	flag.Parse()
 	adfPath := flag.Arg(0)
 	if adfPath == "" {
@@ -74,6 +75,33 @@ func main() {
 
 	if *all {
 		renderAll(adf, overlay, *out, *secs)
+		return
+	}
+
+	if *cpu >= 0 { // run the real driver code in the interpreter
+		mods, err := modulesOf(adf, overlay)
+		if err != nil {
+			fail(err)
+		}
+		var m tfmxModule
+		found := false
+		for _, mm := range mods {
+			if mm.addr == *mod || (*mod == 0 && mm.addr == mdatAddr) {
+				m, found = mm, true
+				break
+			}
+		}
+		if !found {
+			fail(fmt.Errorf("no module at $%X", *mod))
+		}
+		const sr = 44100
+		pcm, hz := renderDriver(overlay, m, *cpu, sr, *secs, true)
+		name := fmt.Sprintf("cpu_%X_%d.wav", m.addr, *cpu)
+		if err := writeWAV(filepath.Join(*out, name), pcm, sr); err != nil {
+			fail(err)
+		}
+		fmt.Printf("ran driver: %s song %d -> %s (%.1fs @ %.2f Hz, %s)\n",
+			m.label, *cpu, name, float64(len(pcm)/2)/sr, hz, name)
 		return
 	}
 
@@ -116,9 +144,6 @@ func main() {
 
 	if *traceN > 0 {
 		pl := newPlayer(mdat, smpl)
-		if *mod != 0 {
-			pl.speedOverride = 1
-		}
 		pl.tracing = true
 		pl.start(*traceSong)
 		for i := 0; i < *traceN; i++ {
@@ -133,9 +158,6 @@ func main() {
 	if *render >= 0 {
 		const sr = 44100
 		pl := newPlayer(mdat, smpl)
-		if *mod != 0 {
-			pl.speedOverride = 1
-		}
 		pl.start(*render)
 		pcm := pl.render(sr, *secs)
 		name := fmt.Sprintf("song%d.wav", *render)
@@ -200,10 +222,11 @@ func writeWAV(path string, pcm []float32, sr int) error {
 // tfmxModule is one TFMX song/sample bank: a runtime address for naming, the mdat
 // (song/pattern/macro/trackstep tables) and the sample bank it draws from.
 type tfmxModule struct {
-	label string // human label (where it comes from)
-	addr  int    // mdat runtime address (used in song names)
-	mdat  []byte
-	smpl  []byte
+	label    string // human label (where it comes from)
+	addr     int    // mdat runtime address (used in song names)
+	smplAddr int    // sample bank runtime address
+	mdat     []byte
+	smpl     []byte
 }
 
 // modulesOf returns every TFMX module in the game: the $1BB00 sound overlay (title /
@@ -211,10 +234,11 @@ type tfmxModule struct {
 // world's music as mdat = block+$10, smpl = block+$0C — both inside the decoded block.
 func modulesOf(adf, overlay []byte) ([]tfmxModule, error) {
 	mods := []tfmxModule{{
-		label: "sound overlay $1BB00",
-		addr:  mdatAddr,
-		mdat:  overlay[mdatAddr-soundBase : smplAddr-soundBase],
-		smpl:  overlay[smplAddr-soundBase:],
+		label:    "sound overlay $1BB00",
+		addr:     mdatAddr,
+		smplAddr: smplAddr,
+		mdat:     overlay[mdatAddr-soundBase : smplAddr-soundBase],
+		smpl:     overlay[smplAddr-soundBase:],
 	}}
 	g, err := scene.Load(adf)
 	if err != nil {
@@ -229,10 +253,11 @@ func modulesOf(adf, overlay []byte) ([]tfmxModule, error) {
 			continue
 		}
 		mods = append(mods, tfmxModule{
-			label: fmt.Sprintf("world %d", w),
-			addr:  mAddr,
-			mdat:  blk.Data[mOff:],
-			smpl:  blk.Data[sOff:],
+			label:    fmt.Sprintf("world %d", w),
+			addr:     mAddr,
+			smplAddr: sAddr,
+			mdat:     blk.Data[mOff:],
+			smpl:     blk.Data[sOff:],
 		})
 	}
 	return mods, nil
@@ -286,15 +311,14 @@ func renderAll(adf, overlay []byte, out string, secs int) {
 			if !ok {
 				continue
 			}
-			e, t := be16(0x140+i*2), be16(0x180+i*2)
-			_ = e
-			_ = t
-			pl := newPlayer(m.mdat, m.smpl)
-			if m.addr != mdatAddr { // world (in-game) module: resident-driver row speed
-				pl.speedOverride = 1
+			// Run the real driver code to render this sub-song (exact, one full pass).
+			// A single-trackstep song (start == end) loops inside its pattern, so the
+			// trackstep position never jumps back — cap those at a short length.
+			maxSecs := secs
+			if s == be16(0x140+i*2) {
+				maxSecs = 25
 			}
-			pl.start(i)
-			pcm := pl.renderN(sr, secs, true)
+			pcm, _ := renderDriver(overlay, m, i, sr, maxSecs, true)
 			if rms(pcm) < 0.004 { // empty stub / silence
 				continue
 			}
@@ -310,7 +334,7 @@ func renderAll(adf, overlay []byte, out string, secs int) {
 				Label: m.label,
 			})
 			fmt.Printf("%-20s %s  song %2d (track $%02X-$%02X) %.1fs rms=%.3f\n",
-				m.label, name, i, s, e, float64(len(pcm)/2)/sr, rms(pcm))
+				m.label, name, i, s, be16(0x140+i*2), float64(len(pcm)/2)/sr, rms(pcm))
 		}
 	}
 	j, _ := json.MarshalIndent(manifest, "", "  ")

@@ -60,6 +60,8 @@ type voice struct {
 	macPos  int  // command index
 	macWait int  // ticks to wait before the next macro command ($42)
 	keyOn   bool // voice is sounding ($2)
+	keyHeld bool // note is held ($D2): cmd $14 parks the macro here until key-off ($F5)
+	env62   int  // cmd $14 sustain-hold counter ($62)
 	note    int  // current note ($11)
 	addNote int  // per-channel note offset from $F5/portamento
 	detune  int  // macro period detune
@@ -78,8 +80,10 @@ type voice struct {
 	vibDepth, vibSpeed, vibPos, vibSign    int
 	portOn                                 bool
 	portTarget, portRate                   int
-	envOn                                  bool
-	envTarget, envSpeed, envCnt, envReload int
+	// volume envelope (cmd $0F / voice_envelope $1C6D2): every envReload+1 ticks step
+	// vol toward envTarget by envRate, then snap & stop. Fields mirror $70/$71/$72/$73.
+	envOn                                   bool
+	envTarget, envRate, envCnt, envReload   int
 	// macro loop (cmd $05): byte1 = count (0 = infinite), byte2-3 = target macPos.
 	// Wrapped around cmd $11 (advance sample) this is the wavetable scan / sustain.
 	mLoopOn  bool
@@ -353,8 +357,14 @@ func (p *player) readTrack(t int) {
 			case 0xF4: // disable/stop the track
 				tr.patPos++
 				return
-			default: // F5/F6/F7 (and others): per-voice effect-note — continue (effects
-				// are approximated at the macro level for now)
+			case 0xF5: // per-voice key-off (driver note-trigger $1C7A0: CLR.b $D2): release
+				// the held note on voice byte2&3 so its macro's cmd $14 falls through to
+				// the volume release/fade. Continue reading.
+				p.v[int(b2)&3].keyHeld = false
+				tr.patPos++
+				continue
+			default: // F6/F7 (and others): per-voice effect-note — continue (vibrato/porta
+				// config approximated at the macro level for now)
 				tr.patPos++
 				continue
 			}
@@ -364,6 +374,13 @@ func (p *player) readTrack(t int) {
 		ch := int(b2) & 3
 		tb := (int(b0) + int(tr.transpose)) & 0xFF
 		note := int(b0&0x3F) + int(tr.transpose)
+		if dbg {
+			kind := "fresh"
+			if tb >= 0xBF {
+				kind = "HOLD"
+			}
+			fmt.Fprintf(os.Stderr, "  t%d trk%d: b0=%02X tb=%02X -> ch%d note%d %s wait=%d\n", p.tick, t, b0, tb, ch, note, kind, int(b3))
+		}
 		if tb >= 0xBF { // hold / portamento: pitch only, no retrigger
 			v := &p.v[ch]
 			v.note = note
@@ -398,6 +415,8 @@ func (p *player) trigger(ch, note, macroNum, detune int, porta bool) {
 	v.macPos = 0
 	v.macWait = 0
 	v.keyOn = true
+	v.keyHeld = true // $D2 set; cmd $14 will sustain until a $F5 key-off
+	v.env62 = 0xFF   // retrigger sets $62 = $FFFF (cmd $14 reads its low byte)
 	v.addNote = 0
 	v.mLoopOn = false
 	if porta {
@@ -515,17 +534,17 @@ func (p *player) runMacro(ch int) {
 			v.vibDepth = int(p.mdat[o+3])
 			v.vibPos = 0
 			v.vibSign = 1
-		case 0x0D, 0x0E: // set volume = b3
+		case 0x0D: // set volume (driver $1C3DE): byte2<<8|byte3 (base $20*3 ignored)
+			v.vol = w & 0x7F
+		case 0x0E: // set volume (driver $1C400): = byte3
 			v.vol = int(p.mdat[o+3]) & 0x7F
-			if v.vol > 64 {
-				v.vol = 64
-			}
-		case 0x0F: // volume envelope: speed b1, target b3
-			v.envOn = true
-			v.envSpeed = int(b1) & 0x7F
-			v.envReload = int(b1) & 0x7F
-			v.envCnt = 0
-			v.envTarget = int(p.mdat[o+3]) & 0x7F
+		case 0x0F: // volume envelope (driver $1C4B0): $70 speed = byte2, $73 rate = byte1,
+			// $72 target = byte3; inactive when speed (byte2) == 0.
+			v.envReload = int(p.mdat[o+2])
+			v.envCnt = int(p.mdat[o+2])
+			v.envRate = int(b1)
+			v.envTarget = int(p.mdat[o+3])
+			v.envOn = p.mdat[o+2] != 0
 		case 0x10: // reset effects
 			v.vibOn, v.envOn, v.portOn = false, false, false
 		case 0x11: // add a SIGNED delta to the sample start (drives the wavetable scan)
@@ -539,7 +558,23 @@ func (p *player) runMacro(ch int) {
 			if v.regLen < 2 {
 				v.regLen = 2
 			}
-		case 0x14: // wait for DMA / sustain marker — no-op (keep stepping)
+		case 0x14: // key-on sustain hold (driver $1C4F8): while the note is held ($D2),
+			// park the macro on this command (so it never reaches the release/fade) for
+			// byte3 ticks — byte3 = 0 means hold forever. On the first encounter ($62 == 0)
+			// it just arms and passes through; on key-off ($D2 cleared) it falls through.
+			if v.keyHeld {
+				if v.env62 == 0 {
+					v.env62 = 0xFF // arm, then advance (already did macPos++)
+				} else if v.env62 == 0xFF {
+					v.env62 = (int(p.mdat[o+3]) - 1) & 0xFF
+					v.macPos-- // stay on this command, re-evaluate next tick
+					stop = true
+				} else {
+					v.env62 = (v.env62 - 1) & 0xFF
+					v.macPos--
+					stop = true
+				}
+			}
 		default:
 			// 0x13-0x22 (loop/wave-shaper/etc.) — ignore, keep stepping
 		}
@@ -585,12 +620,18 @@ func (p *player) applyEffects(ch int) {
 			v.envCnt--
 		} else {
 			v.envCnt = v.envReload
-			if v.vol < v.envTarget {
-				v.vol++
-			} else if v.vol > v.envTarget {
-				v.vol--
-			} else {
-				v.envOn = false
+			if v.envTarget > v.vol { // ramp up by envRate, snap at target
+				v.vol += v.envRate
+				if v.vol >= v.envTarget {
+					v.vol = v.envTarget
+					v.envOn = false
+				}
+			} else { // ramp down by envRate, snap at target
+				v.vol -= v.envRate
+				if v.vol <= v.envTarget {
+					v.vol = v.envTarget
+					v.envOn = false
+				}
 			}
 		}
 	}

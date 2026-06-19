@@ -1,2 +1,4 @@
 rendered/music/*.bin
 rendered/music/*.wav
+extract/music
+extract/rendered/

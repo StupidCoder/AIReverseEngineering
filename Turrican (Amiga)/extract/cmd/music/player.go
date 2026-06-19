@@ -35,13 +35,19 @@ var periodTab = []int{
 	214, 202, 191, 180, 170, 160, 151, 143, 135, 127, 120, 113,
 }
 
-type voice struct {
-	// sequencer (pattern) state
-	patData   int  // mdat offset of the current pattern (0 = none)
-	patPos    int  // entry index into the pattern
-	active    bool // a pattern is assigned
-	transpose int8 // from the trackstep word
+// track is one of the 8 sequencer tracks. The driver's seq_step ($1BBC2) walks all
+// 8 each step; each track reads its own pattern and, on a note, routes it to the
+// Paula voice named by the note's byte2 (& 3) — tracks and voices are decoupled (8→4).
+type track struct {
+	patData   int  // mdat offset of the current pattern ($28; 0 = none)
+	patPos    int  // entry index into the pattern ($68)
+	wait      int  // note-delay counter ($6A)
+	transpose int8 // low byte of the trackstep word ($49)
+	active    bool // a pattern is assigned and running
 	loopCnt   int  // pattern-loop counter ($4A); -1 = none
+}
+
+type voice struct {
 	// macro VM state
 	macro   int  // mdat offset of the current macro (0 = none)
 	macPos  int  // command index
@@ -87,6 +93,7 @@ type paulaCh struct {
 type player struct {
 	mdat []byte
 	smpl []int8
+	tr   [8]track
 	v    [4]voice
 	p    [4]paulaCh
 	// song state
@@ -94,6 +101,7 @@ type player struct {
 	speed, speedCnt                int
 	tickHz                         float64
 	songOver                       bool
+	trackAdvanced                  bool // a track's $F0 advanced the trackstep this row
 	loopedAt                       int // tick at which the song looped (-1 until then)
 	tick                           int
 	Trace                          [][8]int // per-tick [per0,vol0,per1,vol1,...] when tracing
@@ -115,17 +123,34 @@ func newPlayer(mdat, smpl []byte) *player {
 func (p *player) start(n int) {
 	p.trackStart = be16(p.mdat, 0x100+n*2)
 	p.trackEnd = be16(p.mdat, 0x140+n*2)
-	p.speed = be16(p.mdat, 0x180+n*2)
+	// The song table's "tempo" word is the driver's $6 row-speed register, but the
+	// api_play setup ($1C8FA) reinterprets large values: tempo > $1F is a CIA-timer
+	// divisor and the real row speed is forced to 5 (the actual tick rate then comes
+	// from the in-song $EFFE/sub4 command); $10..$1F is an intro mode (row speed = t-$10);
+	// <= $F is the row speed directly. Without this, songs 1/2 (tempo $78/$A0) crawl.
+	t := be16(p.mdat, 0x180+n*2)
+	switch {
+	case t > 0x1F:
+		p.speed = 5
+	case t > 0xF:
+		p.speed = t - 0x10
+	default:
+		p.speed = t
+	}
 	p.trackPos = p.trackStart
 	p.speedCnt = 0
+	for i := range p.tr {
+		p.tr[i] = track{loopCnt: -1}
+	}
 	for i := range p.v {
-		p.v[i] = voice{loopCnt: -1}
+		p.v[i] = voice{}
 	}
 	p.processTrack()
 }
 
-// processTrack reads the current trackstep, following command steps until it lands
-// on a normal one (which assigns patterns to the voices).
+// processTrack reads the current trackstep, following command steps until it lands on
+// a normal one (which assigns patterns to the 8 tracks). A trackstep word with bit15
+// set leaves that track running its previous pattern (no reset).
 func (p *player) processTrack() {
 	for guard := 0; guard < 256; guard++ {
 		o := trackTable + p.trackPos*16
@@ -140,19 +165,20 @@ func (p *player) processTrack() {
 			p.advanceTrack()
 			continue
 		}
-		for ch := 0; ch < 4; ch++ {
-			w := be16(p.mdat, o+ch*2)
+		for t := 0; t < 8; t++ {
+			w := be16(p.mdat, o+t*2)
 			if w&0x8000 != 0 {
-				continue // channel off this step (keep previous pattern running)
+				continue // keep this track's previous pattern running
 			}
 			pn := (w >> 8) & 0x7F
-			p.v[ch].patData = be32(p.mdat, patTable+pn*4)
-			p.v[ch].patPos = 0
-			p.v[ch].active = p.v[ch].patData != 0
-			p.v[ch].transpose = int8(w & 0xFF)
-			p.v[ch].loopCnt = -1
+			p.tr[t].patData = be32(p.mdat, patTable+pn*4)
+			p.tr[t].patPos = 0
+			p.tr[t].wait = 0
+			p.tr[t].active = p.tr[t].patData != 0
+			p.tr[t].transpose = int8(w & 0xFF)
+			p.tr[t].loopCnt = -1
 			if dbg {
-				fmt.Fprintf(os.Stderr, "trackstep $%X: ch%d = pat $%X (data $%X) transpose %d\n", p.trackPos, ch, pn, p.v[ch].patData, int8(w&0xFF))
+				fmt.Fprintf(os.Stderr, "trackstep $%X: trk%d = pat $%X (data $%X) transpose %d\n", p.trackPos, t, pn, p.tr[t].patData, int8(w&0xFF))
 			}
 		}
 		return
@@ -203,9 +229,7 @@ func (p *player) advanceTrack() {
 func (p *player) stepTick() {
 	if p.speedCnt == 0 {
 		p.speedCnt = p.speed
-		for ch := 0; ch < 4; ch++ {
-			p.readPattern(ch)
-		}
+		p.seqStep()
 	} else {
 		p.speedCnt--
 	}
@@ -235,13 +259,37 @@ func (p *player) stepTick() {
 	p.tick++
 }
 
-// readPattern reads one entry of voice ch's pattern (a note, or an $F0-$FF command).
-func (p *player) readPattern(ch int) {
-	v := &p.v[ch]
-	for guard := 0; v.active && guard < 256; guard++ {
-		o := v.patData + v.patPos*4
+// seqStep runs the sequencer for one row: it walks all 8 tracks (seq_step $1BBC2),
+// each reading its own pattern. A track's $F0 end advances the global trackstep, which
+// reloads every track's pattern — so restart the walk when that happens (mirrors the
+// driver's $A-flag resync).
+func (p *player) seqStep() {
+	for restart := 0; restart < 8; restart++ {
+		p.trackAdvanced = false
+		for t := 0; t < 8; t++ {
+			p.readTrack(t)
+			if p.trackAdvanced {
+				break
+			}
+		}
+		if !p.trackAdvanced {
+			return
+		}
+	}
+}
+
+// readTrack reads track t's pattern up to one note, routing notes to the Paula voice
+// named by the note's byte2 (& 3). $F0-$FF are sequencer commands.
+func (p *player) readTrack(t int) {
+	tr := &p.tr[t]
+	if tr.wait > 0 {
+		tr.wait--
+		return
+	}
+	for guard := 0; tr.active && guard < 256; guard++ {
+		o := tr.patData + tr.patPos*4
 		if o+4 > len(p.mdat) {
-			v.active = false
+			tr.active = false
 			return
 		}
 		b0 := p.mdat[o]
@@ -249,20 +297,22 @@ func (p *player) readPattern(ch int) {
 		b2 := p.mdat[o+2]
 		b3 := p.mdat[o+3]
 		if b0 >= 0xF0 {
-			if p.patCommand(ch, b0, b1, b2, b3) {
-				return // a note/hold was produced, or we should stop reading
+			if p.trackCmd(t, b0, b1, b2, b3) {
+				return
 			}
 			continue
 		}
-		// A note row. b0 < 0xBF: a fresh note — retrigger the instrument macro. b0 >=
-		// 0xBF: a portamento/hold note — the driver ($1C808) changes the pitch WITHOUT
-		// restarting the macro or sample, so the voice sustains (drones, glides). The
-		// high note bits are masked off (driver: ANDI #$3FFF then byte0&$3F).
-		v.patPos++
-		note := int(b0&0x3F) + int(v.transpose)
+		// A note row. The driver ($1C726) picks the voice from byte2 & 3, then keys it.
+		// b0 < 0xBF: a fresh note — retrigger the instrument macro. b0 >= 0xBF: a
+		// portamento/hold note — the driver ($1C808) changes the pitch WITHOUT
+		// restarting the macro or sample, so the voice sustains (drones, glides).
+		tr.patPos++
+		ch := int(b2) & 3
+		note := int(b0&0x3F) + int(tr.transpose)
 		if b0 >= 0xBF {
+			v := &p.v[ch]
 			v.note = note
-			v.basePer = p.noteToPeriod(note) + int(int8(b3))
+			v.basePer = p.noteToPeriod(note) // byte3 -> $23 field, not finetune
 			if !v.portOn {
 				v.period = v.basePer
 			}
@@ -273,40 +323,41 @@ func (p *player) readPattern(ch int) {
 	}
 }
 
-// patCommand handles a pattern $F0-$FF command. Returns true when the caller should
-// stop reading this tick (a row was consumed), false to keep reading.
-func (p *player) patCommand(ch int, b0, b1, b2, b3 byte) bool {
-	v := &p.v[ch]
+// trackCmd handles a pattern $F0-$FF command on track t. Returns true when the caller
+// should stop reading this track this row, false to keep reading.
+func (p *player) trackCmd(t int, b0, b1, b2, b3 byte) bool {
+	tr := &p.tr[t]
 	switch b0 {
-	case 0xF0: // end of pattern -> advance the song trackstep
+	case 0xF0: // end of pattern -> advance the global song trackstep (reloads all tracks)
 		p.advanceTrack()
 		p.processTrack()
+		p.trackAdvanced = true
 		return true
 	case 0xF1: // pattern loop: count b1, target (b2<<8|b3)
-		if v.loopCnt < 0 {
-			v.loopCnt = int(b1)
+		if tr.loopCnt < 0 {
+			tr.loopCnt = int(b1)
 		}
-		if v.loopCnt == 0 {
-			v.loopCnt = -1
-			v.patPos++
+		if tr.loopCnt == 0 {
+			tr.loopCnt = -1
+			tr.patPos++
 			return false
 		}
 		if b1 != 0xFF {
-			v.loopCnt--
+			tr.loopCnt--
 		}
-		v.patPos = int(b2)<<8 | int(b3)
+		tr.patPos = int(b2)<<8 | int(b3)
 		return false
 	case 0xF2: // jump to pattern b1 at position (b2<<8|b3)
 		pn := int(b1) & 0x7F
-		v.patData = be32(p.mdat, patTable+pn*4)
-		v.patPos = int(b2)<<8 | int(b3)
-		v.active = v.patData != 0
+		tr.patData = be32(p.mdat, patTable+pn*4)
+		tr.patPos = int(b2)<<8 | int(b3)
+		tr.active = tr.patData != 0
 		return false
-	case 0xF6, 0xF7: // per-channel effect notes — skip (handled at macro level)
-		v.patPos++
+	case 0xF6, 0xF7: // per-channel effect notes — skip (approximated at macro level)
+		tr.patPos++
 		return false
 	default: // F3,F4,F5,F8-FF: tempo/key/etc. — advance and stop the row
-		v.patPos++
+		tr.patPos++
 		return true
 	}
 }
@@ -315,7 +366,11 @@ func (p *player) patCommand(ch int, b0, b1, b2, b3 byte) bool {
 func (p *player) trigger(ch, note, macroNum, detune int, porta bool) {
 	v := &p.v[ch]
 	v.note = note
-	v.detune = detune
+	// The pattern's byte3 goes to the driver's $23 field (not the period finetune
+	// $22, which a macro sets), so it must NOT detune the note. Adding it shifted
+	// every note's pitch by up to ±127.
+	v.detune = 0
+	_ = detune
 	v.macro = be32(p.mdat, macTable+(macroNum&0x7F)*4)
 	v.macPos = 0
 	v.macWait = 0

@@ -1,0 +1,8 @@
+[
+  { "file": "prcsnd.mp3", "course": "Practice",     "snd": "PrcSnd" },
+  { "file": "begsnd.mp3", "course": "Beginner",     "snd": "BegSnd" },
+  { "file": "intsnd.mp3", "course": "Intermediate", "snd": "IntSnd" },
+  { "file": "aersnd.mp3", "course": "Aerial",       "snd": "AerSnd" },
+  { "file": "silsnd.mp3", "course": "Silly",        "snd": "SilSnd" },
+  { "file": "ultsnd.mp3", "course": "Ultimate",     "snd": "UltSnd" }
+]

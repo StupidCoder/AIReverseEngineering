@@ -35,6 +35,12 @@
       <label><input type="checkbox" id="objects" /> Objects</label>
       <span class="hint">tilemap: drag to pan · slopes: drag to rotate · scroll to zoom</span>
     </div>
+    <div class="controls music-controls">
+      <label>Music
+        <select id="song"></select>
+      </label>
+      <audio id="player" controls preload="none"></audio>
+    </div>
     <p class="legend">
       Each course is the actual playfield tilemap, decoded from its <code>.mlb</code> map file and
       assembled tile-by-tile exactly as the game's blitter does — a 36-tile-wide column of 8×8,
@@ -50,10 +56,40 @@
       (cyan), the dynamic/animated regions (yellow), and the creature patrol routes (black
       marbles magenta, slinkies green) — the same overlays as the write-up's slope renders. See the
       <a href="https://github.com/StupidCoder/AIReverseEngineering/blob/main/Marble%20Madness%20(Amiga)/Marble_Madness.md">write-up</a>
-      for how the tile format was decoded.
+      for how the tile format was decoded. The <b>Music</b> selector plays each course's in-game
+      theme, rendered to audio by a from-scratch Go reimplementation of the game's sampled-sound
+      music player (the per-course <code>*Snd</code> arrangement + the shared waveform, decoded in
+      Part VI of the write-up).
     </p>
   </div>
 
   <script type="module" src="src/marble/main.js"></script>
+  <script>
+    // Music player: each course's in-game theme ($Snd op0 arrangement), rendered to
+    // MP3 by the Go music reimplementation (extract/cmd/musicrender). Self-contained,
+    // independent of the tilemap viewer module.
+    (function () {
+      const MUSIC = 'public/marble/music/';
+      const sel = document.getElementById('song');
+      const player = document.getElementById('player');
+      fetch(MUSIC + 'manifest.json')
+        .then(r => r.json())
+        .then(list => {
+          sel.innerHTML = '';
+          list.forEach(m => {
+            const o = document.createElement('option');
+            o.value = m.file;
+            o.textContent = m.course;
+            sel.appendChild(o);
+          });
+          sel.addEventListener('change', () => {
+            player.src = MUSIC + sel.value;
+            player.play().catch(() => {});
+          });
+          if (sel.value) player.src = MUSIC + sel.value; // ready, no autoplay on load
+        })
+        .catch(() => { sel.innerHTML = '<option>music manifest not found</option>'; });
+    })();
+  </script>
 </body>
 </html>

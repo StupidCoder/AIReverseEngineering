@@ -1654,9 +1654,32 @@ checked against a dynamic run in the 68000 core (`extract/cmd/sndcapture`, over
   **pitch and volume envelopes** on the sustained notes.
 
 So it is *not* a flat per-frame player, but it is also not purely reply-driven:
-faithful reproduction needs both clocks. This is still far simpler than a TFMX
-macro VM — there is no software mixing (the OS streams the samples) and no opcode
-interpreter, just event lists plus two envelope curves.
+faithful reproduction needs both clocks (the timer ticks at 60 Hz —
+`tv_micro = $411A` = 16666 µs).
+
+**The command/message protocol.** The player runs as its own Exec **task** and the
+rest of the engine talks to it only by message — a clean producer/consumer split:
+
+```
+game engine            player task ($20A3C, one GetMsg loop)
+-----------            -----------------------------------------
+snd_play(eventList,    msg == timer request  -> $21740  (envelope tick, 60 Hz)
+   volEnv, periodEnv,  msg == a channel reply -> $2057A  (advance that voice)
+   repeat)             else (a command msg)   -> $2098A  dispatch on msg+$1A:
+  builds a message M,                            1 -> $2076E  play/trigger a voice
+  PutMsg → task port                             2,3,5,6 -> stop / alloc / control
+```
+
+The play command fills the message straight from its arguments — `M+$20 ←`
+eventList, `M+$24 ←` volume-envelope, `M+$28 ←` period-envelope, `M+$1E ←` repeat,
+`M+$1A ← 1` (the command tag) — and those are *exactly* the fields `$2076E` reads
+back out (§ below), which pins the wire format. A whole tune is started by a
+"play song" routine (`$20CAC`) that pulls pooled messages and fires one `snd_play`
+per voice (after a `cmd 5/6` allocate handshake). So **rendering a course reduces
+to replaying that routine's message sequence** — the event-list + two envelope
+pointers per voice — which is precisely what the capture oracle records and the Go
+port reproduces. This is more than a flat event list but still far simpler than a
+TFMX macro VM: the OS does the mixing, and there is no software synth.
 
 **The player task.** Song setup (`song_init`, ~`$20BB0`–`$20CAA`) zeroes the state
 tables via a `memset` helper `$218C8` — notably `$38` = 4·14 bytes at `$21490` (the
@@ -1730,17 +1753,27 @@ a short update `IOAudio` (`io_Command = $C`) and submits it via `$24A3C` — so 
 slides and envelopes are audible between note triggers. `$20FFC[ch]` counts the
 note's remaining ticks and releases the voice (`$2015E`) at zero.
 
-**What this means for the Go port.** The reimplementation parses the `*Snd` module
-into the `S` descriptor array + event lists + instruments + envelope descriptors,
-then runs the two clocks: the audio-reply clock fires `$2057A`-equivalent note
-advances (the next note triggers when the current sample has played `Cycles` times
-at its period), and the timer clock fires `$21740`-equivalent envelope updates. Each
-voice is mixed Paula-style (8-bit sample resampled by `ioa_Period`, scaled by
-`ioa_Volume`) and summed; one full pass per course is rendered with loop detection.
-Still to pin down before coding: the `S`-descriptor array layout inside `*Snd`
-object 0 (so the score can be parsed straight from the file), the voice-allocation
-helpers `$020458`/`$02012C`, the envelope-binding helper `$02070A`, and the
-`timer.device` request period (the envelope tick rate / tempo).
+**What this means for the Go port.** Given a course's per-voice `(eventList,
+volEnv, periodEnv, repeat)` set, the reimplementation runs the two clocks: the
+audio-reply clock fires `$2057A`-equivalent note advances (the next note triggers
+once the current sample has played `Cycles` times at its period), and the 60 Hz
+timer clock fires `$21740`-equivalent envelope updates. Each voice is mixed
+Paula-style (8-bit sample resampled by `ioa_Period`, scaled by `ioa_Volume`) and
+summed; one full pass per course is rendered with loop detection.
+
+The chosen way to lock this down is the **capture oracle**: drive the real `$20CAC`
+"play song" routine for each course on `tools/m68k` with `timer.device` and
+`audio.device` emulated as a discrete-event reply queue feeding the task's one
+`GetMsg` loop, and record the exact `CMD_WRITE` + envelope-update stream it emits.
+That stream is the ground truth the Go port must reproduce, and it sidesteps having
+to statically decode every byte of the `*Snd` arrangement up front. Still to pin
+down for that: how `$20CAC` reads a course's `*Snd` to obtain each voice's
+`(eventList, volEnv, periodEnv)` pointers (the in-file song directory; note `*Snd`
+hunk h1 is a pointer-less control table, while the event/instrument waveforms with
+their sample relocations live in the h7-style hunks), and the voice/envelope helper
+routines `$020458`/`$02012C`/`$02070A`. (Reliable tracing of the course→`$20CAC`
+call path needs recursive-descent `codetrace68k`, since the module interleaves code
+and data and a flat linear sweep misaligns across the data islands.)
 
 ---
 

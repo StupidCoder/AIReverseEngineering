@@ -294,6 +294,9 @@ func main() {
 					m.save(cpu, &m.cur.regs)
 				}
 				m.cur = nil
+				if os.Getenv("FASTTEMPO") != "" {
+					m.w32(datBase+0x1FA68, 0x300000) // force timers to expire fast (diagnostic)
+				}
 				m.game.regs.PC = datBase + 0x1F286
 				m.game.regs.A[7] = gameStack - 4
 				m.w32(gameStack-4, sentinel)

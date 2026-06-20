@@ -74,6 +74,7 @@ type machine struct {
 	cmds    []audioCmd
 	course  string // *snd filename to force when the game's course global is unset
 	curChan int    // channel being pumped (for note attribution)
+	msgq    []uint32 // player-task message queue (PutMsg -> GetMsg/WaitPort)
 }
 
 func (m *machine) Read(a uint32) byte {
@@ -132,6 +133,7 @@ func main() {
 	steps := flag.Int("steps", 80_000_000, "instruction budget")
 	trace := flag.Bool("trace", false, "log every trapped call")
 	course := flag.String("course", "prcsnd", "*snd file to force-load")
+	song := flag.Uint("song", 0x400010, "absolute address of the loaded *snd song struct (h1) to start")
 	flag.Parse()
 	if flag.NArg() < 2 {
 		fmt.Fprintln(os.Stderr, "usage: sndcapture disk.adf decrypted.dat.hunk [-entry 0xADDR]")
@@ -166,37 +168,18 @@ func main() {
 	cpu.A[7] = stackTop
 	traps := m.buildTraps(cpu)
 
-	// Call sound_init, then the load+play to set up the channel cursors.
+	// Game side: sound_init + load+play ($21DC0). $21DC0 PutMsgs the play commands to the
+	// player task's port (our message queue) and LoadSegs the *Snd.
 	m.callRoutine(cpu, traps, 0x1FF34, *steps)
 	m.callRoutine(cpu, traps, uint32(*entry), *steps)
-	// NOTE (empirical): after $21DC0 the 8 voice structs at $60000 (stride $38) are all
-	// ZERO — $21DC0 only AllocMems them and LoadSegs the *Snd; it does NOT parse/fill.
-	// The *Snd->voice-struct parse + the song-start ($2076E, which links per-voice fields
-	// $14/$18/$1B/$1C/$20/$24/$28 into the channel cursors $21490) are done by the PLAYER
-	// TASK ($20A52 reply loop) on a "play song" message. So the pump below emits nothing
-	// until that task + its message/reply protocol are driven (the remaining work).
-	for v := uint32(0); v < 8; v++ {
-		b := 0x60000 + v*0x38
-		m.logf("voice%d @$%X = %08X %08X (empty until the player task fills it)", v, b, m.r32(b), m.r32(b+0x20))
-	}
-	m.logf("--- pumping the sequencer $2057A per channel (cursors not yet linked) ---")
-	// Pump each channel's sequencer: $2057A($8=ch, $C=request, $10=0) emits one note
-	// and advances to the next event; loop until the channel marks itself done
-	// ($20FD4[ch]) or a safety cap. The CMD_WRITE is captured in audioIO.
-	for ch := uint32(0); ch < 8; ch++ {
-		m.curChan = int(ch)
-		req := uint32(0x21250 + ch*0x44) // this channel's IOAudio in the array
-		for n := 0; n < 4000; n++ {
-			if m.ram[datBase+0x20FD4+ch] != 0 { // channel done
-				break
-			}
-			before := len(m.cmds)
-			m.call2057A(cpu, traps, ch, datBase+req, *steps)
-			if len(m.cmds) == before { // no note emitted this call -> stop
-				break
-			}
-		}
-	}
+	m.logf("--- %d messages queued; running the player task $20A52 ---", len(m.msgq))
+	// Player task: its reply loop drains the queue (channel registrations, the play
+	// command -> parse + start the song) and the audio replies (each finished note ->
+	// the next, enqueued in audioIO). Capture the CMD_WRITE stream.
+	m.callRoutine(cpu, traps, 0x20A52, *steps)
+	_ = song
+	_ = m.call2057A
+	_ = m.callRoutineArg
 
 	fmt.Println("=== call log ===")
 	for _, l := range m.log {
@@ -232,6 +215,30 @@ func (m *machine) call2057A(cpu *m68k.CPU, traps map[uint32]func(), ch, req uint
 		}
 		if cpu.Halted {
 			m.logf("HALTED in $2057A at $%06X: %s", cpu.PC, cpu.HaltReason)
+			return
+		}
+		cpu.Step()
+	}
+}
+
+// callRoutineArg runs a subroutine at datBase+off with one stack argument.
+func (m *machine) callRoutineArg(cpu *m68k.CPU, traps map[uint32]func(), off, arg uint32, steps int) {
+	sp := uint32(stackTop) - 4
+	m.w32(sp, arg)
+	sp -= 4
+	m.w32(sp, sentinel)
+	cpu.A[7] = sp
+	cpu.PC = datBase + off
+	for i := 0; i < steps; i++ {
+		if cpu.PC == sentinel {
+			return
+		}
+		if t, ok := traps[cpu.PC]; ok {
+			t()
+			continue
+		}
+		if cpu.Halted {
+			m.logf("HALT in $%X at $%06X: %s", off, cpu.PC, cpu.HaltReason)
 			return
 		}
 		cpu.Step()
@@ -281,10 +288,18 @@ func (m *machine) buildTraps(cpu *m68k.CPU) map[uint32]func() {
 	ex(336, func() { m.ret(cpu, 0) })                          // FreeSignal
 	ex(354, func() { m.ret(cpu, 0) })                          // AddPort
 	ex(360, func() { m.ret(cpu, 0) })                          // RemPort
-	ex(366, func() { m.ret(cpu, 0) })                          // PutMsg
-	ex(372, func() { m.ret(cpu, 0) })                          // GetMsg
-	ex(378, func() { m.ret(cpu, 0) })                          // ReplyMsg
-	ex(384, func() { m.ret(cpu, 0) })                          // WaitPort
+	ex(366, func() { m.msgq = append(m.msgq, cpu.A[1]); m.ret(cpu, 0) }) // PutMsg -> enqueue
+	ex(372, func() { // GetMsg -> dequeue
+		if len(m.msgq) == 0 {
+			m.ret(cpu, 0)
+			return
+		}
+		msg := m.msgq[0]
+		m.msgq = m.msgq[1:]
+		m.ret(cpu, msg)
+	})
+	ex(378, func() { m.ret(cpu, 0) }) // ReplyMsg
+	ex(384, func() { m.ret(cpu, cpu.A[0]) }) // WaitPort -> return the port (a message is queued)
 	ex(444, func() { // OpenDevice(d0=unit, a0=name, a1=ioreq, d1=flags)
 		name := m.cstr(cpu.A[0])
 		req := cpu.A[1]
@@ -330,6 +345,11 @@ func (m *machine) audioIO(cpu *m68k.CPU, req uint32) {
 			vol:    m.r16(req + ioaVolume),
 			cyc:    m.r16(req + ioaCycles),
 		})
+		// audio.device replies the finished request to the task's port -> next note.
+		// Cap to keep the capture finite.
+		if len(m.cmds) < 6000 {
+			m.msgq = append(m.msgq, req)
+		}
 	default:
 		m.logf("audio cmd $%X on req $%X (unit $%X)", cmd, req, m.r16(req+0x18))
 	}

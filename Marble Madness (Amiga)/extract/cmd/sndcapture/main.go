@@ -70,9 +70,10 @@ type machine struct {
 	nextH  uint32
 	trace  bool
 	log    []string
-	frame  int
-	cmds   []audioCmd
-	course string // *snd filename to force when the game's course global is unset
+	frame   int
+	cmds    []audioCmd
+	course  string // *snd filename to force when the game's course global is unset
+	curChan int    // channel being pumped (for note attribution)
 }
 
 func (m *machine) Read(a uint32) byte {
@@ -165,10 +166,27 @@ func main() {
 	cpu.A[7] = stackTop
 	traps := m.buildTraps(cpu)
 
-	// Call sound_init, then the requested routine (default: load+play $21DC0).
+	// Call sound_init, then the load+play to set up the channel cursors.
 	m.callRoutine(cpu, traps, 0x1FF34, *steps)
-	m.logf("--- sound_init done; calling $%X ---", *entry)
 	m.callRoutine(cpu, traps, uint32(*entry), *steps)
+	m.logf("--- setup done; pumping the sequencer $2057A per channel ---")
+	// Pump each channel's sequencer: $2057A($8=ch, $C=request, $10=0) emits one note
+	// and advances to the next event; loop until the channel marks itself done
+	// ($20FD4[ch]) or a safety cap. The CMD_WRITE is captured in audioIO.
+	for ch := uint32(0); ch < 8; ch++ {
+		m.curChan = int(ch)
+		req := uint32(0x21250 + ch*0x44) // this channel's IOAudio in the array
+		for n := 0; n < 4000; n++ {
+			if m.ram[datBase+0x20FD4+ch] != 0 { // channel done
+				break
+			}
+			before := len(m.cmds)
+			m.call2057A(cpu, traps, ch, datBase+req, *steps)
+			if len(m.cmds) == before { // no note emitted this call -> stop
+				break
+			}
+		}
+	}
 
 	fmt.Println("=== call log ===")
 	for _, l := range m.log {
@@ -178,6 +196,35 @@ func main() {
 	for _, c := range m.cmds {
 		fmt.Printf("f%-4d cmd=$%X ch%d data=$%X len=%d per=%d vol=%d cyc=%d\n",
 			c.frame, c.cmd, c.chan_, c.data, c.length, c.period, c.vol, c.cyc)
+	}
+}
+
+// call2057A invokes the sequencer for one channel: $2057A(ch, request, 0).
+func (m *machine) call2057A(cpu *m68k.CPU, traps map[uint32]func(), ch, req uint32, steps int) {
+	sp := uint32(stackTop)
+	sp -= 4
+	m.w32(sp, 0) // arg3: flag = 0
+	sp -= 4
+	m.w32(sp, req) // arg2: the channel's IOAudio request
+	sp -= 4
+	m.w32(sp, ch) // arg1: channel index
+	sp -= 4
+	m.w32(sp, sentinel) // return address
+	cpu.A[7] = sp
+	cpu.PC = datBase + 0x2057A
+	for i := 0; i < steps; i++ {
+		if cpu.PC == sentinel {
+			return
+		}
+		if t, ok := traps[cpu.PC]; ok {
+			t()
+			continue
+		}
+		if cpu.Halted {
+			m.logf("HALTED in $2057A at $%06X: %s", cpu.PC, cpu.HaltReason)
+			return
+		}
+		cpu.Step()
 	}
 }
 
@@ -266,6 +313,7 @@ func (m *machine) audioIO(cpu *m68k.CPU, req uint32) {
 		m.cmds = append(m.cmds, audioCmd{
 			frame:  m.frame,
 			cmd:    cmd,
+			chan_:  m.curChan,
 			data:   m.r32(req + ioaData),
 			length: m.r32(req + ioaLength),
 			period: m.r16(req + ioaPeriod),

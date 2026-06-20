@@ -44,6 +44,13 @@ function select(i) {
   buttons[i].scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
 }
 
+// "Old school" toggle — currently the authentic single-buffer XOR line flicker
+// (more period effects, e.g. lo-res and a CRT filter, will hang off the same switch).
+const oldschool = document.getElementById('oldschool');
+if (oldschool) {
+  oldschool.addEventListener('change', () => viewer.setOldSchool(oldschool.checked));
+}
+
 // Open with the Cobra Mk III (the player's ship and the cover star) if present.
 const startIndex = Math.max(0, ships.findIndex((s) => s.type === 11));
 select(startIndex);

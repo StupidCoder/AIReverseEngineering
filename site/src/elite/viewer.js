@@ -13,6 +13,19 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 const WHITE = 0xffffff;
 const FACE_NONE = 15; // edge face nibble sentinel: no face this side → always drawn
 
+// "Old school" authentic flicker. The C64 draws ships by XOR-plotting their line
+// heap into a single, live bitmap (no double buffer): to move a ship it re-draws
+// the old lines to erase them, reprojects, then draws the new lines. That
+// erase→reproject→redraw runs in the game loop, out of sync with the 50 Hz beam,
+// so the beam keeps catching individual lines during the brief window they are
+// erased — the signature Elite shimmer. We reproduce it by giving every edge its
+// own erase-window phase and, each displayed frame, hiding the edges whose window
+// the "beam" is currently sampling. FLICKER_DUTY ≈ the fraction of a redraw cycle
+// a line spends erased; FLICKER_RATE drifts the sampling phase so the off-set
+// changes (and beats) every frame rather than sitting still.
+const FLICKER_DUTY = 0.17;
+const FLICKER_RATE = 0.37;
+
 // ShipMesh holds one ship's geometry and the per-frame visible-edge buffer.
 // Flat typed arrays keep the HSR loop tight; verts/normals stay in model space
 // (the ship never moves — the camera orbits). Elite's +Y is up, matching
@@ -29,6 +42,15 @@ class ShipMesh {
     }
 
     this.edges = ship.edges; // [v1, v2, faceA, faceB]
+    // A stable per-edge phase in [0,1) for the authentic flicker: each line gets
+    // its own slot in the erase/redraw cycle, scattered so the blinking reads as
+    // shimmer rather than a clean wipe.
+    this.edgePhase = new Float32Array(this.edges.length);
+    for (let i = 0; i < this.edges.length; i++) {
+      const e = this.edges[i];
+      const h = Math.sin((e[0] + 1) * 12.9898 + (e[1] + 1) * 78.233 + i * 0.613) * 43758.5453;
+      this.edgePhase[i] = h - Math.floor(h);
+    }
     this.faceN = new Float32Array(ship.faces.length * 3); // outward normal per face
     this.faceC = new Float32Array(ship.faces.length * 3); // a point on each face
     for (let i = 0; i < ship.faces.length; i++) {
@@ -58,8 +80,11 @@ class ShipMesh {
   // eye from the face's own position: dot(normal, camPos - faceCenter) > 0.
   // Testing from the face centre (not the origin) is what correctly culls faces
   // on the far side instead of leaving them showing "below the horizon".
-  updateForCamera(camPos) {
-    const { verts, faceN, faceC, faceVis, edges } = this;
+  // flickerPhase < 0 disables the effect; otherwise it is the current sampling
+  // phase, and an edge is dropped this frame when the "beam" falls inside its
+  // erase window — reproducing the C64's single-buffer XOR redraw flicker.
+  updateForCamera(camPos, flickerPhase = -1) {
+    const { verts, faceN, faceC, faceVis, edges, edgePhase } = this;
     for (let i = 0; i < faceVis.length; i++) {
       const dot = faceN[i * 3] * (camPos.x - faceC[i * 3])
         + faceN[i * 3 + 1] * (camPos.y - faceC[i * 3 + 1])
@@ -67,11 +92,18 @@ class ShipMesh {
       faceVis[i] = dot > 0 ? 1 : 0;
     }
     const pos = this.positions;
+    const flicker = flickerPhase >= 0;
     let n = 0;
-    for (const e of edges) {
+    for (let ei = 0; ei < edges.length; ei++) {
+      const e = edges[ei];
       const fa = e[2], fb = e[3];
       const vis = fa === FACE_NONE || fb === FACE_NONE || faceVis[fa] || faceVis[fb];
       if (!vis) continue;
+      if (flicker) {
+        let d = edgePhase[ei] - flickerPhase;
+        d -= Math.floor(d);
+        if (d < FLICKER_DUTY) continue; // this line is mid-erase right now → blink off
+      }
       const a = e[0] * 3, b = e[1] * 3;
       pos[n++] = verts[a]; pos[n++] = verts[a + 1]; pos[n++] = verts[a + 2];
       pos[n++] = verts[b]; pos[n++] = verts[b + 1]; pos[n++] = verts[b + 2];
@@ -123,7 +155,11 @@ export class ShipViewer {
     this.hud = hud;
     this.ships = [];
     this.current = null;
+    this.oldSchool = false; // "old school" CRT/flicker effects (start: line flicker)
+    this.flickerPhase = 0;
   }
+
+  setOldSchool(on) { this.oldSchool = on; }
 
   async init() {
     const res = await fetch('public/elite/ships.json');
@@ -157,7 +193,10 @@ export class ShipViewer {
 
     const tick = () => {
       this.controls.update();
-      if (this.current) this.current.updateForCamera(this.camera.position);
+      if (this.oldSchool) this.flickerPhase = (this.flickerPhase + FLICKER_RATE) % 1;
+      if (this.current) {
+        this.current.updateForCamera(this.camera.position, this.oldSchool ? this.flickerPhase : -1);
+      }
       this.renderer.render(this.scene, this.camera);
       requestAnimationFrame(tick);
     };

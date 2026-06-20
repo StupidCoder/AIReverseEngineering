@@ -252,6 +252,12 @@ func main() {
 	m.game.alive = true
 	m.schedule(cpu, traps)
 
+	// The init/allocate handshake leaves $211E4 set (the task then only ACKs timer
+	// ticks via $211E6 instead of re-arming the timer + running the $21740 envelope
+	// pass). The real game clears it to enter normal play; do the same here since we
+	// shortcut the device-level handshake.
+	m.w16(datBase+0x211E4, 0)
+
 	// Phase C: trigger.
 	d2 := m.r32(datBase + 0x21DD4)
 	m.logf("pre-trigger: $21DD4=$%X count=%d rec7.desc=$%X", d2, m.r16(d2), m.r32(d2+2+7*8+4))
@@ -555,6 +561,9 @@ func (m *machine) beginIO(cpu *m68k.CPU, req uint32, sync bool) {
 		secs := float64(m.r32(req+0x20)) + float64(m.r32(req+0x24))/1e6
 		port := m.r32(req + ioMsgRepl)
 		m.tl = append(m.tl, ev{t: m.clock + secs, port: port, msg: req, kind: "timer"})
+		if m.trace {
+			m.logf("timer ADDREQUEST cmd=%d secs=%g replyport=$%X (task port=$%X)", cmd, secs, port, m.r32(datBase+0x20FA8))
+		}
 		return
 	}
 	// audio.device

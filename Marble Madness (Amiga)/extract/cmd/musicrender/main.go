@@ -68,13 +68,40 @@ func (s *snd) bytesAt(a uint32, n int) []byte {
 	return s.img[o : o+n]
 }
 
+// envSeg is one [rate, target] segment of a volume envelope (16.16 fixed).
+type envSeg struct{ rate, target int32 }
+
 // voice is one playing note.
 type voice struct {
-	active   bool
-	sample   []int8  // the looped waveform slice
-	pos      float64 // fractional read position
-	step     float64 // samples advanced per output sample
-	vol      float64 // 0..1
+	active bool
+	sample []int8  // the looped waveform slice
+	pos    float64 // fractional read position
+	step   float64 // samples advanced per output sample
+	vol    float64 // base level 0..1
+	level  float64 // current envelope level 0..1 (updated per frame)
+
+	// volume envelope (the engine's $21954 segment ramp): value is 16.16, 0..$10000.
+	env    []envSeg
+	envVal int64
+	envIdx int
+}
+
+// envStep advances the envelope one sequencer frame and returns the level 0..1.
+func (v *voice) envStep() float64 {
+	if v.envIdx < len(v.env) {
+		s := v.env[v.envIdx]
+		if s.rate != 0 {
+			v.envVal += int64(s.rate)
+			if (s.rate > 0 && v.envVal >= int64(s.target)) || (s.rate < 0 && v.envVal <= int64(s.target)) {
+				v.envVal = int64(s.target)
+				v.envIdx++ // advance to the next segment (rate 0 = sustain/hold)
+			}
+		}
+	}
+	if v.envVal < 0 {
+		v.envVal = 0
+	}
+	return float64(v.envVal) / 65536.0
 }
 
 // chanState is the per-channel sequencer cursor.
@@ -140,7 +167,8 @@ func main() {
 	song := s.r32(desc)     // arrangement
 	sub := s.r32(desc + 4)  // instrument bank
 	sampBase := s.r32(sub + 4) // h4 waveform base
-	fmt.Printf("music id%d desc=$%X song=$%X sampleBase=$%X\n", pick, desc, song, sampBase)
+	volEnv = parseEnv(s, s.r32(sub+8)) // the per-note volume envelope ($1FE82 / $21954 segments)
+	fmt.Printf("music id%d desc=$%X song=$%X sampleBase=$%X volEnv=%d segs\n", pick, desc, song, sampBase, len(volEnv))
 
 	// set up channels
 	var chans []*chanState
@@ -163,17 +191,31 @@ func main() {
 	for i := 0; i < total; i++ {
 		if float64(i) >= nextFrame {
 			for _, c := range chans {
-				tickChannel(s, c, delta)
+				tickChannel(s, c, delta)   // advance the sequencer (may trigger a new note)
+				c.v.level = c.v.envStep()  // advance the volume envelope one frame
 			}
 			nextFrame += samplesPerFrame
 		}
 		var mix float64
 		for _, c := range chans {
 			if c.v.active {
-				mix += c.v.sampleAt() * c.v.vol
+				mix += c.v.sampleAt() * c.v.vol * c.v.level
 			}
 		}
 		buf[i] = mix
+	}
+	// normalise so stacked attacks never clip
+	peak := 0.0
+	for _, x := range buf {
+		if a := math.Abs(x); a > peak {
+			peak = a
+		}
+	}
+	if peak > 0 {
+		g := 0.92 / peak
+		for i := range buf {
+			buf[i] *= g
+		}
 	}
 	writeWAV(*out, buf, *rate)
 	fmt.Printf("wrote %s (%.1fs @ %dHz)\n", *out, *secs, *rate)
@@ -247,7 +289,7 @@ func triggerNote(s *snd, c *chanState, note int) {
 	}
 	per := period[semi]
 	srcRate := paulaClock / per // Paula playback rate (samples/sec) at this period
-	c.v = voice{active: true, sample: smp, step: srcRate / float64(outRate), vol: 0.22}
+	c.v = voice{active: true, sample: smp, step: srcRate / float64(outRate), vol: 0.45, env: volEnv}
 	if dump {
 		pitch := srcRate / float64(len(smp))
 		fmt.Fprintf(os.Stderr, "note ch=%p n=%3d oct=%d semi=%2d lenB=%d per=%.0f pitch=%.1fHz\n", c, note, octave, semi, len(smp), per, pitch)
@@ -257,6 +299,25 @@ func triggerNote(s *snd, c *chanState, note int) {
 var dump = os.Getenv("DUMP") != ""
 var synthBase = 1
 var outRate = 44100
+var volEnv []envSeg
+
+// parseEnv reads the engine's volume-envelope segments ([rate:long][target:long]
+// pairs, 16.16 fixed) starting at addr, stopping after a rate==0 (sustain) segment.
+func parseEnv(s *snd, addr uint32) []envSeg {
+	if addr == 0 {
+		return nil
+	}
+	var segs []envSeg
+	for i := 0; i < 16; i++ {
+		rate := int32(s.r32(addr + uint32(i*8)))
+		target := int32(s.r32(addr + uint32(i*8) + 4))
+		segs = append(segs, envSeg{rate, target})
+		if rate == 0 {
+			break
+		}
+	}
+	return segs
+}
 
 func (v *voice) sampleAt() float64 {
 	if len(v.sample) == 0 {

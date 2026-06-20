@@ -1,8 +1,16 @@
 [
-  { "file": "prcsnd.mp3", "course": "Practice",     "snd": "PrcSnd" },
-  { "file": "begsnd.mp3", "course": "Beginner",     "snd": "BegSnd" },
-  { "file": "intsnd.mp3", "course": "Intermediate", "snd": "IntSnd" },
-  { "file": "aersnd.mp3", "course": "Aerial",       "snd": "AerSnd" },
-  { "file": "silsnd.mp3", "course": "Silly",        "snd": "SilSnd" },
-  { "file": "ultsnd.mp3", "course": "Ultimate",     "snd": "UltSnd" }
+  { "file": "prcsnd.mp3",    "course": "Practice" },
+  { "file": "prcsnd_25.mp3", "course": "Practice (alt)" },
+  { "file": "begsnd.mp3",    "course": "Beginner" },
+  { "file": "begsnd_25.mp3", "course": "Beginner (alt)" },
+  { "file": "intsnd.mp3",    "course": "Intermediate" },
+  { "file": "intsnd_25.mp3", "course": "Intermediate (alt)" },
+  { "file": "aersnd.mp3",    "course": "Aerial" },
+  { "file": "aersnd_25.mp3", "course": "Aerial (alt)" },
+  { "file": "aersnd_31.mp3", "course": "Aerial (alt 2)" },
+  { "file": "silsnd.mp3",    "course": "Silly" },
+  { "file": "silsnd_25.mp3", "course": "Silly (alt)" },
+  { "file": "ultsnd.mp3",    "course": "Ultimate" },
+  { "file": "ultsnd_25.mp3", "course": "Ultimate (alt)" },
+  { "file": "ultsnd_32.mp3", "course": "Ultimate (alt 2)" }
 ]

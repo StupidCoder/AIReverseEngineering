@@ -1670,16 +1670,39 @@ snd_play(eventList,    msg == timer request  -> $21740  (envelope tick, 60 Hz)
   PutMsg → task port                             2,3,5,6 -> stop / alloc / control
 ```
 
-The play command fills the message straight from its arguments — `M+$20 ←`
-eventList, `M+$24 ←` volume-envelope, `M+$28 ←` period-envelope, `M+$1E ←` repeat,
-`M+$1A ← 1` (the command tag) — and those are *exactly* the fields `$2076E` reads
-back out (§ below), which pins the wire format. A whole tune is started by a
-"play song" routine (`$20CAC`) that pulls pooled messages and fires one `snd_play`
-per voice (after a `cmd 5/6` allocate handshake). So **rendering a course reduces
-to replaying that routine's message sequence** — the event-list + two envelope
-pointers per voice — which is precisely what the capture oracle records and the Go
-port reproduces. This is more than a flat event list but still far simpler than a
-TFMX macro VM: the OS does the mixing, and there is no software synth.
+The play path (`snd_play`, `$20D96`) first sends `cmd 6` to **allocate a voice**
+(carrying a priority and a base pitch) and waits for the reply, then fills the
+message — `M+$20 ←` eventList, `M+$24 ←` volume-envelope, `M+$28 ←` period-envelope,
+`M+$1E ←` repeat, `M+$1A ← 1` — and PutMsgs it. Those are *exactly* the fields the
+task's `$2076E` reads back, which pins the wire format. (The SfxTask itself is
+brought up once by `$20CAC`: it sends a `cmd 5` init, `ADCMD_ALLOCATE`s the four
+Paula channels, and starts the 60 Hz timer — the `"SfxTask"`/`"timer.device"`
+strings sit at `$211FF`.)
+
+**Triggering a sound — `play_sfx(soundID)` (`$21ADC`), and the `*Snd` directory.**
+The rest of the engine plays a sound by *number*. A loaded sound bank's directory
+pointer lives in the global `$21DD4` (and `$21DD0` is the sfx-enable flag); the six
+per-course banks are named at `$21DD8` (`prcsnd`…`ultsnd`, with a pointer table
+right after), `LoadSeg`'d, and their first data hunk becomes the directory.
+`play_sfx` reads a **count word** then indexes an **8-byte record** per soundID:
+
+```
+*Snd directory:  [count:word][ record ×count ]
+record (8 bytes): +$0 word  opcode (0..5: kinds of play / stop / one-shot)
+                  +$4 long  -> sound descriptor   (opcode-dependent)
+sound descriptor: +$0, +$4, +$8 -> eventList, volEnv, periodEnv  (the snd_play args)
+                  +$C word, +$E byte, +$10 word    base pitch / priority / repeat
+```
+
+It dispatches on the opcode and, for the play kinds, calls `snd_play($20D96)` with
+the descriptor's three pointers. **So a course's music is one (or a few) of these
+directory entries** — a soundID whose event lists are the long, looping score —
+and rendering it means triggering that entry and letting the dual clock run. The
+capture oracle therefore loads a course `*Snd`, points `$21DD4` at it, brings up the
+SfxTask, calls `play_sfx` for the music entry, and records the emitted `CMD_WRITE` +
+envelope stream; the Go port replays the same directory walk. This is more than a
+flat event list, but still far simpler than a TFMX macro VM: the OS does the mixing
+and there is no software synth.
 
 **The player task.** Song setup (`song_init`, ~`$20BB0`–`$20CAA`) zeroes the state
 tables via a `memset` helper `$218C8` — notably `$38` = 4·14 bytes at `$21490` (the
@@ -1761,19 +1784,19 @@ timer clock fires `$21740`-equivalent envelope updates. Each voice is mixed
 Paula-style (8-bit sample resampled by `ioa_Period`, scaled by `ioa_Volume`) and
 summed; one full pass per course is rendered with loop detection.
 
-The chosen way to lock this down is the **capture oracle**: drive the real `$20CAC`
-"play song" routine for each course on `tools/m68k` with `timer.device` and
+The chosen way to lock this down is the **capture oracle**: on `tools/m68k`, load a
+course `*Snd`, point `$21DD4` at its directory, bring up the SfxTask (`$20CAC`), and
+call `play_sfx` (`$21ADC`) for the music entry — with `timer.device` and
 `audio.device` emulated as a discrete-event reply queue feeding the task's one
-`GetMsg` loop, and record the exact `CMD_WRITE` + envelope-update stream it emits.
-That stream is the ground truth the Go port must reproduce, and it sidesteps having
-to statically decode every byte of the `*Snd` arrangement up front. Still to pin
-down for that: how `$20CAC` reads a course's `*Snd` to obtain each voice's
-`(eventList, volEnv, periodEnv)` pointers (the in-file song directory; note `*Snd`
-hunk h1 is a pointer-less control table, while the event/instrument waveforms with
-their sample relocations live in the h7-style hunks), and the voice/envelope helper
-routines `$020458`/`$02012C`/`$02070A`. (Reliable tracing of the course→`$20CAC`
-call path needs recursive-descent `codetrace68k`, since the module interleaves code
-and data and a flat linear sweep misaligns across the data islands.)
+`GetMsg` loop — recording the exact `CMD_WRITE` + envelope-update stream it emits.
+That stream is the ground truth the Go port must reproduce, and it runs the real
+directory walk so we don't have to statically decode every `*Snd` byte up front.
+Still to pin down for the Go port: which directory soundID is the looping course
+theme (enumerable by triggering each entry and watching which yields a long score),
+the exact opcode set of the 8-byte records, and the voice/envelope helper routines
+`$020458`/`$02012C`/`$02070A`. (All of the above was traced with recursive-descent
+`codetrace68k`; a flat linear sweep misaligns across the module's code/data islands —
+which is what produced the earlier mis-identifications.)
 
 ---
 

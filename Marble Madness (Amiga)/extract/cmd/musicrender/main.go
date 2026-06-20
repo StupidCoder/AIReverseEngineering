@@ -104,16 +104,20 @@ func (v *voice) envStep() float64 {
 	return float64(v.envVal) / 65536.0
 }
 
-// chanState is the per-channel sequencer cursor.
+// chanState is the per-channel sequencer cursor. The 6-byte "events" are the
+// song's order/sequence table (Soundtracker-style): each entry is
+// [repeat:word][pattern:long]; the pattern (a note byte-stream) is played
+// `repeat` times before advancing, and a repeat of 0 terminates -> loop to 0.
 type chanState struct {
-	events  uint32 // ptr to 6-byte events
-	evIdx   int    // current event index
-	sub     int    // byte offset within the current note-stream
-	instr   int    // current "instrument" (duration index)
-	timer   int64  // counts down by delta each frame
+	events     uint32 // ptr to the order table (6-byte entries)
+	evIdx      int    // current order index
+	repeat     int    // remaining plays of the current pattern ($1FA0A)
+	sub        int    // byte offset within the current pattern
+	instr      int    // current "instrument" (duration class)
+	timer      int64  // counts down by delta each frame
 	sampleBase uint32
-	v       voice
-	live    bool
+	v          voice
+	live       bool
 }
 
 func main() {
@@ -177,7 +181,11 @@ func main() {
 		if evs == 0 {
 			continue
 		}
-		chans = append(chans, &chanState{events: evs, sampleBase: sampBase, live: true})
+		rep := int(int16(s.r16(evs))) // order entry 0's repeat count
+		if rep == 0 {
+			rep = 1
+		}
+		chans = append(chans, &chanState{events: evs, sampleBase: sampBase, repeat: rep, live: true})
 	}
 	fmt.Printf("%d active channels\n", len(chans))
 
@@ -239,17 +247,23 @@ func tickChannel(s *snd, c *chanState, delta int64) {
 		b := s.img[ns-base+uint32(c.sub)]
 		c.sub++
 		if b&0x80 != 0 {
-			if b&0x0F == 0 { // $80: advance to next event
-				c.evIdx++
+			if b&0x0F == 0 { // $80: end of this pattern instance
 				c.sub = 0
-				// loop the song if the next event is empty/terminator
-				if s.r32(c.events+uint32(c.evIdx)*6+2) == 0 {
-					c.evIdx = 0
-					c.sub = 0
+				c.repeat--
+				if c.repeat > 0 {
+					continue // replay the same pattern
 				}
+				// advance to the next order entry; repeat 0 = terminator -> loop
+				c.evIdx++
+				rep := int(int16(s.r16(c.events + uint32(c.evIdx)*6)))
+				if rep == 0 {
+					c.evIdx = 0
+					rep = int(int16(s.r16(c.events)))
+				}
+				c.repeat = rep
 				continue
 			}
-			c.instr = int(b & 0x0F) // set instrument (duration index)
+			c.instr = int(b & 0x0F) // set "instrument" (note-length class)
 			continue
 		}
 		// bit7 clear -> note or rest

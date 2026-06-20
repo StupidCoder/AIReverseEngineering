@@ -1562,11 +1562,12 @@ each voice, hands the OS a sample pointer, a period (pitch) and a volume, and le
 is much simpler than a TFMX-class engine: there is no macro virtual machine, no
 software mixing — just *"play this sample at this pitch and volume."*
 
-This part documents the music **container** and the **playback path**, both
-recovered by static analysis of the decrypted game body. The **sequencer** — how
-the song bytes are interpreted into those per-frame audio commands — is the active
-reversing target (§3); the plan is to recover it against a ground-truth capture of
-the real commands the engine issues, and then reimplement it in Go.
+This part documents the music **container** (§1), the **playback path** (§2) and
+the **sequencer** (§3) — the event-list interpreter and its two envelope clocks —
+all recovered by static analysis of the decrypted game body and cross-checked in a
+68000 core. The remaining unknowns (the in-file score layout and a few helper
+routines, called out at the end of §3) are what stands between this map and the Go
+reimplementation that renders each course to audio.
 
 > Addresses below are offsets into the **flat, base-0 relocated image** of the
 > decrypted game (`hunkload -o` of `extract/c_MarbleMadness.dat.decrypted.hunk`).
@@ -1640,51 +1641,106 @@ ground truth a reimplementation must reproduce.
 
 ## 3. The sequencer
 
-The score interpreter was recovered by running the real sound code in a 68000
-core (`extract/cmd/sndcapture`, over the shared `tools/m68k` machine) with the OS
-and `audio.device` stubbed — the same dynamic technique used to drive the loader
-in Part III. The key finding: **the music is reply-driven, not frame-driven.**
-There is no per-frame tick. A small player loop (`$20A52`) opens the device,
-allocates the four channels, and then blocks on the reply port, looping forever
-(`$20ABA`). Each channel plays a sample; when `audio.device` finishes it and
-replies, the handler works out *which* channel's request came back (by its address
-in the channel array `$21250…$2142C`, stride `$44`) and calls the sequencer to
-write that channel's **next** note.
+The interpreter was recovered by static disassembly of the decrypted body, cross-
+checked against a dynamic run in the 68000 core (`extract/cmd/sndcapture`, over
+`tools/m68k`, with the OS and `audio.device` stubbed). The engine is a general
+**sampled-sound driver** — music is just a set of voices it triggers — and it is
+**dual-clocked**:
 
-**The sequencer (`$2057A`).** Each channel has a 14-byte **cursor** at
-`$21490 + ch·$E` that walks a per-channel **linked list of note events**:
+- an **audio-reply clock** advances each voice's event list (note triggers): when
+  `audio.device` finishes a voice's sample it replies the request, and the player
+  task calls the sequencer to write that voice's *next* note;
+- a **timer clock** (`timer.device`, opened alongside the song) ticks the per-voice
+  **pitch and volume envelopes** on the sustained notes.
+
+So it is *not* a flat per-frame player, but it is also not purely reply-driven:
+faithful reproduction needs both clocks. This is still far simpler than a TFMX
+macro VM — there is no software mixing (the OS streams the samples) and no opcode
+interpreter, just event lists plus two envelope curves.
+
+**The player task.** Song setup (`song_init`, ~`$20BB0`–`$20CAA`) zeroes the state
+tables via a `memset` helper `$218C8` — notably `$38` = 4·14 bytes at `$21490` (the
+four voice cursors), `$8` at `$21004`, `$4` at `$21010` — primes per-voice defaults
+(`$20FEC[ch]=1`, `$2100C[ch]=1`, `$20FD8[ch]=$FF`) and then **spawns a player task**
+with entry `$20A3C` through a `CreateProc`/`AddTask` wrapper (`$248D4`). That task
+owns the reply port and the two-thread handshake; the game side talks to it by
+`PutMsg`. (An earlier note placing the loop at `$20A52` was mistaken — `$20A52` is
+inside an unrelated varargs/`printf` helper that is duplicated at several addresses.)
+
+**Triggering a voice — `$2076E`.** A "sound request" struct `S` (the score's voice
+descriptor) is handed to `$2076E`, which allocates a free voice (`$020458`), maps
+it to a channel `ch` (`$02012C`), and latches `S`'s fields into per-channel state:
 
 ```
-cursor / event (14 bytes):
-  +$0  long   -> next event (the list link)
-  +$4  word    duration counter
-  +$6  long    condition / hold flag
-  +$A  long   -> instrument descriptor
-
-instrument descriptor:
-  +$0  word    sample length (in words)
-  +$4  word    -> volume parameter
-  +$6  word    -> period (pitch) parameter
-  +$8  long   -> 8-bit PCM sample (in a *Snd chip-RAM hunk)
+sound request S:
+  +$18 word    base pitch / transpose      -> $20FF4[ch]
+  +$1B byte    priority                     -> $21014[ch]
+  +$1C word    Paula-voice bitmask          -> $21004[ch]   (which of voices 0..3)
+  +$1E word    repeat / note-length count   -> $20FFC[ch]
+  +$20 long  -> initial 14-byte event       (copied into the cursor)
+  +$24 long  -> volume-envelope descriptor   (bound into $21138[v])
+  +$28 long  -> period-envelope descriptor   (bound into $21148[v])
 ```
 
-On each call it counts the duration down; when it expires it copies the next
-14-byte event over the cursor (following the `+$0` link) and emits a note. Emitting
-a note fills the channel's `IOAudio` straight from the instrument: `ioa_Data` ←
-sample, `ioa_Length` ← length·2, `ioa_Period` ← a per-channel pitch
-(`$21708`), `ioa_Volume` ← a per-channel volume (`$21850`), `ioa_Cycles` ←
-duration + 1, `io_Command` ← `CMD_WRITE` (3) — and submits it. The device plays
-the sample `Cycles` times, then replies, and the cycle repeats.
+For every Paula voice `v` set in the mask it binds the volume/period envelope
+descriptors (`$02070A` into `$21138[v]`/`$21148[v]`), defaults `$20FBC[v]=$100`,
+clears the voice's done-flag `$20FD4[v]`, **copies the 14-byte initial event from
+`S+$20` into that voice's cursor** `$21490 + v·$E`, and kicks `$2057A` to emit the
+first note. The `*Snd` score (objects 0/1) is therefore an array of these `S`
+descriptors, each naming an event list, two envelopes, a base pitch, a voice mask
+and a repeat count — all by relocated pointer into the module's data hunks.
 
-So a Marble song is, per voice, simply a **list of (instrument, duration)** events,
-where the instrument names a one-shot PCM sample and a base pitch/volume — about as
-simple as a sampled-sound sequencer gets, and a world away from a TFMX macro engine.
-What remains to fully pin down (in progress) is the `$21708`/`$21850` pitch and
-volume helpers (per-channel state at `$20FCC`/`$20FC4` plus the instrument's `+$6`/
-`+$4` — most likely a pitch slide and a volume envelope), and the exact `*Snd` hunk
-that holds each voice's event list. The reimplementation then walks the linked
-lists in Go and mixes `sample @ period × volume` as Paula would, rendering one full
-pass per course with loop detection.
+**The sequencer (`$2057A(ch, ioreq, latch)`).** Each voice has a 14-byte **cursor**
+at `$21490 + ch·$E` walking a **linked list of note events**, and an instrument
+descriptor per event:
+
+```
+cursor / event (14 bytes):            instrument descriptor:
+  +$0  long  -> next event (link)       +$0  word    sample length (in words; ×2 = bytes)
+  +$4  word     duration counter        +$4  word    base period (pitch)   -> $20FAC[ch]
+  +$6  long     hold / rest flag        +$6  word    volume-envelope base  -> $20FB4[ch]
+  +$A  long  -> instrument descriptor   +$8  long -> 8-bit PCM sample (a *Snd chip-RAM hunk)
+```
+
+Per call it decrements the duration counter (`+$4`, signed). While the event is
+still active (`counter ≠ −1`): if the hold/rest flag `+$6` is non-zero it just
+burns ticks, otherwise it **emits**. When the counter reaches `−1` the event has
+expired: if the `+$0` link is null it sets the voice's done-flag and stops;
+otherwise it copies the next 14 bytes over the cursor and continues. Emitting fills
+the voice's `IOAudio` straight from the instrument — `ioa_Data ← i+$8`,
+`ioa_Length ← (i+$0)·2`, `ioa_Period ← $21708(ch)`, `ioa_Volume ← $21850(ch)`,
+`ioa_Cycles ←` the duration (a counter of `−2` means Cycles 0 = loop forever),
+`io_Command ← CMD_WRITE (3)` — and submits it via `$24A3C`. When `latch` (arg3) is
+set it also copies the instrument's `+$6`/`+$4` into the envelope bases
+`$20FB4[ch]`/`$20FAC[ch]` and sets `io_Flags=$10`.
+
+**Pitch envelope — `$21708(ch)`.** Base period `$20FAC[ch]`, scaled by a 16.16
+ratio held at `+$E` of the bound descriptor `*$21148[ch]`: ratio `$10000` (= 1.0)
+leaves the period unchanged, otherwise `period = ((ratio>>8) · base) >> 8` — a
+multiplicative pitch slide (portamento / glissando).
+
+**Volume envelope — `$21850(ch)`.** Similar two-stage multiply: an 8.8 ratio at
+`+$E` of `*$21138[ch]` combined with `$20FB4[ch]` and `$20FBC[ch]` through
+`MULU … >>8` chains, yielding the final 0..64 `ioa_Volume`.
+
+**The envelope clock — `$21740`** (per `timer.device` tick). It loops the four
+voices; for each active one it walks the `$21250` voice array (stride `$44`),
+recomputes `$21708`/`$21850`, and **only when the period or volume changed** builds
+a short update `IOAudio` (`io_Command = $C`) and submits it via `$24A3C` — so the
+slides and envelopes are audible between note triggers. `$20FFC[ch]` counts the
+note's remaining ticks and releases the voice (`$2015E`) at zero.
+
+**What this means for the Go port.** The reimplementation parses the `*Snd` module
+into the `S` descriptor array + event lists + instruments + envelope descriptors,
+then runs the two clocks: the audio-reply clock fires `$2057A`-equivalent note
+advances (the next note triggers when the current sample has played `Cycles` times
+at its period), and the timer clock fires `$21740`-equivalent envelope updates. Each
+voice is mixed Paula-style (8-bit sample resampled by `ioa_Period`, scaled by
+`ioa_Volume`) and summed; one full pass per course is rendered with loop detection.
+Still to pin down before coding: the `S`-descriptor array layout inside `*Snd`
+object 0 (so the score can be parsed straight from the file), the voice-allocation
+helpers `$020458`/`$02012C`, the envelope-binding helper `$02070A`, and the
+`timer.device` request period (the envelope tick rate / tempo).
 
 ---
 

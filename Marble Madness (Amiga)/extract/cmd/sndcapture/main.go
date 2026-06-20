@@ -169,7 +169,17 @@ func main() {
 	// Call sound_init, then the load+play to set up the channel cursors.
 	m.callRoutine(cpu, traps, 0x1FF34, *steps)
 	m.callRoutine(cpu, traps, uint32(*entry), *steps)
-	m.logf("--- setup done; pumping the sequencer $2057A per channel ---")
+	// NOTE (empirical): after $21DC0 the 8 voice structs at $60000 (stride $38) are all
+	// ZERO — $21DC0 only AllocMems them and LoadSegs the *Snd; it does NOT parse/fill.
+	// The *Snd->voice-struct parse + the song-start ($2076E, which links per-voice fields
+	// $14/$18/$1B/$1C/$20/$24/$28 into the channel cursors $21490) are done by the PLAYER
+	// TASK ($20A52 reply loop) on a "play song" message. So the pump below emits nothing
+	// until that task + its message/reply protocol are driven (the remaining work).
+	for v := uint32(0); v < 8; v++ {
+		b := 0x60000 + v*0x38
+		m.logf("voice%d @$%X = %08X %08X (empty until the player task fills it)", v, b, m.r32(b), m.r32(b+0x20))
+	}
+	m.logf("--- pumping the sequencer $2057A per channel (cursors not yet linked) ---")
 	// Pump each channel's sequencer: $2057A($8=ch, $C=request, $10=0) emits one note
 	// and advances to the next event; loop until the channel marks itself done
 	// ($20FD4[ch]) or a safety cap. The CMD_WRITE is captured in audioIO.
@@ -262,7 +272,7 @@ func (m *machine) buildTraps(cpu *m68k.CPU) map[uint32]func() {
 
 	// --- exec.library ---
 	ex(294, func() { m.ret(cpu, 0x30000) })                    // FindTask
-	ex(198, func() { a := m.alloc(cpu.D[0]); m.logf("AllocMem(%d,$%X)=$%X", cpu.D[0], cpu.D[1], a); m.ret(cpu, a) })
+	ex(198, func() { a := m.alloc(cpu.D[0]); m.logf("AllocMem(%d,$%X)=$%X <-$%X", cpu.D[0], cpu.D[1], a, m.r32(cpu.A[7])-datBase); m.ret(cpu, a) })
 	ex(210, func() { m.ret(cpu, 0) })                          // FreeMem
 	ex(552, func() { m.ret(cpu, libByName(m.cstr(cpu.A[1]))) }) // OpenLibrary
 	ex(408, func() { m.ret(cpu, libByName(m.cstr(cpu.A[1]))) }) // OldOpenLibrary
@@ -397,9 +407,10 @@ func (m *machine) loadSeg(cpu *m68k.CPU) {
 		return
 	}
 	copy(m.ram[base:], prog.Image)
-	m.w32(base-4, 0) // seglist next = 0
+	m.w32(base-4, 0) // seglist next = 0 (single node; parser uses h1's directory)
 	m.seg = base + uint32(len(prog.Image)) + 16
-	m.logf("LoadSeg(%q) = seglist @$%X (%d hunks, %d bytes)", name, base, len(prog.Segments), len(prog.Image))
+	caller := m.r32(cpu.A[7])
+	m.logf("LoadSeg(%q) = seglist @$%X (%d hunks, %d bytes) <- caller $%X", name, base, len(prog.Segments), len(prog.Image), caller-datBase)
 	m.ret(cpu, (base-4)>>2) // BPTR
 }
 

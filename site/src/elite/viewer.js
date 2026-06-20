@@ -26,6 +26,14 @@ const FACE_NONE = 15; // edge face nibble sentinel: no face this side → always
 const FLICKER_DUTY = 0.17;
 const FLICKER_RATE = 0.37;
 
+// More "old school" knobs. The C64 ran the view at a low effective frame rate and
+// in a chunky multicolor bitmap, so old-school mode throttles to OLD_FPS (which
+// also slows the flicker beat into something coarser and more authentic) and
+// renders the scene into a low internal resolution that CSS upscales with nearest
+// -neighbour (LORES_H = internal height in pixels; width follows the aspect).
+const OLD_FPS = 12;
+const LORES_H = 168;
+
 // ShipMesh holds one ship's geometry and the per-frame visible-edge buffer.
 // Flat typed arrays keep the HSR loop tight; verts/normals stay in model space
 // (the ship never moves — the camera orbits). Elite's +Y is up, matching
@@ -159,7 +167,7 @@ export class ShipViewer {
     this.flickerPhase = 0;
   }
 
-  setOldSchool(on) { this.oldSchool = on; }
+  setOldSchool(on) { this.oldSchool = on; this._applyResolution(); }
 
   async init() {
     const res = await fetch('public/elite/ships.json');
@@ -191,23 +199,43 @@ export class ShipViewer {
     this._resize();
     new ResizeObserver(() => this._resize()).observe(this.viewport);
 
-    const tick = () => {
+    let lastRender = 0;
+    const tick = (now) => {
+      requestAnimationFrame(tick);
+      // In old-school mode, throttle to OLD_FPS (chunky motion + a coarser flicker beat).
+      if (this.oldSchool && now - lastRender < 1000 / OLD_FPS) return;
+      lastRender = now;
       this.controls.update();
       if (this.oldSchool) this.flickerPhase = (this.flickerPhase + FLICKER_RATE) % 1;
       if (this.current) {
         this.current.updateForCamera(this.camera.position, this.oldSchool ? this.flickerPhase : -1);
       }
       this.renderer.render(this.scene, this.camera);
-      requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
     return this.ships;
   }
 
-  _resize() {
+  _resize() { this._applyResolution(); }
+
+  // _applyResolution sizes the drawing buffer: full viewport resolution normally,
+  // or a low internal resolution (LORES_H tall) in old-school mode, which the CSS
+  // canvas (100% of the viewport) then upscales with nearest-neighbour for a
+  // chunky C64-multicolor look. The camera aspect always tracks the real viewport.
+  _applyResolution() {
     const w = this.viewport.clientWidth, h = this.viewport.clientHeight;
     if (!w || !h) return;
-    this.renderer.setSize(w, h, false);
+    const cv = this.renderer.domElement;
+    if (this.oldSchool) {
+      const s = Math.min(1, LORES_H / h);
+      this.renderer.setPixelRatio(1);
+      this.renderer.setSize(Math.max(2, Math.round(w * s)), Math.max(2, Math.round(h * s)), false);
+      cv.style.imageRendering = 'pixelated';
+    } else {
+      this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      this.renderer.setSize(w, h, false);
+      cv.style.imageRendering = ''; // revert to the smooth .viewport-3d rule
+    }
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }

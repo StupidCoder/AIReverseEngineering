@@ -307,6 +307,23 @@ func main() {
 		}
 		m.logf("=== soundID %d: %d notes (song $1FA1A=$%X $1FA68=$%X) ===", sid, len(m.notes)-before,
 			m.r32(datBase+0x1FA1A), m.r32(datBase+0x1FA68))
+		m.logf("    music flags: 1F8FA(flush)=%d 1F8FC(en)=%d 1F8FE=%d 1FA1E=%d 1FA24=%d  $1F9EA[0..3]=%d,%d,%d,%d  $1F9C2[0..3]=$%X,$%X,$%X,$%X",
+			m.r16(datBase+0x1F8FA), m.r16(datBase+0x1F8FC), m.r16(datBase+0x1F8FE), m.r16(datBase+0x1FA1E), m.r16(datBase+0x1FA24),
+			m.r16(datBase+0x1F9EA), m.r16(datBase+0x1F9EC), m.r16(datBase+0x1F9EE), m.r16(datBase+0x1F9F0),
+			m.ram[datBase+0x1F9C2], m.ram[datBase+0x1F9C3], m.ram[datBase+0x1F9C4], m.ram[datBase+0x1F9C5])
+		song := m.r32(datBase + 0x1FA1A)
+		for ch := uint32(0); ch < 4; ch++ {
+			slot := song + ch*8
+			evs := m.r32(slot)            // ptr to 6-byte events
+			ns := m.r32(evs + 2)          // event0 +2 = note-stream ptr
+			b := make([]byte, 12)
+			for i := range b {
+				b[i] = m.ram[ns+uint32(i)]
+			}
+			m.logf("    ch%d slot=$%X events=$%X event0=[dur=%d ns=$%X] notestream=% X  $1F9FA(sub)=%d $1FA0A(durc)=%d $1F9CA(timer)=%d",
+				ch, slot, evs, m.r16(evs), ns, b,
+				int16(m.r16(datBase+0x1F9FA+ch*2)), int16(m.r16(datBase+0x1FA0A+ch*2)), int32(m.r32(datBase+0x1F9CA+ch*4)))
+		}
 		if os.Getenv("DBG") != "" {
 			for ch := uint32(0); ch < 4; ch++ {
 				pd := m.r32(datBase + 0x21148 + ch*4)

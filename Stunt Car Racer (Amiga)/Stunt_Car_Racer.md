@@ -122,13 +122,52 @@ title/copyright/"protection" tag; to be transcribed.)
 
 ## 2. The custom track loader
 
-*To be analysed.* The `$9800`-byte loader at disk offset `$2C00` is the entry
-point for everything else: it presumably sets up the hardware, loads the main
-engine and the track data from later regions of the disk (possibly
-decompressed), and hands off to the game. Disassembling it (`tools/cmd/dis68k`
-/ `codetrace68k`, base = its load address) is the next step, and will establish
-the on-disk map: where the engine lives, where the track geometry lives, and
-any packing used.
+The `$9800`-byte blob (disk sectors 22–97) is position-independent 68000 code
+(every reference is `LEA …(pc)`), so it disassembles cleanly with its file
+offsets as addresses. It does four things:
+
+1. **Take over the machine.** A `MOVE.l #handler,$80 ; TRAP #0` pair jumps into
+   supervisor mode at `$10`, then it kills the OS environment: `INTENA`/`INTREQ`
+   cleared (`#$7FFF → $DFF09A/$9C`), `DMACON = $7C5F` (bitplane/copper/blitter/
+   sprite/disk DMA + master on), a level-3 (VBlank) autovector installed at `$6C`
+   pointing to its own handler (`$13A`), then `INTENA = $C020` (master + VERTB).
+2. **Load stage data to `$4000`.** With `a0 = $4000` and a return address in
+   `a1`, it branches to the disk reader (`$D76`) to pull an initial chunk to
+   `$4000`.
+3. **Show the title screen.** It unpacks a 4-bitplane image from an embedded
+   table (`$D9C`) into chip RAM at `$78000` — four interleaved planes `$1F3E`
+   bytes apart, `$FA0` words each (a full lo-res screen) — loads the palette
+   (`$D7C → $206`) and points a Copper list at the planes (`$4A2`).
+4. **Stream the game and enter it.** The load loop calls the disk reader to read
+   **805 sectors starting at sector 110 into `$E700`**, retrying on error (and
+   flashing the screen red and hanging if it can't); then it sets the user stack
+   (`usp = $7FFFC`), the supervisor stack (`$3D80`) and `JMP $E700` — the game.
+
+**The disk reader (`$570`).** This is a logical-sector reader, not a filesystem.
+Its arguments are `d1 = start sector`, `d2 = sector count`, `a0 = destination`
+(plus mode bits in `d0`/`d3`). It validates `start + count ≤ $6E0` (1760 =
+80 cyl × 2 heads × 11 sectors) and converts a logical sector to a physical track
+with `sector / $B` (11 sectors per track-side), then MFM-reads whole tracks (the
+helpers at `$C22`/`$664`/`$9E4`/`$746`). Crucially it **only reads** — there is
+no decompression — so on disk the data is stored raw, sector-aligned. (A
+`"DOW"`-plus-incrementing-byte table at `$96CE` looks like a per-sector
+track/format key, the same shape as Marble Madness's `sigfile`.)
+
+### The disk map
+
+Putting the boot block and loader together, the image is a handful of raw
+regions read by sector — no filesystem, no packing:
+
+| sectors | offset | bytes | loaded at | what |
+|--------:|-------:|------:|----------:|------|
+| 0 | `$0000` | 1024 | — | boot block (reads the loader, jumps to it) |
+| 22–97 | `$2C00` | 38,912 | (chip) | the loader above |
+| 110–914 | `$DC00` | 412,160 | `$E700` | **the whole game** (engine + tracks + physics) |
+
+`extract/cmd/extract` slices these straight out of the `.adf`
+(`extracted/loader.bin`, `extracted/game.bin`). Because nothing is compressed,
+`extracted/game.bin` disassembles directly at base `$E700` — the input for
+Parts III–V.
 
 ---
 

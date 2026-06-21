@@ -475,22 +475,31 @@ storing each node in `$1C650[]` (X) / `$1C718[]` (Z) and accumulating the headin
 Z equally — the world axes are the 45°-rotated `(x±z)` pair — and curves bend them
 apart.
 
-**Recovering the geometry.** `extract/cmd/spineoracle` executes the real `$5AE46`
-on the `tools/m68k` core over a flat image (it takes only `d1` = track id and
-self-initialises), then reads the `$1C650`/`$1C718` arrays back out. This is the
-project's *guide-and-verify* oracle — not a source of shipped data; the Go re-draw is
-reimplemented independently from the tables above and checked against it. The spines
-it produces are unmistakably the real circuits — all eight close into loops, 40–78
-sections, world extents ~7 k–19 k units (the commit's ASCII plot shows LITTLE RAMP
-and DRAW BRIDGE as recognisable closed tracks).
+**The Go reimplementation (`extract/track`).** `package track` walks this spine
+purely in Go, reading only the game's data tables — it does *not* run any 68000 code.
+The handle math has two byte-width subtleties worth recording (both were initial
+mis-reads, caught because the format is shared with the 6502/Z80 ports and so cannot
+depend on any 68000 quirk):
 
-**Remaining:** reimplement the spine walk in Go from the data tables (verified
-coordinate-exact against `spineoracle`), recover the per-section **elevation** (the
-ramps/jumps — not in the plan-view loop, so a separate vertical profile to locate)
-and **track width**, then build a hidden-line **wireframe level viewer** for the
-website (a 3-D track ribbon, in the spirit of the Marble Madness slope viewer).
+* the per-type shape table is a **word table at `$1EF82 + nib*2`** (an earlier
+  reading saw a phantom `ASL.l #7` — actually the low word of the
+  `MOVEA.l #$1EF82` immediately before it; there is no shift);
+* the X/Z offset-shape handle index is `ASL.b #1` on the param, i.e.
+  **`(param*2) & $FF`** — a byte multiply that wraps, not a 16-bit one.
 
-*Go spine re-draw + elevation + web viewer: next.*
+`extract/cmd/spineoracle` executes the real `$5AE46` on the `tools/m68k` core (it
+takes only `d1` = track id and self-initialises) and reads the `$1C650`/`$1C718`
+arrays back out; `extract/cmd/spineverify` checks `package track` against it.
+**All eight tracks match coordinate-exact** — the Go decoder is the source of truth,
+the oracle only confirms it. The spines are unmistakably the real circuits (all eight
+close into loops, 40–78 sections, world extents ~7 k–19 k units).
+
+**Remaining:** recover the per-section **elevation** (the ramps/jumps — not in the
+plan-view loop) and **track width**, then build a hidden-line **wireframe level
+viewer** for the website (a 3-D track ribbon, in the spirit of the Marble Madness
+slope viewer).
+
+*Elevation + web viewer: next.*
 
 ---
 

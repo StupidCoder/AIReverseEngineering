@@ -72,6 +72,7 @@ func runTrack(img []byte, id int) {
 	c.D[1] = uint32(id)
 
 	steps := 0
+	var segLens []byte // value written to $1BB6A at $5FF5A, per section
 	for c.PC != sentinel {
 		if c.Halted {
 			fmt.Printf("track %d: HALTED at $%X — %s\n", id, c.PC, c.HaltReason)
@@ -81,8 +82,14 @@ func runTrack(img []byte, id int) {
 			fmt.Printf("track %d: step cap (pc=$%X)\n", id, c.PC)
 			return
 		}
+		if c.PC == 0x5FF5A { // MOVE.b d0,$1BB6A — d0 is the segment length
+			segLens = append(segLens, byte(c.D[0]))
+		}
 		c.Step()
 		steps++
+	}
+	if len(os.Getenv("SEGLENS")) > 0 {
+		fmt.Printf("track %d segLens(%d): %v\n", id, len(segLens), segLens)
 	}
 
 	n := int(bus.Read(cCount))

@@ -51,6 +51,7 @@ way (the eight tracks located and extracted, section grammar in progress); Part 
   - [1. Finding the track table](#1-finding-the-track-table-the-race-setup-path)
   - [2. The record header](#2-the-record-header)
   - [3. The section stream and spine builder](#3-the-section-stream-rle-and-the-spine-builder)
+  - [4. A verified Go decoder](#4-a-verified-go-decoder)
 - [Part V — The physics simulation](#part-v--the-physics-simulation)
 - [Appendix A — Toolchain and reproduction](#appendix-a--toolchain-and-reproduction)
 
@@ -415,12 +416,43 @@ scenery / markers.
 
 So a track decodes to: *a header (count, finish index, seed) → an RLE section stream
 → a scenery trailer*, with each section a `(type, p1, p2)` triple where the type
-indexes a shared piece-shape table that supplies the geometry. The remaining work is
-to (a) reimplement this exact stream parser in Go and verify it consumes each track
-to its end (and against the `tools/m68k` oracle), (b) decode the piece-shape
-sub-tables `$5B2D2` follows, and (c) walk the spine to **re-draw each circuit**.
+indexes a shared piece-shape table that supplies the geometry.
 
-*Section parser + spine reconstruction: in progress.*
+## 4. A verified Go decoder
+
+`extract/cmd/sections` reimplements the `$5AED0..$5B106` loop exactly — the
+run-length marker, the `$5AE0C` delta step, the `≥$C` table branch and the
+`bit5`/`bit6`/`bit7` flag-driven reads — and then checks itself against the data.
+The whole track stream is:
+
+```
+6 (header)  +  section stream  +  6 (trailer)  +  2*trailer[4] + trailer[5] (scenery)
+```
+
+so a correct parse must consume a track's bytes **exactly**. It does, for all seven
+length-bounded tracks:
+
+```
+LITTLE RAMP     44 sections  used 124/124   STEPPING STONES 56  145/145
+HUMP BACK       53 sections  used 145/145   BIG RAMP        44  142/142
+SKI JUMP        40 sections  used 145/145   DRAW BRIDGE     78  213/213
+HIGH JUMP       52 sections  used 142/142   ROLLER COASTER  78  used 192 (last)
+```
+
+(ROLLER COASTER, the last record, is 192 bytes — the raw slice in `cmd/tracks` runs
+on into padding; the parser gives its true length.) The byte-exact match across every
+track confirms the read pattern is right. As a spot check, LITTLE RAMP's first ten
+sections are a single `$A0` run: a fresh `type $A0, p1 $CF, p2 $6A` section, then one
+marker byte `$9F` (run = 9) followed by nine `p2` bytes, with `p1` stepping `−$10`
+each section — exactly the bytes on disk.
+
+What remains for the circuits is geometric, not structural: decode the per-section
+piece-shape sub-tables that `$5B2D2` follows (the handle in `$1BC8C`), then walk the
+spine (`$1C650`/`$1C718` start nodes + the shape profiles) to **re-draw each track**
+in plan/3-D — the Part IV goal — and verify the layout against the `tools/m68k`
+oracle running `$5AE46` on the same data.
+
+*Piece-shape tables + spine re-draw: next.*
 
 ---
 
@@ -458,6 +490,9 @@ cd "Stunt Car Racer (Amiga)/extract" && go run ./cmd/extract "../Stunt Car Racer
 
 # Dump the eight track byte streams (reimplements the $5AE46 pointer math)
 go run ./cmd/tracks ../extracted/game.dec.bin    # -> extracted/tracks/<id>_<name>.bin
+
+# Decode + verify the section streams (byte-exact against each track's length)
+go run ./cmd/sections ../extracted/game.dec.bin [-v]
 
 # Disassemble / trace the engine. Use game.dec.bin for anything in $F4B8..$1AA4A.
 go run stupidcoder.com/tools/cmd/dis68k     -base 0xE700 -start <addr> -end <addr> extracted/game.dec.bin

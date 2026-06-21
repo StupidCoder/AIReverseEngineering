@@ -50,9 +50,10 @@ export class TrackViewer {
     if (t.group) { t.scene.remove(t.group); disposeGroup(t.group); }
     const group = new THREE.Group();
 
-    // Nodes -> centre-line points. n[0],n[1] are the reconstructed world plan (the
-    // actual circuit); the ribbon is flat for now (elevation still being recovered).
-    const pts = track.nodes.map(n => ({ x: n[0], z: n[1], y: 0 }));
+    // Nodes -> centre-line points. n[0],n[1] = grid plan cell; n[2] = elevation
+    // (height above the track reference). Scale elevation into grid-cell units.
+    const EY = 1 / 900; // elevation units (~±1600) -> a few grid cells
+    const pts = track.nodes.map(n => ({ x: n[0], z: n[1], y: n[2] * EY }));
     const n = pts.length;
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
     for (const p of pts) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z); }
@@ -119,7 +120,7 @@ export class TrackViewer {
     // rather than edge-on. Pull back to fit the longest axis of the ribbon.
     const cam = t.camera, ctrl = t.controls;
     ctrl.target.set(0, 0, 0);
-    cam.position.set(0.5, 9, 5);
+    cam.position.set(0.5, 6.5, 8);
     cam.near = 0.1; cam.far = 100; cam.updateProjectionMatrix();
     ctrl.update();
   }

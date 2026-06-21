@@ -54,6 +54,7 @@ way (the eight tracks located and extracted, section grammar in progress); Part 
   - [4. A verified Go decoder](#4-a-verified-go-decoder)
   - [5. The spine geometry and re-drawing the circuits](#5-the-spine-geometry-and-re-drawing-the-circuits)
   - [6. The plan footprint (the 16×16 track grid)](#6-the-plan-footprint-the-1616-track-grid)
+  - [7. Elevation (the vertical profile)](#7-elevation-the-vertical-profile)
 - [Part V — The physics simulation](#part-v--the-physics-simulation)
 - [Appendix A — Toolchain and reproduction](#appendix-a--toolchain-and-reproduction)
 
@@ -555,14 +556,35 @@ heading from `p1`'s nibbles and a `type` quadrant — it was wrong: it forced cl
 a fitted quadrant table and produced sharp corners and false crossings. Reading
 `$5FE04`/`$64304` replaced it with the actual grid.)
 
-**The web viewer** (`extract/cmd/trackjson` → `site/public/stuntcar/tracks.json`,
-`site/stuntcar.html` + `site/src/stuntcar/`) draws each grid footprint as a hidden-line
-wireframe ribbon. It is flat for now; the per-section **elevation** (the ramps, jumps
-and over-passes) is the remaining vertical profile — the `$5A1A6` renderer reads two
-offset shapes per vertex (one horizontal, one vertical), so the elevation is carried by
-the second (`attr`-indexed) shape and the type's high bits, still to be decoded.
+## 7. Elevation (the vertical profile)
 
-*Elevation (vertical profile): next.*
+The footprint is the plan; the **height** comes from the loader's two per-section
+extent arrays. The renderer's vertex builder (`$5C0AA`, and the projection `$5C6C4`)
+assembles each track vertex from two axes — the **`p2`-indexed extent `$1C650`** and
+the **`attr`-indexed extent `$1C718`** — one the horizontal reference, the other the
+vertical. On flat track the section's `p2` and `attr` select the same piece-shape, so
+the two extents advance together; over a ramp or jump they diverge. Their difference is
+therefore the height above the reference:
+
+```
+elev = $1C650 − $1C718
+```
+
+It behaves exactly as a track profile should: **zero on every straight** and rising
+only over the features, returning to the reference across the lap. The features land
+where the track names promise — *Little Ramp* and *Big Ramp* each one ramp, *Hump Back*
+a run of humps, *Roller Coaster* a string of them, and *Draw Bridge* a single large
+up-then-down swing (the bridge). `package track` sets `Elev` from this difference,
+`cmd/trackjson` exports it, and the viewer lifts the ribbon by it — the tracks now
+stand up in 3-D.
+
+Both extents are the verified `$5AE46` arrays (coordinate-exact vs the oracle), so the
+profile is read straight from decoded data, not fitted; the one free choice is the
+vertical scale in the viewer. The finer per-vertex shape (banking across the ribbon,
+the kerbs) lives in the per-type piece-shapes the projection reads, and is a further
+refinement.
+
+*Refinements: banking/kerbs from the per-type shapes; Part V — the physics.*
 
 ---
 

@@ -60,17 +60,18 @@ const CRT_FRAG = /* glsl */`
 
   // soft, linearly-sampled glow: rings of taps at two radii with a falloff, so
   // it's a smooth halo (not the chunky source pixels), brighter near the line.
+  // The radius is a fraction of the OUTPUT image height (aspect-corrected to x so
+  // the halo is round), NOT source texels — so its width on screen is the same
+  // whether the input is blocky (lo-res) or full-res.
   vec3 glowAt(vec2 uv) {
-    vec2 r = 1.0 / uSceneRes;
+    vec2 unit = vec2(uSceneRes.y / uSceneRes.x, 1.0); // (1/aspect, 1): circular in screen space
     vec3 g = vec3(0.0);
-    // inner ring (radius ~1.6 texels)
-    vec2 a = r * 1.6;
+    vec2 a = unit * 0.010; // inner ring (~1% of image height)
     g += (texture2D(tScene, uv + vec2( a.x, 0.0)).rgb + texture2D(tScene, uv + vec2(-a.x, 0.0)).rgb
         + texture2D(tScene, uv + vec2(0.0,  a.y)).rgb + texture2D(tScene, uv + vec2(0.0, -a.y)).rgb) * 0.6;
     g += (texture2D(tScene, uv + vec2( a.x,  a.y)).rgb + texture2D(tScene, uv + vec2(-a.x,  a.y)).rgb
         + texture2D(tScene, uv + vec2( a.x, -a.y)).rgb + texture2D(tScene, uv + vec2(-a.x, -a.y)).rgb) * 0.4;
-    // outer ring (radius ~3.4 texels), dimmer and wider
-    vec2 b = r * 3.4;
+    vec2 b = unit * 0.022; // outer ring (~2.2%), dimmer and wider
     g += (texture2D(tScene, uv + vec2( b.x, 0.0)).rgb + texture2D(tScene, uv + vec2(-b.x, 0.0)).rgb
         + texture2D(tScene, uv + vec2(0.0,  b.y)).rgb + texture2D(tScene, uv + vec2(0.0, -b.y)).rgb) * 0.18;
     return g;

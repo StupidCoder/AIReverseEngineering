@@ -29,8 +29,9 @@ the shared `tools/` module — the AmigaDOS reader (`tools/amiga/adf`), the
 disassemblers (`tools/cmd/dis68k`, `tools/cmd/codetrace68k`) and an
 instruction-level 68000 execution core (`tools/m68k`) for dynamic verification.
 All addresses are 68000 addresses; sizes are `.b`/`.w`/`.l` (8/16/32-bit).
-**Status: Parts I–III done (disk format, loader, engine architecture); Parts IV–V
-(tracks, physics) in progress.**
+**Status: Parts I–III done (disk format, loader, engine architecture); Part IV under
+way (the eight tracks located and extracted, section grammar in progress); Part V
+(physics) to follow.**
 
 ---
 
@@ -47,6 +48,8 @@ All addresses are 68000 addresses; sizes are `.b`/`.w`/`.l` (8/16/32-bit).
   - [2. Hardware bring-up](#2-hardware-bring-up-ed56)
   - [3. Game bootstrap and top-level loop](#3-game-bootstrap-and-top-level-loop-1ba08--5c890)
 - [Part IV — The tracks (vector circuits)](#part-iv--the-tracks-vector-circuits)
+  - [1. Finding the track table](#1-finding-the-track-table-the-race-setup-path)
+  - [2. The record header](#2-the-record-header-in-progress)
 - [Part V — The physics simulation](#part-v--the-physics-simulation)
 - [Appendix A — Toolchain and reproduction](#appendix-a--toolchain-and-reproduction)
 
@@ -291,7 +294,79 @@ part is to:
 3. reimplement the decoder in Go and **re-draw each circuit** (a 3-D wireframe/
    plan view), the way the Elite ship blueprints were re-rendered.
 
-*Format: to be reverse-engineered.*
+## 1. Finding the track table (the race-setup path)
+
+The selected track is a single byte, **`$1CA33`** (0–7), set from the track-select
+menu and printed by the name-printer `$64C3E` (which does `ASL.b #4,d1` — names are
+16-byte records at **`$1EDAA`**, in track order: *LITTLE RAMP, STEPPING STONES, HUMP
+BACK, BIG RAMP, SKI JUMP, DRAW BRIDGE, HIGH JUMP, ROLLER COASTER*; the AI opponents
+are a parallel 14-byte table at `$1ECAA`).
+
+Starting a race runs `$5D2CA`: `MOVE.b $1CA33,d1` then a chain
+`JSR $5AE46 / $64304 / $5A794 / $696FC / $65BEC / $604B4`. The first of these,
+**`$5AE46`, is the track loader**, and it is the key to the data:
+
+```
+$5AE46 MOVE.b d1,d0 ; ASL.b #1,d0 ; MOVE.b d0,d2     ; d2 = track_id * 2 (word index)
+       MOVEA.l #$1F0A2,a2                            ; the track-pointer table
+       MOVE.w  $0(a2,d2.w),$1BCC0                    ; word = table[id]
+       MOVE.w  $1BCC0,d0
+       ROL.w   #8,d0                                 ; byte-swap the word
+       SUBI.w  #$B100,d0 ; ANDI.l #$FFFF,d0          ; -> a 16-bit offset
+       ADDI.l  #$1EF82,d0                            ; + data base
+       MOVEA.l d0,a5                                 ; a5 = this track's data stream
+       MOVE.w  #0,d5
+       … reads bytes through $5AE00 …
+```
+
+So a **track-pointer table of eight words at `$1F0A2`** indexes into the track data:
+each word is byte-swapped, less `$B100`, added to the base `$1EF82` to give the
+track's absolute address. The reader **`$5AE00`** is a plain sequential byte fetch
+(`MOVE.b $0(a5,d5.w),d0 ; ADDQ #1,d5`) — the track is a **byte stream**, decoded in
+order, not a fixed-size struct.
+
+Decoding the table gives the eight tracks, stored **contiguously in track order**:
+
+| id | track | address | bytes |
+|---:|-------|--------:|------:|
+| 0 | LITTLE RAMP | `$1F8E4` | 124 |
+| 1 | STEPPING STONES | `$1F960` | 145 |
+| 2 | HUMP BACK | `$1F9F1` | 145 |
+| 3 | BIG RAMP | `$1FA82` | 142 |
+| 4 | SKI JUMP | `$1FB10` | 145 |
+| 5 | DRAW BRIDGE | `$1FBA1` | 213 |
+| 6 | HIGH JUMP | `$1FC76` | 142 |
+| 7 | ROLLER COASTER | `$1FD04` | 312 |
+
+`extract/cmd/tracks` reimplements the `$5AE46` pointer math and writes the eight
+raw streams to `extracted/tracks/<id>_<name>.bin` — the input for the format work.
+
+## 2. The record header (in progress)
+
+Each track stream begins with a short parameter header that `$5AE46` reads first
+(five bytes into `$1CA19[1..5]`, then two more into `$1BBF6..9`). The first eight
+bytes of all eight tracks share a clear shape — **byte 1 always equals byte 2**:
+
+```
+LITTLE RAMP     2c 0f 0f | 25 00 05 a0 cf …
+STEPPING STONES 38 2a 2a | 0e 00 0f a0 cf …
+HUMP BACK       35 2e 2e | 13 40 05 60 04 …
+BIG RAMP        2c 01 01 | 18 80 07 a0 c0 …
+SKI JUMP        28 0f 0f | 23 40 6a aa bd …
+DRAW BRIDGE     4e 2a 2a | 04 a0 11 a0 cc …
+HIGH JUMP       34 1d 1d | 04 40 06 20 3f …
+ROLLER COASTER  4e 00 00 | 25 00 05 a0 cf …
+```
+
+Byte 0 looks like a count/length, bytes 1–2 a duplicated start/limit parameter, and
+bytes 3–7 the initial position/orientation seed the simulation starts from. The
+section grammar that follows (consumed by the `$5AE46` body and the post-load passes
+`$64304`/`$65BEC`) is the next step: decode it into a list of typed sections
+(straight / banked curve / hump / ramp / jump / broken bridge) with their
+length/curvature/gradient, then reimplement that decoder in Go and re-draw each
+circuit.
+
+*Section grammar: in progress.*
 
 ---
 
@@ -326,6 +401,9 @@ go run stupidcoder.com/tools/cmd/dis68k -base 0 -skip 12 "Stunt Car Racer (Amiga
 
 # Slice the disk into loader.bin, game.bin and the decrypted game.dec.bin
 cd "Stunt Car Racer (Amiga)/extract" && go run ./cmd/extract "../Stunt Car Racer.adf"
+
+# Dump the eight track byte streams (reimplements the $5AE46 pointer math)
+go run ./cmd/tracks ../extracted/game.dec.bin    # -> extracted/tracks/<id>_<name>.bin
 
 # Disassemble / trace the engine. Use game.dec.bin for anything in $F4B8..$1AA4A.
 go run stupidcoder.com/tools/cmd/dis68k     -base 0xE700 -start <addr> -end <addr> extracted/game.dec.bin

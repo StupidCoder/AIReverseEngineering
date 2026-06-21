@@ -49,7 +49,8 @@ way (the eight tracks located and extracted, section grammar in progress); Part 
   - [3. Game bootstrap and top-level loop](#3-game-bootstrap-and-top-level-loop-1ba08--5c890)
 - [Part IV — The tracks (vector circuits)](#part-iv--the-tracks-vector-circuits)
   - [1. Finding the track table](#1-finding-the-track-table-the-race-setup-path)
-  - [2. The record header](#2-the-record-header-in-progress)
+  - [2. The record header](#2-the-record-header)
+  - [3. The section stream and spine builder](#3-the-section-stream-rle-and-the-spine-builder)
 - [Part V — The physics simulation](#part-v--the-physics-simulation)
 - [Appendix A — Toolchain and reproduction](#appendix-a--toolchain-and-reproduction)
 
@@ -341,7 +342,7 @@ Decoding the table gives the eight tracks, stored **contiguously in track order*
 `extract/cmd/tracks` reimplements the `$5AE46` pointer math and writes the eight
 raw streams to `extracted/tracks/<id>_<name>.bin` — the input for the format work.
 
-## 2. The record header (in progress)
+## 2. The record header
 
 Each track stream begins with a short parameter header that `$5AE46` reads first
 (five bytes into `$1CA19[1..5]`, then two more into `$1BBF6..9`). The first eight
@@ -358,15 +359,68 @@ HIGH JUMP       34 1d 1d | 04 40 06 20 3f …
 ROLLER COASTER  4e 00 00 | 25 00 05 a0 cf …
 ```
 
-Byte 0 looks like a count/length, bytes 1–2 a duplicated start/limit parameter, and
-bytes 3–7 the initial position/orientation seed the simulation starts from. The
-section grammar that follows (consumed by the `$5AE46` body and the post-load passes
-`$64304`/`$65BEC`) is the next step: decode it into a list of typed sections
-(straight / banked curve / hump / ramp / jump / broken bridge) with their
-length/curvature/gradient, then reimplement that decoder in Go and re-draw each
-circuit.
+`$5AE46` reads these into `$1CA1A..$1CA1E`, which fixes their meaning:
 
-*Section grammar: in progress.*
+* **byte 0 = section count** (`$1CA1A`) — the loop below runs until the section
+  index reaches it. Per track: 44, 56, 53, 44, 40, 78, 52, 78 — i.e. each circuit
+  is 40–78 sections long;
+* **byte 1 = byte 2 = the finish/start section index** (`$1CA1B`/`$1CA1C`) — a
+  duplicated value, used to wrap the lap (`$5B10C`: start from `$1CA1C+1`);
+* **bytes 3–4 = the initial position seed** (`$1CA1D`/`$1CA1E`; `$1CA1E` is later
+  overwritten with the total track length).
+
+`extract/cmd/tracks` prints all of this (`sections=… finishIdx=…(dup=true) seed=…`).
+
+## 3. The section stream (RLE) and the spine builder
+
+After the header, the body of `$5AE46` (`$5AED0..$5B106`) walks the byte stream once,
+emitting one **section** per iteration into a set of parallel arrays indexed by the
+section number `d1`:
+
+| array | per-section meaning |
+|-------|---------------------|
+| `$1C5EC[]` | type / flags byte |
+| `$1C588[]` | parameter 1 |
+| `$1C4C0[]` | parameter 2 |
+| `$1C524[]` | combined attribute (`param & $7F | $1BB1B`) |
+| `$1C650[]` / `$1C718[]` (word) | the section node's **X / Z** coordinate |
+| `$1C7E0[]` (word) | accumulated distance along the track (`<<5`) |
+
+**Encoding.** Each section normally costs a type byte plus 1–2 parameter bytes. Two
+mechanisms compress the common case of many similar sections in a row:
+
+* **Run-length.** If a type byte's **low nibble is `$F`**, its high nibble is a
+  *run count* (`$1BB48`): the following `n` sections repeat the saved type
+  (`$1BC55`) with their parameter stepped by the delta helper `$5AE0C` — which adds
+  or subtracts either `$10` or `$1` depending on flag bits in `$1BB1A`. This is what
+  encodes a constant curve or a constant gradient as one marker plus a step.
+* **Type-nibble ≥ `$C`.** These section types take their second parameter from the
+  small tables `$5B2B8`/`$5B2BA` instead of from the stream (the standard ramp/jump
+  piece shapes).
+
+**Spine layout.** As it emits each section, the loop also places it in 3-D. The
+running position is `(X,Z) = ($1BBF6,$1BBF8)`, advanced per section by a helper
+`$5B2D2`/`$5B2C8` that — notably — **reuses the very same handle-decode formula as
+the track-pointer table** (`ROL.w #8`, `−$B100`, `+$1EF82` on a 16-bit handle in
+`$1BC8C`) to follow a *section-shape* sub-table inside the track data, indexed by the
+section type. So section "types" are references to reusable extruded-piece shapes,
+and the per-section dx/dz come from those shape profiles rather than from a sine
+table. The node coordinates are stored in `$1C650[]`/`$1C718[]`; the cumulative
+distance in `$1C7E0[]`; and the grand total length in `$1CA1E` (`$1BC2A << 5`).
+
+**Trailer.** After the sections, the stream carries a fixed 6-byte block (`$1CA2A`),
+then two optional object lists guarded by counts: `$1CA2E` pairs into
+`$1C8A8[]`/`$1C8C8[]` and `$1CA2F` entries into a further array — the trackside
+scenery / markers.
+
+So a track decodes to: *a header (count, finish index, seed) → an RLE section stream
+→ a scenery trailer*, with each section a `(type, p1, p2)` triple where the type
+indexes a shared piece-shape table that supplies the geometry. The remaining work is
+to (a) reimplement this exact stream parser in Go and verify it consumes each track
+to its end (and against the `tools/m68k` oracle), (b) decode the piece-shape
+sub-tables `$5B2D2` follows, and (c) walk the spine to **re-draw each circuit**.
+
+*Section parser + spine reconstruction: in progress.*
 
 ---
 

@@ -88,11 +88,12 @@ func main() {
 		blob := img[at(s):at(e)]
 		fn := fmt.Sprintf("%d_%s.bin", id, name)
 		must(os.WriteFile(filepath.Join(dir, fn), blob, 0o644))
-		mark := ""
-		if len(blob) >= 8 && blob[3] == 0x25 && blob[4] == 0x00 && blob[5] == 0x05 {
-			mark = "  hdr 25 00 05 A0 CF ok"
-		}
-		fmt.Printf("%-16s addr $%05X  %3d bytes  %s%s\n", name, s, len(blob), fn, mark)
+		// Header ($5AE46 reads the first five bytes into $1CA1A..$1CA1E):
+		//   [0] = section count ; [1]==[2] = finish/start section index ; [3..] = seed.
+		nSec := blob[0]
+		dup := blob[1] == blob[2]
+		fmt.Printf("%-16s addr $%05X  %3d bytes  sections=%-3d finishIdx=%d(dup=%v) seed=%02x %02x  %s\n",
+			name, s, len(blob), nSec, blob[1], dup, blob[3], blob[4], fn)
 	}
 }
 

@@ -44,6 +44,11 @@ To do:
       byte-identical against the FS-UAE oracle. Next (Part III): disassemble and
       annotate the decrunched game (`$43880` base, `$5F500` entry) into a
       `disasm/` store, per the Marble Madness convention
+* Stunt Car Racer (Amiga)
+    * Part I recon done: custom (non-AmigaDOS) disk; `DOS\0` boot block bootstraps
+      a `$9800`-byte loader read from disk offset `$2C00`. Next (Part II):
+      disassemble that loader and map the disk. Goal: extract and replicate the
+      vector race tracks (Part IV) and the rigid-body car physics (Part V)
 * Tools
     * Disassembler should be better at segmenting functions; currently jumps within a function are treated as separate sub-routines; try to document parameters of sub-routines (which registers are used?)
 
@@ -120,6 +125,10 @@ AIReverseEngineering/
 │   ├── disasm/                  # annotated recursive-descent disassembly + annotations.txt
 │   └── rendered/                # generated PNGs (graphics — once located)
 │
+├── Stunt Car Racer (Amiga)/
+│   ├── Stunt Car Racer.adf      # raw disk image (custom format; not committed; see Image files)
+│   └── Stunt_Car_Racer.md       # writeup (Part I recon; tracks + physics the goal)
+│
 └── Turrican (Amiga)/
     ├── Turrican.adf             # raw disk image (pinned by MD5 in Image files)
     ├── Turrican.md              # writeup (Parts I-IV; V stubbed) — loader, engine, disk-streamed levels
@@ -147,6 +156,7 @@ below pin the precise copy, so the work stays reproducible.
 | `Fort Apocalypse (C64)/Fort_Apocalypse.tap` | 225,817 | `bec7409816865f3ad160af9984f127cd` |
 | `Marble Madness (Amiga)/Marble_Madness.adf` | 901,120 | `735dc697d64b3eeaa000778eb0b1153a` |
 | `Sonic (GG)/Sonic The Hedgehog (Japan, USA).gg` | 262,144 | `8a95b36139206a5ba13a38bb626aee25` |
+| `Stunt Car Racer (Amiga)/Stunt Car Racer.adf` | 901,120 | `b6d3751e6aa636f203f3c6a8de81ebfc` |
 | `Turrican (Amiga)/Turrican.adf` | 901,120 | `6677ce6cea38dc66be40e9211576a149` |
 
 Verify a copy before reusing it, e.g. `md5 "Elite (C64)/Elite.tap"`

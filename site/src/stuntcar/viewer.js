@@ -50,10 +50,10 @@ export class TrackViewer {
     if (t.group) { t.scene.remove(t.group); disposeGroup(t.group); }
     const group = new THREE.Group();
 
-    // Nodes -> centre-line points. n[0],n[1] = grid plan cell; n[2] = elevation
-    // (height above the track reference). Scale elevation into grid-cell units.
-    const EY = 1 / 900; // elevation units (~±1600) -> a few grid cells
-    const pts = track.nodes.map(n => ({ x: n[0], z: n[1], y: n[2] * EY }));
+    // Nodes -> centre-line points. n[0],n[1] = grid plan cell. Flat for now: the real
+    // per-section elevation lives in the per-type piece-shapes (still being decoded);
+    // n[2] is left in the data but not used as height (it was curvature, not height).
+    const pts = track.nodes.map(n => ({ x: n[0], z: n[1], y: 0 }));
     const n = pts.length;
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
     for (const p of pts) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z); }

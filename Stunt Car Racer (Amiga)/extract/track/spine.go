@@ -33,7 +33,7 @@ func handle(w int) int { return ((((w<<8|w>>8)&0xFFFF)-bias)&0xFFFF)+dataBase }
 type Node struct {
 	X, Z         int16
 	PlanX, PlanY int
-	Elev         int // height above the track reference (see Spine)
+	Bank         int // road camber: $1C650-$1C718 (diverges on curves), not elevation
 	Type, P1, P2, Attr int
 }
 
@@ -153,11 +153,11 @@ func (im *Image) Spine(id int) Track {
 	for i := range nodes {
 		nodes[i].PlanX = nodes[i].P1 & 0x0F
 		nodes[i].PlanY = nodes[i].P1 >> 4
-		// Elevation: the renderer builds each vertex from two piece-extent axes — the
-		// p2-indexed ($1C650) and the attr-indexed ($1C718), the horizontal reference
-		// and the vertical. On flat track p2==attr and they agree; their difference is
-		// the height above the reference (zero on the flats, rising on ramps/jumps).
-		nodes[i].Elev = int(nodes[i].X) - int(nodes[i].Z)
+		// Camber: the two per-section extent arrays ($1C650 from p2, $1C718 from attr)
+		// are the ribbon's left/right edges; on a straight p2==attr and they agree, on a
+		// curve they diverge by how much the road banks. So this is the banking, not the
+		// elevation (the column height is a separate profile, still being traced).
+		nodes[i].Bank = int(nodes[i].X) - int(nodes[i].Z)
 	}
 
 	return Track{Sections: count, FinishIdx: off(1), Nodes: nodes}

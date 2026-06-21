@@ -41,16 +41,16 @@
       low nibble is the grid X, its high nibble the grid Y. Consecutive sections are
       always adjacent cells, so the footprints are smooth closed loops — a diamond
       (Little Ramp), a rectangle (Stepping Stones), the two inner prongs of the
-      drawbridge (Draw Bridge). Each section also carries an
-      <em>elevation</em> — the height the renderer builds from its two piece-extent axes
-      (the horizontal reference and the vertical), zero on the flats and rising over the
-      ramps, jumps and the drawbridge — so the ribbon stands up in 3-D. The track is
+      drawbridge (Draw Bridge). The track is
       drawn as a <b>hidden-line wireframe</b>: two rails plus a rung per section, coloured
       along the lap (blue → red) with the green marker at the start/finish line. The whole
       decode is from the disk in Go, with the section parse verified <b>coordinate-exact</b>
       against the original loader on our Go 68000 core.
       <br /><br />
-      Drag to rotate, scroll to zoom. See the
+      <b>Work in progress:</b> the ribbon is flat. In the game each circuit is an
+      <em>elevated</em> ribbon on support columns (ramps, jumps, the Roller-Coaster
+      hills), and it <em>banks</em> on the curves; recovering the per-section column
+      height from the game's pre-race preview renderer is the next step. See the
       <a href="https://github.com/StupidCoder/AIReverseEngineering/blob/main/Stunt%20Car%20Racer%20(Amiga)/Stunt_Car_Racer.md">write-up</a>
       (Part IV) for how the track format was decoded.
     </p>

@@ -54,7 +54,7 @@ way (the eight tracks located and extracted, section grammar in progress); Part 
   - [4. A verified Go decoder](#4-a-verified-go-decoder)
   - [5. The spine geometry and re-drawing the circuits](#5-the-spine-geometry-and-re-drawing-the-circuits)
   - [6. The plan footprint (the 16×16 track grid)](#6-the-plan-footprint-the-1616-track-grid)
-  - [7. Elevation (the vertical profile)](#7-elevation-the-vertical-profile)
+  - [7. Banking and elevation (in progress)](#7-banking-and-elevation-in-progress)
 - [Part V — The physics simulation](#part-v--the-physics-simulation)
 - [Appendix A — Toolchain and reproduction](#appendix-a--toolchain-and-reproduction)
 
@@ -556,35 +556,31 @@ heading from `p1`'s nibbles and a `type` quadrant — it was wrong: it forced cl
 a fitted quadrant table and produced sharp corners and false crossings. Reading
 `$5FE04`/`$64304` replaced it with the actual grid.)
 
-## 7. Elevation (the vertical profile)
+## 7. Banking and elevation (in progress)
 
-The footprint is the plan; the **height** comes from the loader's two per-section
-extent arrays. The renderer's vertex builder (`$5C0AA`, and the projection `$5C6C4`)
-assembles each track vertex from two axes — the **`p2`-indexed extent `$1C650`** and
-the **`attr`-indexed extent `$1C718`** — one the horizontal reference, the other the
-vertical. On flat track the section's `p2` and `attr` select the same piece-shape, so
-the two extents advance together; over a ramp or jump they diverge. Their difference is
-therefore the height above the reference:
+The game's pre-race **preview** (the "steer to rotate view" screen) draws each circuit
+as an *elevated ribbon on support columns*, so the track has two distinct vertical
+quantities: the **banking** (the ribbon tilts on the curves) and the **elevation** (the
+column height — how high the ribbon floats, the ramps and Roller-Coaster hills).
 
-```
-elev = $1C650 − $1C718
-```
+* **Banking.** The loader's two per-section extent arrays — the `p2`-indexed `$1C650`
+  and the `attr`-indexed `$1C718` — are the left/right edges of the ribbon. On a
+  straight `p2 == attr` so they agree; on a curve they diverge, by the amount the road
+  banks. So `$1C650 − $1C718` is the **camber**, not the height (an earlier draft
+  used it as elevation, which was wrong — its bumps sit on the corners, where roads
+  bank, not on the ramps).
+* **Elevation.** The column height is a separate vertical profile. The projection
+  `$5C6C4` builds each vertex's screen position from the section's per-type
+  **piece-shape** (`$1EF82 + (type&$F)*2`) plus the `type & $10` "raised" bit, so the
+  rise lives there — but the exact decode is not yet pinned, and won't be guessed.
 
-It behaves exactly as a track profile should: **zero on every straight** and rising
-only over the features, returning to the reference across the lap. The features land
-where the track names promise — *Little Ramp* and *Big Ramp* each one ramp, *Hump Back*
-a run of humps, *Roller Coaster* a string of them, and *Draw Bridge* a single large
-up-then-down swing (the bridge). `package track` sets `Elev` from this difference,
-`cmd/trackjson` exports it, and the viewer lifts the ribbon by it — the tracks now
-stand up in 3-D.
+The plan to finish it is to trace the **preview renderer** itself (it computes absolute
+world `(x, height, z)` for every section to draw the whole track from outside, unlike
+the camera-relative in-race renderer), read out the per-section column height, and
+reimplement that — validated against the preview screenshots (Big Ramp's single ramp,
+Stepping Stones nearly flat, Roller Coaster's run of hills).
 
-Both extents are the verified `$5AE46` arrays (coordinate-exact vs the oracle), so the
-profile is read straight from decoded data, not fitted; the one free choice is the
-vertical scale in the viewer. The finer per-vertex shape (banking across the ribbon,
-the kerbs) lives in the per-type piece-shapes the projection reads, and is a further
-refinement.
-
-*Refinements: banking/kerbs from the per-type shapes; Part V — the physics.*
+*Elevation from the preview renderer; then Part V — the physics.*
 
 ---
 

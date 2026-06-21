@@ -35,19 +35,20 @@
       filesystem; a table of handles at <code>$1F0A2</code> locates each track's byte
       stream, which is a run-length-encoded list of sections that the loader
       (<code>$5AE46</code>) walks to lay out the circuit. This viewer re-runs that walk
-      (package <code>track</code>) to place each section node, then draws the track as a
-      <b>hidden-line wireframe</b> ribbon — the two rails plus a rung per section,
+      (package <code>track</code>) and lays each circuit out in plan by accumulating each
+      section's <em>heading</em> — its <code>type</code>'s quadrant plus the fine
+      direction packed into the section parameter — then draws the track as a
+      <b>hidden-line wireframe</b> ribbon: the two rails plus a rung per section,
       coloured along the lap (blue → red) with the green marker at the start/finish
-      line. The section decode (types, parameters, segment lengths) and these node
-      arrays are verified <b>coordinate-exact</b> against the original loader executed on
-      our Go 68000 core, for all eight tracks.
+      line. The underlying section decode (types, parameters, segment lengths) is
+      verified <b>coordinate-exact</b> against the original loader executed on our Go
+      68000 core, for all eight tracks; the heading layout is a reconstruction, pinned by
+      the constraint that every circuit must close into a loop — and it does, into the
+      figure-eights, crossovers and weaves of the real tracks.
       <br /><br />
-      <b>Work in progress:</b> these node arrays are the loader's internal section
-      layout, not yet the final 3-D world centre-line, so each circuit currently reads
-      as a flattened plan. The renderer composes the visible track from these plus a
-      per-section <em>heading</em> and <em>elevation</em> (the ramps, jumps and famous
-      over-passes); recovering that world transform is the active next step, after which
-      the tracks will stand up properly in 3-D. See the
+      <b>Work in progress:</b> the ribbon is flat — the per-section <em>elevation</em>
+      (the ramps, jumps and famous over-passes) is a separate vertical profile still
+      being reverse-engineered, after which the tracks will stand up in 3-D. See the
       <a href="https://github.com/StupidCoder/AIReverseEngineering/blob/main/Stunt%20Car%20Racer%20(Amiga)/Stunt_Car_Racer.md">write-up</a>
       (Part IV) for how the track format was decoded.
     </p>

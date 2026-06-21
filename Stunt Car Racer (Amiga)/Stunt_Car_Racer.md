@@ -53,6 +53,7 @@ way (the eight tracks located and extracted, section grammar in progress); Part 
   - [3. The section stream and spine builder](#3-the-section-stream-rle-and-the-spine-builder)
   - [4. A verified Go decoder](#4-a-verified-go-decoder)
   - [5. The spine geometry and re-drawing the circuits](#5-the-spine-geometry-and-re-drawing-the-circuits)
+  - [6. The world plan (heading layout)](#6-the-world-plan-heading-layout)
 - [Part V — The physics simulation](#part-v--the-physics-simulation)
 - [Appendix A — Toolchain and reproduction](#appendix-a--toolchain-and-reproduction)
 
@@ -506,24 +507,48 @@ evidence that one of `$1C650`/`$1C718` is the **vertical** (the `a4`/`a5` pair r
 horizontal/vertical cross-sections), so the raw plot is closer to a side profile than
 a plan.
 
-**Open problem.** The visible 3-D circuit is composed from `(base position, heading,
-elevation)` in the render path, which is heavy view-space code (and hangs in the
-oracle without a full race/camera setup). Recovering that world transform faithfully —
-the heading accumulation and the vertical axis — is the active next step. Several
-direct reconstructions (treating `p1` as a 256-step angle, as a packed `(dx,dy)`
-vector, with `type&$C0` quadrants) were tried and rejected: none close the circuits.
-The plan is to drive the pre-race **3-D track-preview renderer** (which draws the whole
-circuit from outside) on the `tools/m68k` core with the correct entry state, read out
-the true per-section world vertices to *guide* the work, and reimplement that in Go
-(verified against it) — the same oracle-guided method that pinned the section format.
+So `$1C650/$1C718` are *base positions*, and the visible circuit is composed from them
+plus a per-section **heading**. That heading is what §6 recovers.
+
+## 6. The world plan (heading layout)
+
+The renderer turns a section into a world direction in `$5FF94`: it splits the section
+parameter `p1` into its two nibbles, forms the intra-quadrant vector
+`(p1.lo − 8, p1.hi − 8)`, and rotates/reflects it by a **quadrant**. For the static
+track the quadrant is the section's own `type & $C0`. Accumulating that displacement
+section by section lays out the circuit:
+
+```
+plan = (0,0)
+for each section i:
+    node[i].plan = plan
+    (dx,dy) = (p1.lo − 8, p1.hi − 8)
+    plan += quadrant_rotate(dx, dy, type & $C0)
+```
+
+The four quadrant transforms (`$00 → (dx,dy)`, `$40 → (dy,dx)`, `$80 → (−dx,dy)`,
+`$C0 → (−dy,dx)`) were pinned by a hard constraint: **every one of the eight circuits
+must close into a loop.** Under that constraint the layout falls out unambiguously and
+produces the real tracks — the figure-eights, crossovers and weaves that *Stunt Car
+Racer* is known for (Roller Coaster and Draw Bridge cross themselves repeatedly; Ski
+Jump is a tight loop with its jump straight). `package track` computes this in its
+second pass (`planStep`), and `cmd/trackjson` exports it.
+
+This is a *reconstruction*, not (yet) a coordinate-exact match: it reproduces the
+circuit topology and shape, but the exact per-section step magnitudes and the vertical
+profile still come from the render path. The plan tightens to a clean closed loop for
+every track, which — together with matching the known track shapes — is strong
+evidence the heading model is right.
 
 **The web viewer** (`extract/cmd/trackjson` → `site/public/stuntcar/tracks.json`,
-`site/stuntcar.html` + `site/src/stuntcar/`) draws each section's node array as a
-hidden-line wireframe ribbon, and is **honestly labelled work-in-progress**: it shows
-the verified internal layout, not the final 3-D circuit, pending the world transform
-above.
+`site/stuntcar.html` + `site/src/stuntcar/`) draws the reconstructed plan of each
+circuit as a hidden-line wireframe ribbon. It is flat for now; the per-section
+**elevation** (the ramps, jumps and over-passes) is the remaining vertical profile —
+the `$5A1A6` renderer reads two offset shapes per vertex (one horizontal, one
+vertical), so the elevation is carried by the second (`attr`-indexed) shape and the
+type's high bits, still to be decoded.
 
-*World centre-line (heading + elevation) via the preview renderer: next.*
+*Elevation (vertical profile) + exact step magnitudes: next.*
 
 ---
 

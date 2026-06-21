@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-const WIDTH = 320; // nominal half-width of the track ribbon, in world units
+const WIDTH = 2.5; // nominal half-width of the track ribbon, in plan units
 
 export class TrackViewer {
   constructor(el) {
@@ -50,10 +50,9 @@ export class TrackViewer {
     if (t.group) { t.scene.remove(t.group); disposeGroup(t.group); }
     const group = new THREE.Group();
 
-    // Nodes -> centre-line points. The decoder's X,Z are a 45°-rotated pair (straight
-    // sections advance X and Z equally), so the true world axes are (X+Z, X−Z); without
-    // this the whole circuit collapses onto the X=Z diagonal and reads as a line.
-    const pts = track.nodes.map(n => ({ x: n[0] + n[1], z: n[0] - n[1], y: 0 }));
+    // Nodes -> centre-line points. n[0],n[1] are the reconstructed world plan (the
+    // actual circuit); the ribbon is flat for now (elevation still being recovered).
+    const pts = track.nodes.map(n => ({ x: n[0], z: n[1], y: 0 }));
     const n = pts.length;
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
     for (const p of pts) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z); }

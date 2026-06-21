@@ -73,14 +73,16 @@ const CRT_FRAG = /* glsl */`
               + texture2D(tScene, uv + g).rgb
               + texture2D(tScene, uv - g).rgb;
     col += glow * 0.10;
-    // scanlines: one dark gap per source row
-    float scan = 0.5 + 0.5 * cos(uv.y * uSceneRes.y * 2.0 * PI);
-    col *= mix(1.0, scan, 0.35);
-    // aperture-grille RGB mask, 3 CSS px per triad
-    float tri = mod(floor(vUv.x * uOutRes.x), 3.0);
-    vec3 mask = (tri < 1.0) ? vec3(1.0, 0.55, 0.55)
-              : (tri < 2.0) ? vec3(0.55, 1.0, 0.55)
-                            : vec3(0.55, 0.55, 1.0);
+    // Scanlines and the RGB mask live at the OUTPUT pixel level (gl_FragCoord, in
+    // device px), so they are a genuinely fine CRT structure over the chunky
+    // low-res image — not tied to the source pixel size (which is what made them
+    // blend in before). Scanlines: ~3 device-px pitch; mask: 3-px RGB triads.
+    float scan = 0.55 + 0.45 * cos(gl_FragCoord.y * (2.0 * PI / 3.0));
+    col *= scan;
+    float tri = mod(floor(gl_FragCoord.x), 3.0);
+    vec3 mask = (tri < 1.0) ? vec3(1.0, 0.45, 0.45)
+              : (tri < 2.0) ? vec3(0.45, 1.0, 0.45)
+                            : vec3(0.45, 0.45, 1.0);
     col *= mask;
     col *= 1.7; // compensate for the mask/scanline darkening
     vec2 vd = vUv * 2.0 - 1.0; // vignette

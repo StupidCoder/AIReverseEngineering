@@ -33,6 +33,9 @@ const FLICKER_RATE = 0.37;
 // -neighbour (LORES_H = internal height in pixels; width follows the aspect).
 const OLD_FPS = 12;
 const LORES_H = 168;
+// Glow buffer height (fixed, so the blur radius is a constant fraction of the
+// screen regardless of the main render resolution). Width follows the aspect.
+const GLOW_H = 200;
 
 // CRT post-process. In old-school mode the scene is rendered into a small
 // (LORES_H-tall) texture, then this shader draws that texture to the full-res
@@ -44,11 +47,29 @@ const CRT_VERT = /* glsl */`
   varying vec2 vUv;
   void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
 `;
+// Separable Gaussian blur (5-sample, linear-weighted) used to build the glow.
+// uTexel is the 1-texel step along one axis: (1/w, 0) then (0, 1/h).
+const BLUR_FRAG = /* glsl */`
+  varying vec2 vUv;
+  uniform sampler2D tSrc;
+  uniform vec2 uTexel;
+  void main() {
+    vec2 o1 = uTexel * 1.3846153846;
+    vec2 o2 = uTexel * 3.2307692308;
+    vec3 s = texture2D(tSrc, vUv).rgb * 0.2270270270
+           + texture2D(tSrc, vUv + o1).rgb * 0.3162162162
+           + texture2D(tSrc, vUv - o1).rgb * 0.3162162162
+           + texture2D(tSrc, vUv + o2).rgb * 0.0702702703
+           + texture2D(tSrc, vUv - o2).rgb * 0.0702702703;
+    gl_FragColor = vec4(s, 1.0);
+  }
+`;
 const CRT_FRAG = /* glsl */`
   varying vec2 vUv;
   uniform sampler2D tScene;
-  uniform vec2 uSceneRes; // off-screen render-target size
-  uniform float uCRT;     // 1 = full CRT, 0 = plain (chunky) upscale only
+  uniform sampler2D tGlow; // pre-blurred glow (a real Gaussian, so round + ring-free)
+  uniform vec2 uSceneRes;  // off-screen render-target size
+  uniform float uCRT;      // 1 = full CRT, 0 = plain (chunky) upscale only
   const float PI = 3.14159265;
 
   vec2 curve(vec2 uv) {            // barrel screen curvature
@@ -56,25 +77,6 @@ const CRT_FRAG = /* glsl */`
     vec2 off = abs(uv.yx) * vec2(0.045, 0.060);
     uv += uv * off * off;
     return uv * 0.5 + 0.5;
-  }
-
-  // soft, linearly-sampled glow: rings of taps at two radii with a falloff, so
-  // it's a smooth halo (not the chunky source pixels), brighter near the line.
-  // The radius is a fraction of the OUTPUT image height (aspect-corrected to x so
-  // the halo is round), NOT source texels — so its width on screen is the same
-  // whether the input is blocky (lo-res) or full-res.
-  vec3 glowAt(vec2 uv) {
-    vec2 unit = vec2(uSceneRes.y / uSceneRes.x, 1.0); // (1/aspect, 1): circular in screen space
-    vec3 g = vec3(0.0);
-    vec2 a = unit * 0.010; // inner ring (~1% of image height)
-    g += (texture2D(tScene, uv + vec2( a.x, 0.0)).rgb + texture2D(tScene, uv + vec2(-a.x, 0.0)).rgb
-        + texture2D(tScene, uv + vec2(0.0,  a.y)).rgb + texture2D(tScene, uv + vec2(0.0, -a.y)).rgb) * 0.6;
-    g += (texture2D(tScene, uv + vec2( a.x,  a.y)).rgb + texture2D(tScene, uv + vec2(-a.x,  a.y)).rgb
-        + texture2D(tScene, uv + vec2( a.x, -a.y)).rgb + texture2D(tScene, uv + vec2(-a.x, -a.y)).rgb) * 0.4;
-    vec2 b = unit * 0.022; // outer ring (~2.2%), dimmer and wider
-    g += (texture2D(tScene, uv + vec2( b.x, 0.0)).rgb + texture2D(tScene, uv + vec2(-b.x, 0.0)).rgb
-        + texture2D(tScene, uv + vec2(0.0,  b.y)).rgb + texture2D(tScene, uv + vec2(0.0, -b.y)).rgb) * 0.18;
-    return g;
   }
 
   void main() {
@@ -87,7 +89,7 @@ const CRT_FRAG = /* glsl */`
     vec3 col = texture2D(tScene, (floor(uv * uSceneRes) + 0.5) / uSceneRes).rgb;
 
     if (uCRT > 0.5) {
-      col += glowAt(uv) * 0.07; // phosphor bloom
+      col += texture2D(tGlow, uv).rgb * 0.85; // smooth, round phosphor glow
       // scanlines + RGB mask at the OUTPUT pixel level (gl_FragCoord, device px),
       // so they are a fine CRT structure over the (possibly chunky) image.
       col *= 0.6 + 0.4 * cos(gl_FragCoord.y * (2.0 * PI / 3.0)); // scanlines, ~3px pitch
@@ -250,28 +252,54 @@ export class ShipViewer {
     this._applyResolution();
   }
 
-  // _buildPost sets up the off-screen render target and the full-screen quad that
-  // upscales it — chunky pass-through when only lo-res is on, full CRT shader when
-  // CRT is on (uCRT). Only used when crt or lowRes is active.
+  // _buildPost sets up the off-screen targets, the glow pipeline and a shared
+  // full-screen quad. _blit draws a material to a target via that quad.
   _buildPost() {
-    // LINEAR so the CRT glow taps interpolate smoothly; the main image is kept
-    // blocky by snapping to texel centres in the shader.
-    this.postTarget = new THREE.WebGLRenderTarget(320, LORES_H, {
-      minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+    const rt = (w, h) => new THREE.WebGLRenderTarget(w, h, {
+      minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: true,
+    });
+    this.postTarget = rt(320, LORES_H);     // the (possibly low-res) scene
+    this.glowA = rt(320, GLOW_H);           // glow ping-pong buffers (fixed size)
+    this.glowB = rt(320, GLOW_H);
+    this.blurMaterial = new THREE.ShaderMaterial({
+      uniforms: { tSrc: { value: null }, uTexel: { value: new THREE.Vector2() } },
+      vertexShader: CRT_VERT, fragmentShader: BLUR_FRAG, depthTest: false, depthWrite: false,
     });
     this.postMaterial = new THREE.ShaderMaterial({
       uniforms: {
         tScene: { value: this.postTarget.texture },
+        tGlow: { value: this.glowA.texture },
         uSceneRes: { value: new THREE.Vector2(320, LORES_H) },
         uCRT: { value: 0 },
       },
-      vertexShader: CRT_VERT,
-      fragmentShader: CRT_FRAG,
-      depthTest: false, depthWrite: false,
+      vertexShader: CRT_VERT, fragmentShader: CRT_FRAG, depthTest: false, depthWrite: false,
     });
     this.postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    this.postScene = new THREE.Scene();
-    this.postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.postMaterial));
+    this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.postMaterial);
+    this.quadScene = new THREE.Scene();
+    this.quadScene.add(this.quad);
+  }
+
+  _blit(material, target) {
+    this.quad.material = material;
+    this.renderer.setRenderTarget(target);
+    this.renderer.render(this.quadScene, this.postCam);
+  }
+
+  // _buildGlow renders the scene small and Gaussian-blurs it (two separable
+  // iterations) into glowA — a smooth, round, ring-free halo source.
+  _buildGlow() {
+    const gw = this.glowA.width, gh = this.glowA.height;
+    this.renderer.setRenderTarget(this.glowA);
+    this.renderer.render(this.scene, this.camera); // a small render of the same scene
+    for (let i = 0; i < 2; i++) {
+      this.blurMaterial.uniforms.tSrc.value = this.glowA.texture;
+      this.blurMaterial.uniforms.uTexel.value.set(1 / gw, 0);
+      this._blit(this.blurMaterial, this.glowB);
+      this.blurMaterial.uniforms.tSrc.value = this.glowB.texture;
+      this.blurMaterial.uniforms.uTexel.value.set(0, 1 / gh);
+      this._blit(this.blurMaterial, this.glowA);
+    }
   }
 
   async init() {
@@ -316,13 +344,13 @@ export class ShipViewer {
         this.current.updateForCamera(this.camera.position, this.flicker ? this.flickerPhase : -1);
       }
       if (this.crt || this.lowRes) {
-        // render the scene off-screen, then upscale via the post shader (CRT or
-        // a plain chunky pass-through depending on uCRT).
-        this.postMaterial.uniforms.uCRT.value = this.crt ? 1 : 0;
+        // render the scene off-screen, (optionally) build the glow, then composite
+        // via the post shader (CRT or a plain chunky pass-through depending on uCRT).
         this.renderer.setRenderTarget(this.postTarget);
         this.renderer.render(this.scene, this.camera);
-        this.renderer.setRenderTarget(null);
-        this.renderer.render(this.postScene, this.postCam);
+        if (this.crt) this._buildGlow();
+        this.postMaterial.uniforms.uCRT.value = this.crt ? 1 : 0;
+        this._blit(this.postMaterial, null);
       } else {
         this.renderer.render(this.scene, this.camera);
       }
@@ -349,6 +377,10 @@ export class ShipViewer {
       const th = this.lowRes ? LORES_H : Math.round(h * pr);
       this.postTarget.setSize(tw, th);
       this.postMaterial.uniforms.uSceneRes.value.set(tw, th);
+      // glow buffers: fixed height, aspect-matched width (screen-relative blur)
+      const gw = Math.max(2, Math.round(GLOW_H * w / h));
+      this.glowA.setSize(gw, GLOW_H);
+      this.glowB.setSize(gw, GLOW_H);
     }
   }
 

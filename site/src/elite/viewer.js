@@ -249,6 +249,8 @@ export class ShipViewer {
   setEffect(name, on) {
     this[name] = on;
     if (name === 'crt' && this.hud) this.hud.style.display = on ? 'none' : ''; // overlay off on a CRT
+    // single-pixel stars in lo-res (so they read as one chunky pixel, not a blob)
+    if (name === 'lowRes' && this.stars) this.stars.material.size = on ? 1 : 2;
     this._applyResolution();
   }
 
@@ -316,7 +318,8 @@ export class ShipViewer {
     this.camera = new THREE.PerspectiveCamera(fov, 1, 0.1, 200000);
 
     // Stars on a sphere well beyond any ship; a calm vector-graphics backdrop.
-    this.scene.add(makeStarfield(500, 60000));
+    this.stars = makeStarfield(500, 60000);
+    this.scene.add(this.stars);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;

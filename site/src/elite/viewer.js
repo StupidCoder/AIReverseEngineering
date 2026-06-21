@@ -33,6 +33,7 @@ const FLICKER_RATE = 0.37;
 // -neighbour (LORES_H = internal height in pixels; width follows the aspect).
 const OLD_FPS = 12;
 const LORES_H = 168;
+const AUTO_ROTATE_SPEED = 1.1; // idle spin (made frame-rate independent in the tick)
 // Glow buffer height (fixed, so the blur radius is a constant fraction of the
 // screen regardless of the main render resolution). Width follows the aspect.
 const GLOW_H = 200;
@@ -328,7 +329,7 @@ export class ShipViewer {
     this.controls.rotateSpeed = 0.9;
     this.controls.zoomSpeed = 4.0;
     this.controls.autoRotate = true;
-    this.controls.autoRotateSpeed = 1.1;
+    this.controls.autoRotateSpeed = AUTO_ROTATE_SPEED;
     // Once the user grabs the ship, stop the idle spin for good.
     this.controls.addEventListener('start', () => { this.controls.autoRotate = false; });
 
@@ -340,7 +341,11 @@ export class ShipViewer {
     const tick = (now) => {
       requestAnimationFrame(tick);
       if (this.lowFps && now - lastRender < 1000 / OLD_FPS) return; // ~12 fps throttle
+      // time-based idle spin: scale the per-update angle by the real elapsed time
+      // so the rotation runs at the same speed regardless of the (throttled) fps.
+      const dt = lastRender ? Math.min(0.1, (now - lastRender) / 1000) : 1 / 60;
       lastRender = now;
+      if (this.controls.autoRotate) this.controls.autoRotateSpeed = AUTO_ROTATE_SPEED * 60 * dt;
       this.controls.update();
       if (this.flicker) this.flickerPhase = (this.flickerPhase + FLICKER_RATE) % 1;
       if (this.current) {

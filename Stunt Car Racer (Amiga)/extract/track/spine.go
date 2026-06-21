@@ -44,6 +44,14 @@ type Node struct {
 	// values is a drivable slope, a sudden jump is a hard edge (e.g. a Big Ramp jump
 	// lip) — so no heuristic classifier is needed.
 	HeightL, HeightR []int
+	// PlanLX/PlanLZ, PlanRX/PlanRZ are the exact per-rung left/right rail positions in the
+	// section's LOCAL frame (+z forward, x lateral) — the (x,z) vertex pairs the engine's
+	// $5C6C4 reads from the per-type piece-shape (so straights are straight, curve pieces
+	// carry their real arc). Verified exact vs the engine (cmd/planoracle). PlanOff is the
+	// byte offset of vertex 0's pair within the shape (a0[0]+7); the viewer places these
+	// by a similarity fit onto the verified grid anchors.
+	PlanLX, PlanLZ, PlanRX, PlanRZ []int
+	PlanOff                        int
 }
 
 // Track is a decoded circuit: its sections' plan-view nodes plus the header.
@@ -122,6 +130,36 @@ func (im *Image) railProfile(n *Node) {
 	for k := 0; k < rungs; k++ {
 		n.HeightL[k] = im.railHeight(a4, a5, bx, bz, n.P2, 2*k)
 		n.HeightR[k] = im.railHeight(a4, a5, bx, bz, n.P2, 2*k+1)
+	}
+}
+
+// s16le reads a signed 16-bit little-endian value (the shape's plan coords are LE; the
+// engine builds them in $5C6C4 as byte[a+1]<<8 | byte[a]).
+func (im *Image) s16le(a int) int {
+	v := im.u8(a) | im.u8(a+1)<<8
+	return int(int16(uint16(v)))
+}
+
+// planProfile fills a node's per-rung local plan outline from the per-type piece-shape.
+// The vertex (x,z) pairs start at shape offset a0[0]+7, stride 4 bytes, vertex k at +4k
+// ($5C6C4 read by the draw loop $65CDC: d2 = 2*d1 + $1BB91, $1BB91 = a0[0]+7). Even
+// vertex = left rail, odd = right rail — the same interleave as the heights, so rung j
+// uses vertices 2j (left) and 2j+1 (right).
+func (im *Image) planProfile(n *Node) {
+	nib := n.Type & 0x0F
+	shp := handle(im.u16(dataBase + 2*nib))
+	off := im.u8(shp)
+	rungs := im.u8(shp+off) / 2
+	n.PlanOff = off + 7
+	n.PlanLX = make([]int, rungs)
+	n.PlanLZ = make([]int, rungs)
+	n.PlanRX = make([]int, rungs)
+	n.PlanRZ = make([]int, rungs)
+	for j := 0; j < rungs; j++ {
+		l := shp + n.PlanOff + 4*(2*j)
+		r := shp + n.PlanOff + 4*(2*j+1)
+		n.PlanLX[j], n.PlanLZ[j] = im.s16le(l), im.s16le(l+2)
+		n.PlanRX[j], n.PlanRZ[j] = im.s16le(r), im.s16le(r+2)
 	}
 }
 
@@ -224,6 +262,8 @@ func (im *Image) Spine(id int) Track {
 		nodes[i].Bank = l - r
 		// Exact per-rung surface profile (the steps/slopes/jumps), verified vs oracle.
 		im.railProfile(&nodes[i])
+		// Exact per-rung local plan outline (straights/arcs), verified vs $5C6C4.
+		im.planProfile(&nodes[i])
 	}
 
 	return Track{Sections: count, FinishIdx: off(1), Nodes: nodes}

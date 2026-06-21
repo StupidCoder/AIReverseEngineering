@@ -1,17 +1,16 @@
-// Stunt Car Racer — track ribbon viewer. The geometry is the verified plan-view
-// spine (package track, Part IV §5): the section grid plan plus, for each section, the
-// exact per-rung left/right rail-height profile — the engine's vertex builder $5C0AA
-// reproduced in Go and verified coordinate-exact against the original (cmd/geomoracle).
-// Decoded purely from the disk and exported to tracks.json. We lay the rungs along a
-// spline through the section grid cells, lift each by its rail heights (their difference
-// is the real camber), and render the result as a hidden-line wireframe (invisible depth
-// fill + colour LineSegments, the same technique as the Marble Madness slope viewer).
-// The surface — flat, ramp, hill or hard jump edge — is whatever the profile data says;
-// no heuristic decides step-vs-slope.
+// Stunt Car Racer — track ribbon viewer. The geometry is entirely the engine's own,
+// decoded purely from the disk in Go (package track, Part IV) and verified against the
+// original on our m68k core. Per section we use: the 16x16 grid plan anchor; the exact
+// per-rung left/right rail-HEIGHT profile (the engine's vertex builder $5C0AA, verified
+// by cmd/geomoracle) — flat, ramp, hill or hard jump edge, whatever the data says, with
+// no heuristic deciding step-vs-slope; and the exact local plan OUTLINE (the (x,z) vertex
+// pairs $5C6C4 reads from the piece-shape, verified by cmd/planoracle) — so straights are
+// straight and curve pieces carry their real arc. We similarity-fit each outline onto its
+// grid-anchor segment, lift each rung by its rail heights (their difference is the real
+// camber), and render a hidden-line wireframe (invisible depth fill + colour LineSegments,
+// the Marble Madness slope-viewer technique).
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-
-const WIDTH = 0.32; // nominal half-width of the track ribbon, in grid-cell units
 
 export class TrackViewer {
   constructor(el) {
@@ -76,43 +75,45 @@ export class TrackViewer {
     for (const pr of track.profiles) for (const h of pr[0]) minH = Math.min(minH, h);
     for (const pr of track.profiles) for (const h of pr[1]) minH = Math.min(minH, h);
 
-    const cm = (a, b, c, d, t) => { const u = t * t, w = u * t; return 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * u + (-a + 3 * b - 3 * c + d) * w); };
-    const cmPt = (P, Q, R2, T, t) => ({ x: cm(P.x, Q.x, R2.x, T.x, t), z: cm(P.z, Q.z, R2.z, T.z, t) });
     const Ai = i => A[((i % n) + n) % n];
+    const SX = p => (p.x - cx) * S, SZ = p => (p.z - cz) * S;
 
-    // Walk the circuit rung by rung. Each section i spans plan param [i, i+1); rung k of
-    // its profile sits at fraction k/rungs along a Catmull-Rom through the grid anchors,
-    // so the curves round out exactly where the pieces carry more rungs. The rung's left
-    // and right rail heights come straight from the profile (their difference is the real
-    // camber — no separate banking term needed).
-    const centres = [], hl = [], hr = [];
+    // Build the ribbon by similarity-fitting each section's EXACT local plan outline
+    // (track.outlines[i] = [ [[Lx,Lz]..], [[Rx,Rz]..] ], the (x,z) vertex pairs $5C6C4
+    // reads from the piece-shape) onto its grid-anchor segment. We map the outline's
+    // local centreline start -> A[i] and end -> A[i+1] with a rotation + uniform scale
+    // (one complex multiply, w = targetChord / localChord), so straights stay straight,
+    // curve pieces carry their real arc, and consecutive sections share the anchor (the
+    // ribbon is continuous). The two rails come straight from the outline — their width
+    // and any asymmetry are exact; heights come from the profile (their difference is the
+    // real camber). No spline, no nominal width: this is the engine's own geometry.
+    const rings = [];
     for (let i = 0; i < n; i++) {
-      const pr = track.profiles[i];
-      const L = pr[0], R = pr[1], rungs = Math.min(L.length, R.length);
-      for (let k = 0; k < rungs; k++) {
-        const t = k / rungs;
-        centres.push(cmPt(Ai(i - 1), Ai(i), Ai(i + 1), Ai(i + 2), t));
-        hl.push((L[k] - minH) * HK);
-        hr.push((R[k] - minH) * HK);
+      const Lp = track.outlines[i][0], Rp = track.outlines[i][1];
+      const pr = track.profiles[i], HL = pr[0], HR = pr[1];
+      const rungs = Math.min(Lp.length, Rp.length, HL.length, HR.length);
+      if (rungs === 0) continue;
+      const c0x = (Lp[0][0] + Rp[0][0]) / 2, c0z = (Lp[0][1] + Rp[0][1]) / 2;
+      const cEx = (Lp[rungs - 1][0] + Rp[rungs - 1][0]) / 2, cEz = (Lp[rungs - 1][1] + Rp[rungs - 1][1]) / 2;
+      const a = Ai(i), b = Ai(i + 1);
+      const ux = cEx - c0x, uz = cEz - c0z;          // local chord (complex u)
+      const vx = b.x - a.x, vz = b.z - a.z;          // target grid chord (complex v)
+      const inv = 1 / (ux * ux + uz * uz || 1);
+      const wr = (vx * ux + vz * uz) * inv;          // w = v / u : real (scale*cos)
+      const wi = (vz * ux - vx * uz) * inv;          //            imag (scale*sin)
+      const tf = (px, pz) => {
+        const dx = px - c0x, dz = pz - c0z;
+        return { x: a.x + dx * wr - dz * wi, z: a.z + dx * wi + dz * wr };
+      };
+      for (let j = 0; j < rungs; j++) {
+        const wl = tf(Lp[j][0], Lp[j][1]), wright = tf(Rp[j][0], Rp[j][1]);
+        rings.push({
+          l: { x: SX(wl), z: SZ(wl) }, r: { x: SX(wright), z: SZ(wright) },
+          hl: (HL[j] - minH) * HK * S, hr: (HR[j] - minH) * HK * S,
+        });
       }
     }
-    const m = centres.length;
-
-    // Offset each rung centre by the local normal to make the two rails, and scale into
-    // grid units (centred on the plan). The normal comes from the spline tangent.
-    const rings = [];
-    for (let k = 0; k < m; k++) {
-      const a = centres[(k - 1 + m) % m], b = centres[(k + 1) % m];
-      let dx = b.x - a.x, dz = b.z - a.z;
-      const len = Math.hypot(dx, dz) || 1; dx /= len; dz /= len;
-      const nx = -dz, nz = dx; // left normal
-      const c = centres[k];
-      rings.push({
-        l: { x: (c.x + nx * WIDTH - cx) * S, z: (c.z + nz * WIDTH - cz) * S },
-        r: { x: (c.x - nx * WIDTH - cx) * S, z: (c.z - nz * WIDTH - cz) * S },
-        hl: hl[k] * S, hr: hr[k] * S,
-      });
-    }
+    const m = rings.length;
     const V = (p, y) => new THREE.Vector3(p.x, y, p.z);
 
     // Invisible depth fill (the ribbon surface) for hidden-line removal.

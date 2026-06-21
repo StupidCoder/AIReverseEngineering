@@ -55,9 +55,13 @@
       <em>are</em> the surface: a smooth run of values is a drivable ramp or rolling hill,
       a sudden jump is a hard edge — the three pairs of steep lips on Big Ramp, the square
       gaps between the Stepping Stones, the Ski Jump's launch. <b>No heuristic decides
-      step-vs-slope; the data does.</b> The rungs are laid along a spline through the
-      section grid cells, so curves round out exactly where their pieces carry more rungs;
-      each rung's left and right rail heights differ by the real camber.
+      step-vs-slope; the data does.</b> The in-plane shape is exact too: each section's
+      <em>plan outline</em> — the <code>(x,z)</code> rail vertices the engine's
+      <code>$5C6C4</code> reads from the piece (verified by <code>cmd/planoracle</code>) —
+      is similarity-fitted onto its grid cell, so straights stay straight and curve pieces
+      carry their real arc, with the exact rail width. There is <b>no spline and no nominal
+      width</b>: the whole ribbon is the engine's own geometry, lifted by the exact rail
+      heights whose difference is the real camber.
       <br /><br />
       Drag to rotate, scroll to zoom. See the
       <a href="https://github.com/StupidCoder/AIReverseEngineering/blob/main/Stunt%20Car%20Racer%20(Amiga)/Stunt_Car_Racer.md">write-up</a>

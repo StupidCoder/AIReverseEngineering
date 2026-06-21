@@ -617,11 +617,41 @@ surface.
 This is verified the strict way: `cmd/geomoracle` runs the engine's own `$5FE56`+`$5C0AA`
 on the m68k core and the Go reimplementation in `package track` (`railHeight`/
 `railProfile`) reproduces every rung of every section of all eight tracks **coordinate-
-exact**. `cmd/trackjson` exports the profiles, and the viewer lays each section's rungs
-along a spline through its grid cell, lifts each rung by its left/right rail heights
-(their difference is the camber), and draws support columns to the ground. The plan
-footprint within a section (the curve rounding from `$5C6C4`) is approximated by the
-spline for now; the **surface** is exact.
+exact**.
+
+### The plan outline (`$5C6C4`)
+
+The other half of each piece is its **plan footprint** — the `(x,z)` shape of the rung
+strip seen from above. The draw loop (`$65CDC`) reads it with `$5C6C4`, which fetches two
+consecutive 16-bit little-endian values at byte offset `d2` in the per-type piece-shape
+and adds the section base, rotating by quadrant. The vertex pairs are a flat array:
+
+```
+plan vertex k = LE16 pair at  a0[0] + 7 + 4k     (even k = left rail, odd = right rail)
+                d2 = 2*d1 + $1BB91 ,  $1BB91 = a0[0]+7        (the draw loop's index math)
+```
+
+Read out, these are exactly the piece's local outline (`+z` forward, `x` lateral): the
+straight piece (`nib 0`) is two parallel rails of width 384 marching `z = 0,256,…,2048`;
+the curve pieces (`nib 6`/`7`) are mirror-image arcs; ramps carry their own profiles. The
+left/right rails are independent, so the rail **width** (and any asymmetry through a bend)
+is exact, not a nominal constant. `cmd/planoracle` drives `$5C6C4` in the canonical frame
+(zero base, zero quadrant) and confirms `package track`'s `planProfile` matches it
+**exactly** on every vertex of all eight tracks.
+
+The renderer itself only ever builds *view-space* points (it walks outward from the car,
+`$1BB22 = dir*8 + cameraPos`), so there is no clean absolute top-down accumulator to lift.
+But there doesn't need to be: the section's **absolute** placement is the verified 16×16
+grid (`p1`), exactly as the engine uses it (`$5FE04`), and that closes every circuit. So
+the viewer similarity-fits each section's exact local outline onto its grid-anchor segment
+— mapping the outline's local centreline start→`A[i]` and end→`A[i+1]` with a rotation and
+uniform scale (one complex multiply). Straights stay straight, curve pieces carry their
+real arc, consecutive sections share the anchor (the ribbon is continuous), and every rung
+is lifted by its exact left/right rail heights. `cmd/trackjson` exports both the height
+profiles and the plan outlines; the viewer needs **no spline and no nominal width** — the
+geometry is entirely the engine's own. **Part IV is complete: the track geometry —
+footprint, surface and camber — is decoded purely from the disk in Go and verified
+coordinate-exact against the original.**
 
 *Part V — the physics.*
 

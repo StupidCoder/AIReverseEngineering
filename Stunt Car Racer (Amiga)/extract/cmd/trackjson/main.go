@@ -31,6 +31,11 @@ type outTrack struct {
 	// left/right rail heights along the section (the in-game surface — flat, slope, or
 	// hard jump edge), verified coordinate-exact vs the engine (cmd/geomoracle).
 	Profiles [][][]int `json:"profiles"`
+	// Per-section exact local plan outline: outlines[i] = [ [[Lx,Lz]..], [[Rx,Rz]..] ],
+	// the left/right rail (x,z) vertex pairs in the section's local frame (+z forward),
+	// the piece's real shape (straight or arc) the engine's $5C6C4 reads. Verified exact
+	// (cmd/planoracle). The viewer similarity-fits these onto the grid anchors.
+	Outlines [][][][]int `json:"outlines"`
 }
 
 func main() {
@@ -51,11 +56,19 @@ func main() {
 		t := im.Spine(id)
 		ns := make([][]int, len(t.Nodes))
 		profs := make([][][]int, len(t.Nodes))
+		outs := make([][][][]int, len(t.Nodes))
 		for i, n := range t.Nodes {
 			ns[i] = []int{n.PlanX, n.PlanY, n.Height, n.Bank, n.Type, n.P1, n.P2, n.Attr}
 			profs[i] = [][]int{n.HeightL, n.HeightR}
+			l := make([][]int, len(n.PlanLX))
+			r := make([][]int, len(n.PlanRX))
+			for j := range n.PlanLX {
+				l[j] = []int{n.PlanLX[j], n.PlanLZ[j]}
+				r[j] = []int{n.PlanRX[j], n.PlanRZ[j]}
+			}
+			outs[i] = [][][]int{l, r}
 		}
-		tracks = append(tracks, outTrack{name, t.Sections, t.FinishIdx, ns, profs})
+		tracks = append(tracks, outTrack{name, t.Sections, t.FinishIdx, ns, profs, outs})
 	}
 	b, _ := json.Marshal(tracks)
 	if err := os.WriteFile(*out, b, 0o644); err != nil {

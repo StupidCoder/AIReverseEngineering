@@ -588,21 +588,27 @@ undulates, Roller Coaster is a run of hills — and every circuit's height **clo
 over the lap (Hump Back exactly). (An earlier draft mis-used `$1C650 − $1C718` as the
 height; its bumps fell on the corners, where roads bank — caught and corrected.)
 
-**Smooth or stepped** is decided per section the way the renderer does it (`$65D3C`):
-a vertex whose height deviates from the mean of its two neighbours by more than a
-threshold is a **sharp feature** (a step); otherwise the surface is **interpolated**.
-That single test separates drivable relief from hard edges cleanly across all eight
-circuits — *Stepping Stones* alternates `1152, 3552, 1152, …` (deviation 2400 → flat
-stones with square gaps), *Ski Jump* has its one jump, *Draw Bridge* its gap, *Big
-Ramp* its ramp lip, while *Hump Back*'s humps and *Roller Coaster*'s hills stay smooth
-(deviation ≤ 1776, below the threshold). So the viewer interpolates smooth runs and
-draws flat tops + vertical risers only where the data is sharp — not steps everywhere,
-which no car could drive.
+**Smooth or stepped.** The surface is **interpolated by default** — so ramps and
+rolling hills stay smooth and drivable (Roller Coaster climbs +4096 per section, dead
+smooth) — and only genuine features become hard steps. A feature is one of:
+
+* a **platform** — a *prominent local extremum*, a section that rises **and** falls
+  sharply: the Stepping Stones (which alternate `1152, 3552, 1152, …`), Big Ramp's
+  three jumps (each a spike → 6 steep edges), the Draw Bridge's raised spans;
+* a **cliff** — a single very large drop: Ski Jump's launch.
+
+This is, honestly, a *data-pattern* criterion rather than a pinned flag. The renderer's
+own sharp-edge test (`$65D3C`) turned out to be a silhouette/crease check, not the
+surface step decision; and the height *magnitude* can't separate the cases cleanly —
+a small jump's drop (~990) and a smooth Roller-Coaster bump (~960) are nearly equal, so
+no height threshold distinguishes them (one RC bump ends up stepped). The likely true
+flag lives in the per-type piece geometry and is still open; what's implemented matches
+the preview screenshots for the features that matter (Big Ramp's six edges, the stones,
+the jumps and the drawbridge).
 
 `package track` sets `Height` and `Bank`, `cmd/trackjson` exports them, and the viewer
-interpolates the smooth sections, steps the sharp ones, lifts each rail by its height,
-and draws support columns to the ground — the circuits now stand up in 3-D as the
-preview shows them.
+interpolates the smooth sections, steps the platforms and cliffs, lifts each rail by
+its height, and draws support columns to the ground.
 
 *Part V — the physics.*
 

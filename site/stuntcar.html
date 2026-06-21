@@ -49,11 +49,11 @@
       at the start/finish. The decode is entirely from the disk in Go (section parse
       verified <b>coordinate-exact</b> against the original loader on our Go 68000 core);
       the elevation is the mean of the two rail heights the renderer reads
-      (<code>$5C0AA</code>). Smooth-vs-stepped is decided the way the
-      renderer does (<code>$65D3C</code>): a section whose height jumps off the line of its
-      neighbours is a step, otherwise the surface is interpolated — so ramps and hills
-      stay smooth and drivable, and only the genuine steps get flat tops with vertical
-      drops (the Stepping Stones' square gaps, Ski Jump's jump, the drawbridge gap).
+      (<code>$5C0AA</code>). The surface is interpolated by default, so
+      ramps and hills stay smooth and drivable; only genuine features become hard steps —
+      a <em>platform</em> (a prominent rise-and-fall: the Stepping Stones, Big Ramp's
+      three jumps, the drawbridge) or a <em>cliff</em> (Ski Jump's launch) — drawn with
+      flat tops and vertical drops.
       <br /><br />
       Drag to rotate, scroll to zoom. See the
       <a href="https://github.com/StupidCoder/AIReverseEngineering/blob/main/Stunt%20Car%20Racer%20(Amiga)/Stunt_Car_Racer.md">write-up</a>

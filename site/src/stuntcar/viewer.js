@@ -83,22 +83,34 @@ export class TrackViewer {
     }
     const V = (p, y) => new THREE.Vector3(p.x, y, p.z);
 
-    // Smooth vs stepped, the way the renderer decides it ($65D3C): a vertex whose height
-    // deviates from the mean of its neighbours by more than a threshold is a sharp
-    // feature (a step); otherwise the surface is interpolated. So ramps and hills stay
-    // smooth and drivable, and only the genuine steps (the Stepping Stones, ramp lips)
-    // get flat tops with vertical risers. The threshold is on the raw height units.
-    const TH = 2000;
+    // Smooth ramp vs hard step. The track surface is interpolated by default (so the
+    // ramps and rolling hills stay smooth and drivable — Roller Coaster has +4096-per-
+    // section climbs that are perfectly smooth), and only genuine features become steps:
+    //  - a "platform": a prominent local extremum (a stone or a jump that rises AND
+    //    falls sharply — Stepping Stones, Big Ramp's three jumps),
+    //  - a "cliff": a single very large drop (Ski Jump's launch).
+    // NB this is a data-pattern criterion, not a pinned flag: a small jump's drop (~990)
+    // and a smooth Roller-Coaster bump (~960) are nearly equal in magnitude, so a height
+    // rule can't separate them perfectly (one RC bump steps). The renderer's own sharp-
+    // edge test ($65D3C) is a silhouette/crease check, not this surface decision.
+    const PROM = 900, CLIFF = 5500;
     const hr = track.nodes.map(nn => nn[2]);
-    const sharp = hr.map((_, i) => Math.abs(hr[i] - (hr[(i - 1 + n) % n] + hr[(i + 1) % n]) / 2) >= TH);
+    const at = i => hr[((i % n) + n) % n];
+    const plat = hr.map((_, i) => {
+      const a = at(i - 1), b = at(i + 1), c = hr[i];
+      const ext = (c >= a && c >= b) || (c <= a && c <= b);
+      return ext && Math.min(Math.abs(c - a), Math.abs(c - b)) >= PROM;
+    });
+    const cliff = hr.map((_, i) => Math.abs(at(i + 1) - hr[i]) >= CLIFF);
+    const step = i => plat[i] || plat[(i + 1) % n] || cliff[i];
 
     // Invisible depth fill: a sloped top across smooth segments, or a flat top + riser
-    // where the segment is between two sharp (stepped) sections.
+    // at a step.
     const fpos = [];
     const quad = (a, b, c, d) => fpos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z, b.x, b.y, b.z, d.x, d.y, d.z, c.x, c.y, c.z);
     for (let i = 0; i < n; i++) {
       const j = (i + 1) % n;
-      if (sharp[i] && sharp[j]) {
+      if (step(i)) {
         quad(V(pL[i], hL[i]), V(pR[i], hR[i]), V(pL[j], hL[i]), V(pR[j], hR[i]));   // flat top at segment i's height
         quad(V(pL[j], hL[i]), V(pR[j], hR[i]), V(pL[j], hL[j]), V(pR[j], hR[j]));   // riser to segment j's height
       } else {
@@ -124,7 +136,7 @@ export class TrackViewer {
     for (let i = 0; i < n; i++) {
       const j = (i + 1) % n, f = i / n;
       edge(V(pL[i], hL[i]), V(pR[i], hR[i]), f); // rung
-      if (sharp[i] && sharp[j]) {
+      if (step(i)) {
         edge(V(pL[i], hL[i]), V(pL[j], hL[i]), f); // flat left rail
         edge(V(pR[i], hR[i]), V(pR[j], hR[i]), f); // flat right rail
         edge(V(pL[j], hL[i]), V(pL[j], hL[j]), f); // left riser

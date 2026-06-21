@@ -47,7 +47,8 @@ const CRT_VERT = /* glsl */`
 const CRT_FRAG = /* glsl */`
   varying vec2 vUv;
   uniform sampler2D tScene;
-  uniform vec2 uSceneRes; // low-res scene texture size
+  uniform vec2 uSceneRes; // off-screen render-target size
+  uniform float uCRT;     // 1 = full CRT, 0 = plain (chunky) upscale only
   const float PI = 3.14159265;
 
   vec2 curve(vec2 uv) {            // barrel screen curvature
@@ -57,43 +58,48 @@ const CRT_FRAG = /* glsl */`
     return uv * 0.5 + 0.5;
   }
 
+  // soft, linearly-sampled glow: rings of taps at two radii with a falloff, so
+  // it's a smooth halo (not the chunky source pixels), brighter near the line.
+  vec3 glowAt(vec2 uv) {
+    vec2 r = 1.0 / uSceneRes;
+    vec3 g = vec3(0.0);
+    // inner ring (radius ~1.6 texels)
+    vec2 a = r * 1.6;
+    g += (texture2D(tScene, uv + vec2( a.x, 0.0)).rgb + texture2D(tScene, uv + vec2(-a.x, 0.0)).rgb
+        + texture2D(tScene, uv + vec2(0.0,  a.y)).rgb + texture2D(tScene, uv + vec2(0.0, -a.y)).rgb) * 0.6;
+    g += (texture2D(tScene, uv + vec2( a.x,  a.y)).rgb + texture2D(tScene, uv + vec2(-a.x,  a.y)).rgb
+        + texture2D(tScene, uv + vec2( a.x, -a.y)).rgb + texture2D(tScene, uv + vec2(-a.x, -a.y)).rgb) * 0.4;
+    // outer ring (radius ~3.4 texels), dimmer and wider
+    vec2 b = r * 3.4;
+    g += (texture2D(tScene, uv + vec2( b.x, 0.0)).rgb + texture2D(tScene, uv + vec2(-b.x, 0.0)).rgb
+        + texture2D(tScene, uv + vec2(0.0,  b.y)).rgb + texture2D(tScene, uv + vec2(0.0, -b.y)).rgb) * 0.18;
+    return g;
+  }
+
   void main() {
-    vec2 uv = curve(vUv);
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+    vec2 uv = (uCRT > 0.5) ? curve(vUv) : vUv;
+    if (uCRT > 0.5 && (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)) {
       gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); return; // black bezel off the tube
     }
-    // Crisp main image: snap to source texel centres so the low-res pixels stay
-    // blocky even though the texture is sampled LINEAR (which lets the glow taps
-    // below interpolate smoothly).
+    // Main image, snapped to texel centres (blocky when the target is low-res;
+    // a sharp 1:1 copy when it's full-res).
     vec3 col = texture2D(tScene, (floor(uv * uSceneRes) + 0.5) / uSceneRes).rgb;
-    // Phosphor glow: a smooth, linearly-sampled blur of the source (a soft halo,
-    // not the chunky pixels). A ring of taps at ~2.3 source texels, interpolated.
-    vec2 r = 2.3 / uSceneRes;
-    vec3 glow = texture2D(tScene, uv + vec2( r.x, 0.0)).rgb
-              + texture2D(tScene, uv + vec2(-r.x, 0.0)).rgb
-              + texture2D(tScene, uv + vec2(0.0,  r.y)).rgb
-              + texture2D(tScene, uv + vec2(0.0, -r.y)).rgb
-              + texture2D(tScene, uv + vec2( r.x,  r.y) * 0.7).rgb
-              + texture2D(tScene, uv + vec2(-r.x,  r.y) * 0.7).rgb
-              + texture2D(tScene, uv + vec2( r.x, -r.y) * 0.7).rgb
-              + texture2D(tScene, uv + vec2(-r.x, -r.y) * 0.7).rgb;
-    col += glow * 0.13;
-    // Scanlines and the RGB mask live at the OUTPUT pixel level (gl_FragCoord, in
-    // device px), so they are a genuinely fine CRT structure over the chunky
-    // low-res image — not tied to the source pixel size (which is what made them
-    // blend in before). Scanlines: ~3 device-px pitch; mask: 3-px RGB triads.
-    float scan = 0.55 + 0.45 * cos(gl_FragCoord.y * (2.0 * PI / 3.0));
-    col *= scan;
-    float tri = mod(floor(gl_FragCoord.x), 3.0);
-    vec3 mask = (tri < 1.0) ? vec3(1.0, 0.45, 0.45)
-              : (tri < 2.0) ? vec3(0.45, 1.0, 0.45)
-                            : vec3(0.45, 0.45, 1.0);
-    col *= mask;
-    col *= 1.7; // compensate for the mask/scanline darkening
-    vec2 vd = vUv * 2.0 - 1.0; // vignette
-    col *= clamp(1.0 - 0.25 * dot(vd, vd), 0.0, 1.0);
-    // the scene texture is linear; this is a raw ShaderMaterial (no auto output
-    // encode), so encode to sRGB ourselves for correct midtone brightness
+
+    if (uCRT > 0.5) {
+      col += glowAt(uv) * 0.07; // phosphor bloom
+      // scanlines + RGB mask at the OUTPUT pixel level (gl_FragCoord, device px),
+      // so they are a fine CRT structure over the (possibly chunky) image.
+      col *= 0.6 + 0.4 * cos(gl_FragCoord.y * (2.0 * PI / 3.0)); // scanlines, ~3px pitch
+      float tri = mod(floor(gl_FragCoord.x), 3.0);               // aperture-grille triads
+      vec3 mask = (tri < 1.0) ? vec3(1.0, 0.5, 0.5)
+                : (tri < 2.0) ? vec3(0.5, 1.0, 0.5)
+                              : vec3(0.5, 0.5, 1.0);
+      col *= mask;
+      col *= 1.6; // compensate for the mask/scanline darkening
+      vec2 vd = vUv * 2.0 - 1.0;
+      col *= clamp(1.0 - 0.22 * dot(vd, vd), 0.0, 1.0); // vignette
+    }
+    // linear scene texture, raw ShaderMaterial (no auto output encode) -> sRGB
     col = pow(clamp(col, 0.0, 1.0), vec3(1.0 / 2.2));
     gl_FragColor = vec4(col, 1.0);
   }
@@ -228,36 +234,43 @@ export class ShipViewer {
     this.hud = hud;
     this.ships = [];
     this.current = null;
-    this.oldSchool = false; // "old school" CRT/flicker effects (start: line flicker)
+    // Four independent "old school" effects (see setEffect):
+    this.crt = false;     // CRT filter (curvature, scanlines, RGB mask, glow)
+    this.lowRes = false;  // chunky low internal resolution
+    this.flicker = false; // single-buffer XOR line flicker
+    this.lowFps = false;  // ~12 fps throttle
     this.flickerPhase = 0;
   }
 
-  setOldSchool(on) {
-    this.oldSchool = on;
-    if (this.hud) this.hud.style.display = on ? 'none' : ''; // hide the overlay text on a real CRT
+  // setEffect toggles one of: 'crt' | 'lowRes' | 'flicker' | 'lowFps'.
+  setEffect(name, on) {
+    this[name] = on;
+    if (name === 'crt' && this.hud) this.hud.style.display = on ? 'none' : ''; // overlay off on a CRT
     this._applyResolution();
   }
 
-  // _buildCRT sets up the low-res scene render target and the full-screen quad
-  // that runs the CRT shader over it (only used when old-school is on).
-  _buildCRT() {
-    // LINEAR so the glow taps interpolate smoothly; the main image is kept blocky
-    // by snapping to texel centres in the shader.
-    this.crtTarget = new THREE.WebGLRenderTarget(320, LORES_H, {
+  // _buildPost sets up the off-screen render target and the full-screen quad that
+  // upscales it — chunky pass-through when only lo-res is on, full CRT shader when
+  // CRT is on (uCRT). Only used when crt or lowRes is active.
+  _buildPost() {
+    // LINEAR so the CRT glow taps interpolate smoothly; the main image is kept
+    // blocky by snapping to texel centres in the shader.
+    this.postTarget = new THREE.WebGLRenderTarget(320, LORES_H, {
       minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
     });
-    this.crtMaterial = new THREE.ShaderMaterial({
+    this.postMaterial = new THREE.ShaderMaterial({
       uniforms: {
-        tScene: { value: this.crtTarget.texture },
+        tScene: { value: this.postTarget.texture },
         uSceneRes: { value: new THREE.Vector2(320, LORES_H) },
+        uCRT: { value: 0 },
       },
       vertexShader: CRT_VERT,
       fragmentShader: CRT_FRAG,
       depthTest: false, depthWrite: false,
     });
-    this.crtCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    this.crtScene = new THREE.Scene();
-    this.crtScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.crtMaterial));
+    this.postCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    this.postScene = new THREE.Scene();
+    this.postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.postMaterial));
   }
 
   async init() {
@@ -287,27 +300,28 @@ export class ShipViewer {
     // Once the user grabs the ship, stop the idle spin for good.
     this.controls.addEventListener('start', () => { this.controls.autoRotate = false; });
 
-    this._buildCRT();
+    this._buildPost();
     this._resize();
     new ResizeObserver(() => this._resize()).observe(this.viewport);
 
     let lastRender = 0;
     const tick = (now) => {
       requestAnimationFrame(tick);
-      // In old-school mode, throttle to OLD_FPS (chunky motion + a coarser flicker beat).
-      if (this.oldSchool && now - lastRender < 1000 / OLD_FPS) return;
+      if (this.lowFps && now - lastRender < 1000 / OLD_FPS) return; // ~12 fps throttle
       lastRender = now;
       this.controls.update();
-      if (this.oldSchool) this.flickerPhase = (this.flickerPhase + FLICKER_RATE) % 1;
+      if (this.flicker) this.flickerPhase = (this.flickerPhase + FLICKER_RATE) % 1;
       if (this.current) {
-        this.current.updateForCamera(this.camera.position, this.oldSchool ? this.flickerPhase : -1);
+        this.current.updateForCamera(this.camera.position, this.flicker ? this.flickerPhase : -1);
       }
-      if (this.oldSchool) {
-        // render the scene into the low-res tube texture, then the CRT shader to the canvas
-        this.renderer.setRenderTarget(this.crtTarget);
+      if (this.crt || this.lowRes) {
+        // render the scene off-screen, then upscale via the post shader (CRT or
+        // a plain chunky pass-through depending on uCRT).
+        this.postMaterial.uniforms.uCRT.value = this.crt ? 1 : 0;
+        this.renderer.setRenderTarget(this.postTarget);
         this.renderer.render(this.scene, this.camera);
         this.renderer.setRenderTarget(null);
-        this.renderer.render(this.crtScene, this.crtCam);
+        this.renderer.render(this.postScene, this.postCam);
       } else {
         this.renderer.render(this.scene, this.camera);
       }
@@ -318,9 +332,9 @@ export class ShipViewer {
 
   _resize() { this._applyResolution(); }
 
-  // _applyResolution keeps the canvas at full viewport resolution (so the CRT
-  // mask/scanlines have pixels to live in) and sizes the low-res scene texture
-  // (LORES_H tall, aspect-matched) that the CRT pass upscales in old-school mode.
+  // _applyResolution keeps the canvas at full viewport resolution and sizes the
+  // off-screen render target: low (LORES_H tall) when lo-res is on for chunky
+  // pixels, otherwise full output resolution so a CRT-only pass stays sharp.
   _applyResolution() {
     const w = this.viewport.clientWidth, h = this.viewport.clientHeight;
     if (!w || !h) return;
@@ -328,10 +342,12 @@ export class ShipViewer {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
-    if (this.crtTarget) {
-      const lw = Math.max(2, Math.round(LORES_H * w / h));
-      this.crtTarget.setSize(lw, LORES_H);
-      this.crtMaterial.uniforms.uSceneRes.value.set(lw, LORES_H);
+    if (this.postTarget) {
+      const pr = this.renderer.getPixelRatio();
+      const tw = this.lowRes ? Math.max(2, Math.round(LORES_H * w / h)) : Math.round(w * pr);
+      const th = this.lowRes ? LORES_H : Math.round(h * pr);
+      this.postTarget.setSize(tw, th);
+      this.postMaterial.uniforms.uSceneRes.value.set(tw, th);
     }
   }
 

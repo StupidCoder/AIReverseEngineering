@@ -44,11 +44,11 @@ function select(i) {
   buttons[i].scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
 }
 
-// "Old school" toggle — currently the authentic single-buffer XOR line flicker
-// (more period effects, e.g. lo-res and a CRT filter, will hang off the same switch).
-const oldschool = document.getElementById('oldschool');
-if (oldschool) {
-  oldschool.addEventListener('change', () => viewer.setOldSchool(oldschool.checked));
+// "Old school" effects — four independent toggles so each can be judged alone.
+const FX = { crt: 'fx-crt', lowRes: 'fx-lowres', flicker: 'fx-flicker', lowFps: 'fx-lowfps' };
+for (const [name, id] of Object.entries(FX)) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', () => viewer.setEffect(name, el.checked));
 }
 
 // Open with the Cobra Mk III (the player's ship and the cover star) if present.

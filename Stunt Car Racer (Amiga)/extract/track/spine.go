@@ -36,6 +36,14 @@ type Node struct {
 	Height       int // surface elevation: ($1C650+$1C718)/2 (left+right rail heights)
 	Bank         int // road camber: $1C650-$1C718 (rail height difference)
 	Type, P1, P2, Attr int
+	// HeightL/HeightR are the exact per-rung left/right rail heights along the section
+	// (the in-game surface profile: where it is flat, ramps, or steps), one entry per
+	// rung. They are the engine's vertex builder $5C0AA reproduced exactly and verified
+	// coordinate-exact against the oracle (cmd/geomoracle) on all eight tracks. The
+	// step-vs-slope distinction the surface needs is *in this data* — a smooth run of
+	// values is a drivable slope, a sudden jump is a hard edge (e.g. a Big Ramp jump
+	// lip) — so no heuristic classifier is needed.
+	HeightL, HeightR []int
 }
 
 // Track is a decoded circuit: its sections' plan-view nodes plus the header.
@@ -64,6 +72,57 @@ func (im *Image) shapeDelta(h, idx int, p2neg bool) int16 {
 		side = (v << 1) & 0xE0
 	}
 	return int16(uint16(main<<8 | side))
+}
+
+// railHeight reproduces the engine's vertex-height builder $5C0AA for one vertex
+// index d1. Even d1 reads the left rail (p2 shape a4, base $1C650 = node.X), odd d1
+// the right rail (attr shape a5, base $1C718 = node.Z). The shape read mode is set by
+// p2's sign ($1BB79): p2>=0 nibble-packed, p2<0 two bytes per entry. Returns the
+// engine's d0.w after ASR.w #5 (signed). Verified exact against the oracle.
+func (im *Image) railHeight(a4, a5, base650, base718, p2, d1 int) int {
+	d2 := d1
+	if int8(p2) >= 0 { // BPL: nibble-packed
+		odd := d2 & 1
+		d2 >>= 1
+		var d0 int
+		if odd != 0 {
+			v := im.u8(a5 + d2)
+			d0 = ((v<<1)&0xE0)|((v&0xF)<<8) + base718
+		} else {
+			v := im.u8(a4 + d2)
+			d0 = ((v<<1)&0xE0)|((v&0xF)<<8) + base650
+		}
+		return int(int16(uint16(d0)) >> 5)
+	}
+	d2 &^= 1 // two bytes per entry
+	if d1&1 != 0 {
+		d3 := im.u8(a5 + d2 + 1)
+		d0 := ((im.u8(a5+d2)&0x7F)<<8 | d3) + base718
+		return int(int16(uint16(d0)) >> 5)
+	}
+	d3 := im.u8(a4 + d2 + 1)
+	d0 := ((im.u8(a4+d2)&0x7F)<<8 | d3) + base650
+	return int(int16(uint16(d0)) >> 5)
+}
+
+// railProfile fills a node's HeightL/HeightR with the exact per-rung rail heights.
+// The rung (vertex) count is the engine's $1BB97 = shape[shape[0]] of the per-type
+// piece-shape (set in $5FE56); it counts both rails, so rungs = count/2. Rung k uses
+// vertex indices 2k (left) and 2k+1 (right).
+func (im *Image) railProfile(n *Node) {
+	nib := n.Type & 0x0F
+	shp := handle(im.u16(dataBase + 2*nib))
+	count := im.u8(shp + im.u8(shp)) // $1BB97
+	rungs := count / 2
+	a4 := handle(im.u16(shapeTab + (2*n.P2)&0xFF))
+	a5 := handle(im.u16(shapeTab + (2*n.Attr)&0xFF))
+	bx, bz := int(n.X), int(n.Z)
+	n.HeightL = make([]int, rungs)
+	n.HeightR = make([]int, rungs)
+	for k := 0; k < rungs; k++ {
+		n.HeightL[k] = im.railHeight(a4, a5, bx, bz, n.P2, 2*k)
+		n.HeightR[k] = im.railHeight(a4, a5, bx, bz, n.P2, 2*k+1)
+	}
 }
 
 // Spine decodes track id and walks its plan-view spine, returning one node per
@@ -163,6 +222,8 @@ func (im *Image) Spine(id int) Track {
 		l, r := int(nodes[i].X), int(nodes[i].Z)
 		nodes[i].Height = (l + r) / 2
 		nodes[i].Bank = l - r
+		// Exact per-rung surface profile (the steps/slopes/jumps), verified vs oracle.
+		im.railProfile(&nodes[i])
 	}
 
 	return Track{Sections: count, FinishIdx: off(1), Nodes: nodes}

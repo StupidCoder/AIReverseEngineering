@@ -27,6 +27,10 @@ type outTrack struct {
 	// [planX, planY, height, bank, type, p1, p2, attr] per section. planX/planY = the
 	// 16x16 grid footprint; height = surface elevation; bank = camber.
 	Nodes [][]int `json:"nodes"`
+	// Per-section exact rung surface profile: profiles[i] = [HeightL[], HeightR[]], the
+	// left/right rail heights along the section (the in-game surface — flat, slope, or
+	// hard jump edge), verified coordinate-exact vs the engine (cmd/geomoracle).
+	Profiles [][][]int `json:"profiles"`
 }
 
 func main() {
@@ -46,10 +50,12 @@ func main() {
 	for id, name := range names {
 		t := im.Spine(id)
 		ns := make([][]int, len(t.Nodes))
+		profs := make([][][]int, len(t.Nodes))
 		for i, n := range t.Nodes {
 			ns[i] = []int{n.PlanX, n.PlanY, n.Height, n.Bank, n.Type, n.P1, n.P2, n.Attr}
+			profs[i] = [][]int{n.HeightL, n.HeightR}
 		}
-		tracks = append(tracks, outTrack{name, t.Sections, t.FinishIdx, ns})
+		tracks = append(tracks, outTrack{name, t.Sections, t.FinishIdx, ns, profs})
 	}
 	b, _ := json.Marshal(tracks)
 	if err := os.WriteFile(*out, b, 0o644); err != nil {

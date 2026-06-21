@@ -1,10 +1,13 @@
 // Stunt Car Racer — track ribbon viewer. The geometry is the verified plan-view
-// spine (package track, Part IV §5): one (x,z) node per section, decoded purely in
-// Go from the disk and exported to tracks.json. We build the track as a ribbon of a
-// nominal width, render it as a hidden-line wireframe (invisible depth fill + colour
-// LineSegments, the same technique as the Marble Madness slope viewer), and view it
-// down a dimetric angle. Elevation is not yet recovered, so the ribbon is flat (y=0);
-// the code carries a per-node height so it can light up once that's decoded.
+// spine (package track, Part IV §5): the section grid plan plus, for each section, the
+// exact per-rung left/right rail-height profile — the engine's vertex builder $5C0AA
+// reproduced in Go and verified coordinate-exact against the original (cmd/geomoracle).
+// Decoded purely from the disk and exported to tracks.json. We lay the rungs along a
+// spline through the section grid cells, lift each by its rail heights (their difference
+// is the real camber), and render the result as a hidden-line wireframe (invisible depth
+// fill + colour LineSegments, the same technique as the Marble Madness slope viewer).
+// The surface — flat, ramp, hill or hard jump edge — is whatever the profile data says;
+// no heuristic decides step-vs-slope.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
@@ -50,89 +53,67 @@ export class TrackViewer {
     if (t.group) { t.scene.remove(t.group); disposeGroup(t.group); }
     const group = new THREE.Group();
 
-    // Nodes -> centre-line points. n[0],n[1] = grid plan cell; n[2] = surface elevation
-    // (mean of the two rail heights). Sit each track on the ground (subtract its min)
-    // and scale into grid-cell units so the relief reads against the plan.
-    const EY = 1 / 3600; // elevation units -> grid cells
-    let minH = Infinity;
-    for (const n of track.nodes) minH = Math.min(minH, n[2]);
-    // y = surface height; bankY = rail-height difference (camber), applied ± per rail.
-    const pts = track.nodes.map(n => ({ x: n[0], z: n[1], y: (n[2] - minH) * EY, bankY: n[3] * EY }));
-    const n = pts.length;
+    // Section plan anchors: n[0],n[1] = the section's cell on the 16x16 track grid.
+    // The surface is NOT one height per section — each section carries an exact per-rung
+    // rail-height profile (track.profiles[i] = [HeightL[], HeightR[]], the engine's
+    // vertex builder $5C0AA reproduced exactly and verified vs the original). Those
+    // profiles ARE the surface: a smooth run of values is a drivable ramp/hill, a sudden
+    // jump is a hard edge (a Big Ramp jump lip, a Stepping-Stone gap). No heuristic
+    // decides step-vs-slope — the data does.
+    const A = track.nodes.map(nn => ({ x: nn[0], z: nn[1] }));
+    const n = A.length;
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    for (const p of pts) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z); }
+    for (const p of A) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z); }
     const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
     const span = Math.max(maxX - minX, maxZ - minZ) || 1;
-    const S = 8 / span; // fit into ~8 units
+    const S = 8 / span; // fit the plan into ~8 units
 
-    // Rail plan positions (x,z) and per-section rail heights, kept separate. The height
-    // belongs to the SEGMENT, not the vertex: each section is a flat platform and the
-    // changes are vertical steps at the boundaries (the Stepping Stones are literally
-    // flat stones with square gaps), so we draw flat tops + vertical risers rather than
-    // interpolating between node heights (which would round the steps into bumps).
-    const pL = [], pR = [], hL = [], hR = [];
+    // Fixed rail-height -> grid-unit scale, shared across all tracks so relative relief
+    // is honest: the Roller Coaster and Ski Jump (rail heights ~900) really do tower over
+    // the gentle circuits (~250). Heights sit on the ground via the per-track minimum.
+    const HK = 1 / 150;
+    let minH = Infinity;
+    for (const pr of track.profiles) for (const h of pr[0]) minH = Math.min(minH, h);
+    for (const pr of track.profiles) for (const h of pr[1]) minH = Math.min(minH, h);
+
+    const cm = (a, b, c, d, t) => { const u = t * t, w = u * t; return 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * u + (-a + 3 * b - 3 * c + d) * w); };
+    const cmPt = (P, Q, R2, T, t) => ({ x: cm(P.x, Q.x, R2.x, T.x, t), z: cm(P.z, Q.z, R2.z, T.z, t) });
+    const Ai = i => A[((i % n) + n) % n];
+
+    // Walk the circuit rung by rung. Each section i spans plan param [i, i+1); rung k of
+    // its profile sits at fraction k/rungs along a Catmull-Rom through the grid anchors,
+    // so the curves round out exactly where the pieces carry more rungs. The rung's left
+    // and right rail heights come straight from the profile (their difference is the real
+    // camber — no separate banking term needed).
+    const centres = [], hl = [], hr = [];
     for (let i = 0; i < n; i++) {
-      const a = pts[(i - 1 + n) % n], b = pts[(i + 1) % n], c = pts[i];
+      const pr = track.profiles[i];
+      const L = pr[0], R = pr[1], rungs = Math.min(L.length, R.length);
+      for (let k = 0; k < rungs; k++) {
+        const t = k / rungs;
+        centres.push(cmPt(Ai(i - 1), Ai(i), Ai(i + 1), Ai(i + 2), t));
+        hl.push((L[k] - minH) * HK);
+        hr.push((R[k] - minH) * HK);
+      }
+    }
+    const m = centres.length;
+
+    // Offset each rung centre by the local normal to make the two rails, and scale into
+    // grid units (centred on the plan). The normal comes from the spline tangent.
+    const rings = [];
+    for (let k = 0; k < m; k++) {
+      const a = centres[(k - 1 + m) % m], b = centres[(k + 1) % m];
       let dx = b.x - a.x, dz = b.z - a.z;
       const len = Math.hypot(dx, dz) || 1; dx /= len; dz /= len;
       const nx = -dz, nz = dx; // left normal
-      pL.push({ x: (c.x + nx * WIDTH - cx) * S, z: (c.z + nz * WIDTH - cz) * S });
-      pR.push({ x: (c.x - nx * WIDTH - cx) * S, z: (c.z - nz * WIDTH - cz) * S });
-      hL.push((c.y + c.bankY * 0.5) * S);
-      hR.push((c.y - c.bankY * 0.5) * S);
+      const c = centres[k];
+      rings.push({
+        l: { x: (c.x + nx * WIDTH - cx) * S, z: (c.z + nz * WIDTH - cz) * S },
+        r: { x: (c.x - nx * WIDTH - cx) * S, z: (c.z - nz * WIDTH - cz) * S },
+        hl: hl[k] * S, hr: hr[k] * S,
+      });
     }
     const V = (p, y) => new THREE.Vector3(p.x, y, p.z);
-
-    // Smooth ramp vs hard step. The track surface is interpolated by default (so the
-    // ramps and rolling hills stay smooth and drivable — Roller Coaster has +4096-per-
-    // section climbs that are perfectly smooth), and only genuine features become steps:
-    //  - a "platform": a prominent local extremum (a stone or a jump that rises AND
-    //    falls sharply — Stepping Stones, Big Ramp's three jumps),
-    //  - a "cliff": a single very large drop (Ski Jump's launch).
-    // NB this is a data-pattern criterion, not a pinned flag: a small jump's drop (~990)
-    // and a smooth Roller-Coaster bump (~960) are nearly equal in magnitude, so a height
-    // rule can't separate them perfectly (one RC bump steps). The renderer's own sharp-
-    // edge test ($65D3C) is a silhouette/crease check, not this surface decision.
-    const PROM = 900, CLIFF = 5500;
-    const hr = track.nodes.map(nn => nn[2]);
-    const at = i => hr[((i % n) + n) % n];
-    const plat = hr.map((_, i) => {
-      const a = at(i - 1), b = at(i + 1), c = hr[i];
-      const ext = (c >= a && c >= b) || (c <= a && c <= b);
-      return ext && Math.min(Math.abs(c - a), Math.abs(c - b)) >= PROM;
-    });
-    const cliff = hr.map((_, i) => Math.abs(at(i + 1) - hr[i]) >= CLIFF);
-    const step = i => plat[i] || plat[(i + 1) % n] || cliff[i];
-
-    // Tessellate non-step segments with a Catmull-Rom spline so the curves round out —
-    // the curve pieces carry ~12 outline points in the data (vs 4 for a straight), which
-    // is exactly that rounding. Step sections stay as a flat top + a vertical riser.
-    // Build a continuous strip of cross-section "rings"; consecutive rings form a quad.
-    const SUB = 6;
-    const Li = i => pL[((i % n) + n) % n], Ri = i => pR[((i % n) + n) % n];
-    const HLi = i => hL[((i % n) + n) % n], HRi = i => hR[((i % n) + n) % n];
-    const cm = (a, b, c, d, t) => { const u = t * t, w = u * t; return 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * u + (-a + 3 * b - 3 * c + d) * w); };
-    const cmPt = (A, B, C, D, t) => ({ x: cm(A.x, B.x, C.x, D.x, t), z: cm(A.z, B.z, C.z, D.z, t) });
-    const rings = [];
-    for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n;
-      if (step(i)) {
-        rings.push({ l: Li(i), r: Ri(i), hl: HLi(i), hr: HRi(i) }); // flat-top start
-        rings.push({ l: Li(j), r: Ri(j), hl: HLi(i), hr: HRi(i) }); // flat-top end
-        rings.push({ l: Li(j), r: Ri(j), hl: HLi(j), hr: HRi(j) }); // vertical riser (same plan)
-      } else {
-        for (let s = 0; s < SUB; s++) {
-          const t = s / SUB;
-          rings.push({
-            l: cmPt(Li(i - 1), Li(i), Li(j), Li(j + 1), t),
-            r: cmPt(Ri(i - 1), Ri(i), Ri(j), Ri(j + 1), t),
-            hl: HLi(i) + (HLi(j) - HLi(i)) * t,
-            hr: HRi(i) + (HRi(j) - HRi(i)) * t,
-          });
-        }
-      }
-    }
-    const m = rings.length;
 
     // Invisible depth fill (the ribbon surface) for hidden-line removal.
     const fpos = [];

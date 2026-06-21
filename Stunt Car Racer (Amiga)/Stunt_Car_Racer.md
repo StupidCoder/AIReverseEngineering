@@ -588,27 +588,40 @@ undulates, Roller Coaster is a run of hills — and every circuit's height **clo
 over the lap (Hump Back exactly). (An earlier draft mis-used `$1C650 − $1C718` as the
 height; its bumps fell on the corners, where roads bank — caught and corrected.)
 
-**Smooth or stepped.** The surface is **interpolated by default** — so ramps and
-rolling hills stay smooth and drivable (Roller Coaster climbs +4096 per section, dead
-smooth) — and only genuine features become hard steps. A feature is one of:
+**Smooth or stepped — solved, exactly.** A long search for an explicit "step here" flag
+(`$65D3C`, the `type` bits, the `p2` sign, `attr`, `a0[1]`, the height magnitude) found
+nothing — *because there is no such flag*. The surface is not one height per section at
+all. `$5C0AA` is a **per-rung** builder: it is called for vertex index `d1 = 0,1,2,…`
+across the section, and each call adds the section's base accumulator (`$1C650` for the
+left rail, `$1C718` for the right) to a **profile value** read from the `p2`/`attr`
+cross-section shape, then `>>5`. So every section carries a short array of rail heights
+*along its length* — the in-game surface itself:
 
-* a **platform** — a *prominent local extremum*, a section that rises **and** falls
-  sharply: the Stepping Stones (which alternate `1152, 3552, 1152, …`), Big Ramp's
-  three jumps (each a spike → 6 steep edges), the Draw Bridge's raised spans;
-* a **cliff** — a single very large drop: Ski Jump's launch.
+```
+rung count   = shape[shape[0]] of the per-TYPE piece-shape   ($1BB97; counts both rails)
+left rail[k]  = ($1C650 + a4-profile[k]) >> 5                  (even vertex 2k,  a4 from p2)
+right rail[k] = ($1C718 + a5-profile[k]) >> 5                  (odd  vertex 2k+1, a5 from attr)
+read mode     = nibble-packed if p2 ≥ 0, two bytes/entry if p2 < 0   ($1BB79)
+```
 
-This is, honestly, a *data-pattern* criterion rather than a pinned flag. The renderer's
-own sharp-edge test (`$65D3C`) turned out to be a silhouette/crease check, not the
-surface step decision; and the height *magnitude* can't separate the cases cleanly —
-a small jump's drop (~990) and a smooth Roller-Coaster bump (~960) are nearly equal, so
-no height threshold distinguishes them (one RC bump ends up stepped). The likely true
-flag lives in the per-type piece geometry and is still open; what's implemented matches
-the preview screenshots for the features that matter (Big Ramp's six edges, the stones,
-the jumps and the drawbridge).
+The step-vs-slope distinction is simply **what those profile values do**. A smooth run is
+a drivable slope; a sudden jump in consecutive rungs is a hard edge. Big Ramp's takeoff
+section reads `[80 85 90 95 100 105 110 115 35]` — a clean climb to the lip (115) then a
+hard drop into the gap (35); the next piece resumes at 35 and the landing ramp rises again
+`[35 105 100 …]`. That is **three jumps, six steep lips**, present in the data, with no
+heuristic. The Stepping Stones read `[118 36 36 …]` (a flat stone with a square gap), the
+Ski Jump's launch is a `704 → 389` drop mid-section, and the Roller Coaster is a long
+continuous `281 → 925` climb. No magnitude rule, no extremum test — the profile *is* the
+surface.
 
-`package track` sets `Height` and `Bank`, `cmd/trackjson` exports them, and the viewer
-interpolates the smooth sections, steps the platforms and cliffs, lifts each rail by
-its height, and draws support columns to the ground.
+This is verified the strict way: `cmd/geomoracle` runs the engine's own `$5FE56`+`$5C0AA`
+on the m68k core and the Go reimplementation in `package track` (`railHeight`/
+`railProfile`) reproduces every rung of every section of all eight tracks **coordinate-
+exact**. `cmd/trackjson` exports the profiles, and the viewer lays each section's rungs
+along a spline through its grid cell, lifts each rung by its left/right rail heights
+(their difference is the camber), and draws support columns to the ground. The plan
+footprint within a section (the curve rounding from `$5C6C4`) is approximated by the
+spline for now; the **surface** is exact.
 
 *Part V — the physics.*
 

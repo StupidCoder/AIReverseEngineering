@@ -44,18 +44,20 @@
       drawbridge (Draw Bridge). Each section also has an
       <em>elevation</em> — the ribbon is an <b>elevated track on support columns</b>, just
       like the game's pre-race preview, with the ramps, jumps and Roller-Coaster hills. The
-      track is drawn as a <b>hidden-line wireframe</b>: two rails plus a rung per section,
+      track is drawn as a <b>hidden-line wireframe</b>: two rails plus rungs,
       coloured along the lap (blue → red), columns down to the ground, and the green marker
       at the start/finish. The decode is entirely from the disk in Go (section parse
-      verified <b>coordinate-exact</b> against the original loader on our Go 68000 core);
-      the elevation is the mean of the two rail heights the renderer reads
-      (<code>$5C0AA</code>). The surface is interpolated by default, so
-      ramps and hills stay smooth and drivable; only genuine features become hard steps —
-      a <em>platform</em> (a prominent rise-and-fall: the Stepping Stones, Big Ramp's
-      three jumps, the drawbridge) or a <em>cliff</em> (Ski Jump's launch) — drawn with
-      flat tops and vertical drops. The curves are <em>tessellated</em> (a spline through
-      the section points), since the curve pieces carry many more outline points in the
-      data than the straights.
+      verified <b>coordinate-exact</b> against the original loader on our Go 68000 core).
+      Crucially, the surface is <b>not one height per section</b>: each section carries an
+      exact <em>per-rung rail-height profile</em> — the engine's own vertex builder
+      (<code>$5C0AA</code>) reproduced in Go and verified <b>coordinate-exact</b> against
+      the original on all eight tracks (<code>cmd/geomoracle</code>). Those profiles
+      <em>are</em> the surface: a smooth run of values is a drivable ramp or rolling hill,
+      a sudden jump is a hard edge — the three pairs of steep lips on Big Ramp, the square
+      gaps between the Stepping Stones, the Ski Jump's launch. <b>No heuristic decides
+      step-vs-slope; the data does.</b> The rungs are laid along a spline through the
+      section grid cells, so curves round out exactly where their pieces carry more rungs;
+      each rung's left and right rail heights differ by the real camber.
       <br /><br />
       Drag to rotate, scroll to zoom. See the
       <a href="https://github.com/StupidCoder/AIReverseEngineering/blob/main/Stunt%20Car%20Racer%20(Amiga)/Stunt_Car_Racer.md">write-up</a>

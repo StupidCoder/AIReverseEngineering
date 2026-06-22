@@ -29,9 +29,10 @@ the shared `tools/` module — the AmigaDOS reader (`tools/amiga/adf`), the
 disassemblers (`tools/cmd/dis68k`, `tools/cmd/codetrace68k`) and an
 instruction-level 68000 execution core (`tools/m68k`) for dynamic verification.
 All addresses are 68000 addresses; sizes are `.b`/`.w`/`.l` (8/16/32-bit).
-**Status: Parts I–III done (disk format, loader, engine architecture); Part IV under
-way (the eight tracks located and extracted, section grammar in progress); Part V
-(physics) to follow.**
+**Status: complete. Parts I–III (disk format, loader, engine architecture), Part IV (the
+track geometry — footprint, surface and camber, decoded and verified coordinate-exact) and
+Part V (the full rigid-body car physics, verified frame-by-frame against the original) are
+all done; combined, a car can be driven over the decoded tracks.**
 
 ---
 
@@ -659,22 +660,122 @@ coordinate-exact against the original.**
 
 # Part V — The physics simulation
 
-*The headline goal.* The car is simulated as a sprung rigid body, not a point —
+*The headline goal — done.* The car is simulated as a sprung rigid body, not a point,
 which is what gave the game its reputation: the chassis pitches and rolls on its
-suspension, the wheels gain and lose contact over crests and on landings, too
-hard a landing damages the car, and airtime/handling depend on speed and the
-track gradient. The aim is to recover, from the 68000 code:
+suspension, the wheels gain and lose contact over crests and on landings, too hard a
+landing damages the car, and airtime/handling depend on speed and the track gradient.
+The **entire** per-frame simulation has been reverse-engineered from the 68000 code and
+reimplemented in Go (`extract/physics`), **verified coordinate-exact against the original
+frame by frame** on the `tools/m68k` core (`cmd/physverify`): every sub-routine matches on
+3000 random states each, and the whole frame matches bit-for-bit over 60 consecutive
+frames on three tracks. The reimplementation operates directly on the game's 24-bit memory
+image, so it can be checked address-for-address.
 
-1. the **car state** (position, orientation, linear/angular velocity, per-wheel
-   suspension state) and its fixed-point representation;
-2. the **integrator** — per-frame forces and the update step: drive/brake,
-   gravity, suspension spring/damper, wheel–ground contact and friction, and the
-   damage/“boost” model;
-3. a faithful **Go reimplementation** of that update, verified against the 68000
-   (the `tools/m68k` core as an oracle) so that, combined with Part IV, a track
-   can actually be *driven* in a reimplementation.
+### 1. The car state and the frame
 
-*Simulation: to be reverse-engineered.*
+One physics frame is `$6185C`, called from the race loop (`$5D42C`) just before the
+renderer. The model is **semi-implicit Euler in fixed point** with a `0.93` (`= $EE/256`)
+damping factor applied at *both* integration stages — that constant is the drag that keeps
+the sim stable. The car-state block lives at `$1BCxx`:
+
+```
+position  (16.16)  X $1BCD8   Y/height $1BCDC (clamped <= $3E8)   Z $1BCE0
+angles    (16-bit) roll $1BCE4   yaw $1BCE6   pitch $1BCE8
+velocity           $1BCEA / $1BCEC / $1BCEE
+angular momentum   roll $1BCF0   pitch $1BCF2   yaw $1BCF4   (body frame)
+```
+
+Forces are summed in the **body frame**, rotated into the world, and integrated. The frame
+pipeline is, in order: build the orientation matrix (`$61368`); compute the wheel contact
+offsets (`$618CE`); **sample the track surface** under each wheel (`$5C1D0`); compute the
+chassis contact-point heights (`$61B70`); rotate velocity into the body frame (`$6158C`)
+and gravity into it (`$615E6`); run the **suspension** (`$61BCC`); and — only when grounded
+(`$1BB72`) — the **drive/tyre/steer** block (`$620B8`, `$61012`, `$61618`, `$621F4`,
+`$62138`, `$61B26`, `$61672`); then integrate force→velocity (`$61ADC`) and
+velocity→position (`$61950`).
+
+### 2. Frame transforms
+
+`$61368` builds the 3×3 chassis orientation matrix at `$1C230` from the three Euler angles
+(`$64D08` = sin, `$64D10` = cos, via a quarter-wave table at `$1CA42`): it seeds the slots
+with sin/cos of each angle, cascades the `MULS/SWAP` products into the composite rotation,
+and forms the cross terms. Everything is then shuttled through it: world velocity → body
+(`$6158C`), body force → world (`$61618`), body torque → world angular rate (`$61672`), all
+driven by a small index table at `$1EC46` that selects which matrix slot each term uses.
+**Gravity** enters via `$615E6`: a fixed world-down vector (magnitude `$13D` = 317) is
+re-expressed in the tilted body frame each tick, so it always pulls world-down whatever the
+car's attitude.
+
+### 3. The suspension — and the surface
+
+The car has a **three-point suspension** (`$61BCC`). Each point computes a spring
+compression
+
+```
+compression = trackSurfaceY - chassisContactY - restLength      (clamped to [-$300, $1400])
+force       = compression + 1.078 * (compression - prevCompression)   ($6180E: spring + damper)
+```
+
+The chassis contact heights (`$1BC94/98/9C`) come from the car height tilted by sin(roll)
+and sin(pitch) (`$61B70`). The track surface heights (`$1BCA4/A8/AC`) are the **direct
+coupling to Part IV**: `$5C1D0` locates the car's section, computes where each wheel sits
+across the rung strip, samples the four surrounding rung-corner heights with the *same*
+`$5C0AA` builder that produces the rail heights in Part IV, and bilinearly interpolates them
+(`$5C554`) — so the springs ride the exact decoded track surface, and a wheel running off
+the lateral edge (`$1BB65`) is detected and tapered (`$5C808`).
+
+The three spring forces combine (`$61F42`) into a **net lift** (`$1BD38`, the average), a
+**roll torque** (`3 * (left - right)`, clamped) and a **pitch torque** (front − rear); the
+**on-ground flag** `$1BB7E` is set if any spring is engaged. The net lift is projected onto
+the body axes by the road slope (`$622DC`) into the tyre **loads** `$1BD40/42/44`.
+
+**Damage.** When a spring force exceeds a tolerance (`$1BB01 << 8 + $700`) and stays there
+for `$63CE2` frames, damage accumulates into `$1BB4F/50/51` (0–255), with a separate
+bottoming counter (`$1BB7D`) for hard slams — the "land too hard and you wreck the car"
+mechanic, reproduced exactly.
+
+### 4. Drive, grip and steering
+
+The longitudinal drive force (`$620B8`) comes from the throttle/gear, decays on wheelspin,
+and is clamped to the available **grip** (`$621DA`): grip = tyre-load × 2 *only when
+grounded* — zero in the air, and load-sensitive on the ground. The lateral tyre force
+(`$6217A`) is likewise grip-limited, setting a slide flag (`$1BBC1`) when the demand
+exceeds grip — a friction-circle model. A velocity **drag** (`$621F4`) opposes motion:
+stiff when grounded and gripping, speed-proportional over a deadzone when rolling free.
+
+`$61012` is the **track-following auto-steer**: it measures the car's heading error against
+the section's centreline and nudges the heading (`$1BCE6`) to follow the track, then
+computes a pitch-stabilisation torque (`$1BCFE`).
+
+### 5. A copy-protection trap inside the physics
+
+`$61012` carries a piece of the disk **copy protection**. At `$611E8` it compares
+`mem[$64AEC]` against a constant and, on mismatch, **zeroes the pitch-stabilisation
+torque** — subtly degrading the handling. Both operands are obfuscated specifically so they
+can't be grepped: the address is built as `$79360 - $14874`, the magic value as
+`$667B379F + $36729563 = $9CEDCD02`. The value at `$64AEC` is not a settings byte — it is
+written (at `$5CEFA`) by a routine (`$5CEB4`) that reads the **physical disk hardware**
+(CIA-B `$BFD100` drive control, `DMACONR`/`DMACON` disk DMA), i.e. it is derived from the
+disk's protection tracks. So on a genuine disk the protection writes `$9CEDCD02` and the
+check passes; our extracted blob holds the unpatched `$2F76EA80`, so it fails. The
+reimplementation reproduces the check exactly (matching the oracle on the same image); for
+a playable sim, "inserting the genuine disk" is just storing the expected value at `$64AEC`.
+
+### 6. Verification
+
+`cmd/physverify` runs each engine routine and its Go twin from identical random snapshots
+and compares the state — `Sin/Cos`, the integrator, the matrix and transforms, the
+suspension and damage, the drive/tyre/drag, the load projection, the per-section setup, the
+**surface sample over loaded tracks**, the auto-steer (both protection branches), and
+finally the whole `$6185C` frame in lockstep for 60 frames. **All match exactly.** The
+oracle repeatedly earned its keep — it caught a swapped sin/cos quarter-mirror, a signed
+`CMPI.b #5` whose `NEG.b $80` stays `$80`, an unsigned shift on a negative handle that
+mis-decoded only curve pieces, and a branch where a large heading error uses the *excess*
+as the correction — all subtle enough to pass a careful read.
+
+**Part V is complete: the full rigid-body car physics is decoded from the disk in Go and
+verified coordinate-exact against the original, frame by frame.** Combined with Part IV, a
+car can now be driven over the decoded tracks.
 
 ---
 
@@ -703,6 +804,10 @@ go run ./cmd/spineverify ../extracted/game.dec.bin
 
 # Export the eight decoded circuits to JSON for the web track viewer
 go run ./cmd/trackjson ../extracted/game.dec.bin   # -> site/public/stuntcar/tracks.json
+
+# Verify the Go car physics (package physics) against the engine on the m68k core:
+# every sub-routine + the full $6185C frame in lockstep for 60 frames (all exact)
+go run ./cmd/physverify ../extracted/game.dec.bin
 
 # Disassemble / trace the engine. Use game.dec.bin for anything in $F4B8..$1AA4A.
 go run stupidcoder.com/tools/cmd/dis68k     -base 0xE700 -start <addr> -end <addr> extracted/game.dec.bin

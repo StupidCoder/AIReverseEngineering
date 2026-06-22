@@ -270,6 +270,251 @@ func (m *Mem) TorqueToWorld61672() {
 	m.SetW(WAmP, m.MtxMul(m.W(WAmY), 0x4)+m.W(AmY))
 }
 
+// --- suspension ($61BCC) ---
+
+// Suspension addresses: the three contact points (left/right/rear). Surf = track surface
+// height under the point, Car = chassis contact height, Comp = compression (Surf-Car-
+// rest), Travel/Prev = clamped travel and its previous value, Force = spring+damper
+// force, Dmg = the point's damage accumulator (0-255).
+const (
+	Rest = 0x1BCA0
+	Spr0Surf, Spr0Car, Spr0Comp, Spr0Travel, Spr0Prev, Spr0Force, Spr0Dmg = 0x1BCA4, 0x1BC94, 0x1BCB0, 0x1BD14, 0x1BD1A, 0x1BD20, 0x1BB4F
+	Spr1Surf, Spr1Car, Spr1Comp, Spr1Travel, Spr1Prev, Spr1Force, Spr1Dmg = 0x1BCA8, 0x1BC98, 0x1BCB4, 0x1BD16, 0x1BD1C, 0x1BD22, 0x1BB50
+	Spr2Surf, Spr2Car, Spr2Comp, Spr2Travel, Spr2Prev, Spr2Force, Spr2Dmg = 0x1BCAC, 0x1BC9C, 0x1BCB8, 0x1BD18, 0x1BD1E, 0x1BD24, 0x1BB51
+
+	NetLift = 0x1BD38 // average of the three spring forces
+	RollTq  = 0x1BD28
+	PitchTq = 0x1BD26
+	OnGround = 0x1BB7E
+	Bottom   = 0x1BB7D
+	DmgEvt   = 0x1BB54
+	dmgLimit = 0x63CE2 // sustained-impact frame limit (config, in image)
+)
+
+// spring6180E: $6180E spring+damper. force = (delta * $114) >> 8 + travel (word add).
+func spring6180E(delta, travel int16) int16 {
+	p := (int32(delta) * 0x114) >> 8
+	return int16(uint16(p) + uint16(travel))
+}
+
+// spring runs one of the three identical suspension blocks: compute compression and the
+// clamped spring+damper force, accumulate bottoming/damage, and clamp the force.
+func (m *Mem) spring(surf, car, comp, travel, prev, force, dmg uint32) {
+	d0 := m.L(surf) - m.L(car) - m.L(Rest)
+	m.SetL(comp, d0)
+	if d0 >= 0 {
+		if d0 >= 0x1400 {
+			d0 = 0x1400
+		}
+	} else if d0 < -0x300 {
+		d0 = -0x300
+	}
+	m.SetW(travel, int16(d0))
+	d6 := int16(d0)
+	f := spring6180E(int16(d0)-m.W(prev), d6)
+	if f < 0 { // negative force -> zeroed, impact counter reset
+		m.SetW(force, 0)
+		m.B[0x1BB56] = 0
+		m.SetW(prev, m.W(travel))
+		return
+	}
+	d4 := m.W(force) // previous force
+	m.SetW(force, f)
+	if f >= 0x400 && d4 < 0x200 { // hard bottoming
+		m.B[Bottom]++ // ADDQ.b #1 (byte)
+	}
+	d := f - int16(m.U8(0x1BB01))<<8
+	if d < 0 || d < 0x700 { // below damage threshold: reset impact counter
+		m.B[0x1BB56] = 0
+		m.SetW(prev, m.W(travel))
+		return
+	}
+	if d >= m.W(0x1BC3A) { // track the peak
+		m.SetW(0x1BC3A, d)
+	}
+	d -= 0x600
+	if int8(m.U8(0x1BBCD)) >= 0 { // damage enabled
+		m.B[0x1BB56] = byte(m.U8(0x1BB56) + 1)
+		if int8(m.U8(0x1BB56)) < int8(m.U8(dmgLimit)) {
+			sev := int(uint16(d) >> 8)         // LSR.w #8
+			sev = (sev + (sev >> 1)) & 0xFF     // + half (byte)
+			n := sev + m.U8(dmg)
+			if n > 0xFF {
+				n = 0xFF
+			}
+			m.B[dmg] = byte(n)
+			m.B[DmgEvt] = 0x80
+		}
+	}
+	if m.W(force) >= 0x1200 { // clamp force
+		m.SetW(force, 0x11FF)
+	}
+	m.SetW(prev, m.W(travel))
+}
+
+// ContactHeights61B70 computes the chassis' three contact-point heights ($1BC94/98/9C)
+// from the car height ($1BCDC) tilted by sin(roll) and sin(pitch) -- the geometry the
+// springs compare against the track surface.
+func (m *Mem) ContactHeights61B70() {
+	sr := m.Sin(m.W(Roll))
+	m.SetW(0x1BBF6, sr)
+	d0 := int32(m.Sin(m.W(Pit))) << 3
+	d3 := int32(sr) << 4
+	m.SetL(Spr2Car, (m.L(PosY)-d3)>>8) // $1BC9C
+	d4 := m.L(PosY) + d3
+	m.SetL(Spr1Car, (d4-d0)>>8) // $1BC98
+	m.SetL(Spr0Car, (d4+d0)>>8) // $1BC94
+}
+
+// Suspension61BCC reproduces $61BCC: the three spring blocks then the combine into net
+// lift ($1BD38), roll torque ($1BD28), pitch torque ($1BD26) and the on-ground flag
+// ($1BB7E), plus the airborne self-righting nudge. It omits the engine's three external
+// calls ($622DC surface-slope/loads, $5B32E, $63E2E), whose outputs are disjoint from
+// these; those are separate routines.
+func (m *Mem) Suspension61BCC() {
+	m.B[Bottom] = 0
+	m.B[0x1BC3A] = 0 // MOVE.b -- clears only the high byte (matches the engine)
+	m.spring(Spr0Surf, Spr0Car, Spr0Comp, Spr0Travel, Spr0Prev, Spr0Force, Spr0Dmg)
+	m.spring(Spr1Surf, Spr1Car, Spr1Comp, Spr1Travel, Spr1Prev, Spr1Force, Spr1Dmg)
+	m.spring(Spr2Surf, Spr2Car, Spr2Comp, Spr2Travel, Spr2Prev, Spr2Force, Spr2Dmg)
+
+	d0 := (m.W(Spr0Force) + m.W(Spr1Force)) >> 1
+	m.SetW(0x1BBF6, d0)
+	d0 = (d0 + m.W(Spr2Force)) >> 1
+	m.SetW(NetLift, d0)
+	// (engine calls $622DC here -- surface slope + body loads; disjoint, done separately)
+
+	// roll torque = clamp(3*(spr0-spr1), +-$1000), sign preserved
+	dd := m.W(Spr0Force) - m.W(Spr1Force)
+	t := dd<<1 + dd
+	if t < 0 {
+		t = -t
+	}
+	if t >= 0x1000 {
+		t = 0x1000
+	}
+	if dd < 0 {
+		t = -t
+	}
+	m.SetW(RollTq, t)
+	// pitch torque = frontAvg - rear
+	m.SetW(PitchTq, m.W(0x1BBF6)-m.W(Spr2Force))
+
+	// on-ground flag = (high byte | low byte) of net lift
+	og := m.U8(NetLift) | m.U8(NetLift+1)
+	m.B[OnGround] = byte(og)
+	if og != 0 {
+		return // grounded: no self-righting
+	}
+	if m.U8(0x1BBDF) != 0 {
+		return
+	}
+	// airborne self-righting (Ski Jump / Roller Coaster): nudge pitch torque.
+	d3 := int16(-0x80)
+	roll := m.W(Roll)
+	if roll >= 0 {
+		if roll >= 0x1000 {
+			d3 = int16(-0x100) // $FF00
+		}
+	} else {
+		switch m.U8(0x1CA33) {
+		case 7:
+			d3 = int16(-0x80) // d1=$F8 set in engine but d3 stays $FF80; pitch path uses d3
+		case 4:
+			d3 = int16(-0x8) // $FFF8
+		default:
+			return
+		}
+	}
+	d3 -= m.W(PitchTq)
+	if d3 >= 0 {
+		return
+	}
+	c := m.U8(0x1BCF0)
+	if int8(c) >= 0 || c == 0xFF {
+		m.SetW(PitchTq, d3)
+	}
+}
+
+// --- drive / tire forces ---
+
+const (
+	Drive   = 0x1BD2A // longitudinal drive (engine/wheelspin) force
+	LoadA   = 0x1BD40 // body loads from the net lift (set by $622DC)
+	LoadB   = 0x1BD42 // the tire-load component used for grip
+	LoadC   = 0x1BD44
+	Slip    = 0x1BBC1 // lateral slide flag
+	TqAppR  = 0x1BCFC // applied roll torque (= TqR)
+	TqAppY  = 0x1BD00 // applied yaw torque (= TqY)
+)
+
+// grip621DA: tire grip = LoadB*2 when on the ground ($1BB7E set), else 0 (no grip in
+// the air). Returns the engine's d0.
+func (m *Mem) grip621DA() int16 {
+	if m.U8(OnGround) == 0 {
+		return 0
+	}
+	return m.W(LoadB) << 1
+}
+
+// LateralTire6217A: the lateral tire force $1BD32 with a grip limit, plus the slide flag
+// $1BBC1 (set when the demand exceeds grip).
+func (m *Mem) LateralTire6217A() {
+	d4 := m.W(GrvA) + m.W(LoadA)
+	d3 := d4 - m.W(BVelL)
+	if d3 < 0 {
+		d3 = -d3
+	}
+	g := m.grip621DA()
+	if uint16(d3) < uint16(g) { // gripping
+		m.SetW(BFrcA, m.W(LoadA)-m.W(BVelL))
+		m.B[Slip] = 0
+		return
+	}
+	if m.W(BVelL) < 0 { // sliding: oppose the slide
+		g = -g
+	}
+	m.SetW(BFrcA, d4-g)
+	m.B[Slip] = 0x80
+}
+
+// Drive620B8: the longitudinal drive force. $1BD34 = gravity-x + load; manage the drive
+// force $1BD2A (wheelspin decay then grip clamp); $1BD36 = drive + load + gravity-z;
+// then the lateral tire force.
+func (m *Mem) Drive620B8() {
+	m.SetW(BFrcB, m.W(GrvB)+m.W(LoadB))
+	d0b := m.U8(Drive) | m.U8(BVelV) // $1BD2A.b | $1BD30.b
+	if int8(d0b) >= 0 && m.U8(0x1BD2B) != 0 {
+		m.SetW(Drive, m.W(Drive)-int16(d0b&0xFF))
+	}
+	d3 := m.W(Drive)
+	if d3 < 0 {
+		d3 = -d3
+	}
+	g := m.grip621DA()
+	if uint16(d3) >= uint16(g) { // |drive| >= grip (SUB.w no borrow): clamp to +-grip
+		if m.W(Drive) >= 0 {
+			m.SetW(Drive, g)
+		} else {
+			m.SetW(Drive, -g)
+		}
+	}
+	m.SetW(BFrcC, m.W(Drive)+m.W(LoadC)+m.W(GrvC))
+	m.LateralTire6217A()
+}
+
+// TorqueApply62138: form the applied roll/yaw torques from the suspension/steering
+// torques and the angular momentum. $1BCFC = $1BD26 - (AmR>>4) [+ $1BD36>>2 if grounded];
+// $1BD00 = $1BD28 - (AmY>>4).
+func (m *Mem) TorqueApply62138() {
+	d0 := m.W(PitchTq) - (m.W(AmR) >> 4)
+	if m.U8(OnGround) != 0 {
+		d0 += m.W(BFrcC) >> 2
+	}
+	m.SetW(TqAppR, d0)
+	m.SetW(TqAppY, m.W(RollTq)-(m.W(AmY)>>4))
+}
+
 // Force61ADC: world force ($1BCF6/F8/FA) * 0.93 -> += velocity ($1BCEA/EC/EE).
 func (m *Mem) Force61ADC() {
 	m.SetW(VelX, m.W(VelX)+mul0_93(m.W(FrcX)))

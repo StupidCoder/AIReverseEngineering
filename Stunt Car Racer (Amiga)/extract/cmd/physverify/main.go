@@ -142,6 +142,32 @@ func main() {
 		{"TorqueToWorld $61672", 0x61672, (*physics.Mem).TorqueToWorld61672,
 			append(append([]uint32{}, matrixSlots...), physics.AmR, physics.AmP, physics.AmY, physics.WAmY),
 			[]uint32{physics.WAmR, physics.WAmY, physics.WAmP}},
+		{"ContactHeights $61B70", 0x61B70, (*physics.Mem).ContactHeights61B70,
+			[]uint32{physics.Roll, physics.Pit},
+			[]uint32{0x1BC94, 0x1BC96, 0x1BC98, 0x1BC9A, 0x1BC9C, 0x1BC9E, 0x1BBF6}},
+		{"Suspension $61BCC", 0x61BCC, (*physics.Mem).Suspension61BCC,
+			[]uint32{physics.Spr0Prev, physics.Spr1Prev, physics.Spr2Prev,
+				physics.Spr0Force, physics.Spr1Force, physics.Spr2Force,
+				0x1BB01, 0x1BBCD, 0x1BB56, 0x1BC3A, physics.Spr0Dmg, physics.Spr1Dmg, physics.Spr2Dmg,
+				0x1BBDF, physics.Roll, 0x1BCF0, 0x1CA33},
+			[]uint32{physics.Spr0Force, physics.Spr1Force, physics.Spr2Force,
+				physics.Spr0Travel, physics.Spr1Travel, physics.Spr2Travel,
+				physics.Spr0Prev, physics.Spr1Prev, physics.Spr2Prev,
+				0x1BCB0, 0x1BCB2, 0x1BCB4, 0x1BCB6, 0x1BCB8, 0x1BCBA,
+				physics.Spr0Dmg, physics.Spr2Dmg, 0x1BB56,
+				physics.NetLift, 0x1BBF6, physics.RollTq, physics.OnGround, physics.Bottom}},
+		// NB $1BD26 (pitch torque) is finalised by $5B32E (steering) in $61BCC's tail; it
+		// is verified with the control routines, not here.
+		{"LateralTire $6217A", 0x6217A, (*physics.Mem).LateralTire6217A,
+			[]uint32{physics.GrvA, physics.LoadA, physics.BVelL, physics.LoadB, physics.OnGround},
+			[]uint32{physics.BFrcA, physics.Slip}},
+		{"TorqueApply $62138", 0x62138, (*physics.Mem).TorqueApply62138,
+			[]uint32{physics.PitchTq, physics.RollTq, physics.AmR, physics.AmY, physics.BFrcC, physics.OnGround},
+			[]uint32{physics.TqAppR, physics.TqAppY}},
+		{"Drive $620B8", 0x620B8, (*physics.Mem).Drive620B8,
+			[]uint32{physics.GrvB, physics.GrvC, physics.GrvA, physics.LoadA, physics.LoadB, physics.LoadC,
+				physics.Drive, physics.BVelV, 0x1BD2B, physics.BVelL, physics.OnGround},
+			[]uint32{physics.BFrcB, physics.BFrcC, physics.Drive, physics.BFrcA, physics.Slip}},
 	}
 	for _, t := range cases {
 		bad := 0
@@ -157,6 +183,19 @@ func main() {
 				wL(m, physics.PosZ, rng.Int31()-(1<<30))
 				m[0x1BB75] = byte(rng.Intn(256))
 				m[0x1BB9A] = byte(rng.Intn(256))
+			}
+			if t.pc == 0x61B70 {
+				wL(m, physics.PosY, rng.Int31()-(1<<30))
+			}
+			if t.pc == 0x61BCC {
+				// 32-bit surface / chassis / rest heights, in a range that exercises the
+				// clamp boundaries and the damage thresholds.
+				r32 := func() int32 { return int32(rng.Intn(0x8000) - 0x4000) }
+				for _, a := range []uint32{physics.Spr0Surf, physics.Spr1Surf, physics.Spr2Surf,
+					physics.Spr0Car, physics.Spr1Car, physics.Spr2Car} {
+					wL(m, a, r32())
+				}
+				wL(m, physics.Rest, int32(rng.Intn(0x2000)))
 			}
 			eng, _ := runEngine(m, t.pc, nil)
 			gmem := physics.New(img)

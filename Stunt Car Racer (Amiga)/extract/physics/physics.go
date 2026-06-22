@@ -690,6 +690,98 @@ func (m *Mem) TorqueApply62138() {
 	m.SetW(TqAppY, m.W(RollTq)-(m.W(AmY)>>4))
 }
 
+// --- per-frame plumbing + the full frame ---
+
+// Sound60FBE ($60FBE): sets the speed measure $1BD5C = |body vertical velocity| (used by
+// the surface sampler's LOD) and the engine note $1BC62 (cosmetic).
+func (m *Mem) Sound60FBE() {
+	d0 := m.W(0x1BD30)
+	if d0 < 0 {
+		d0 = -d0
+	}
+	m.SetW(0x1BD5C, d0)
+	if m.U8(OnGround) == 0 {
+		m.SetW(0x1BC62, m.W(0x1BC62)-int16(uint16(m.W(0x1BC62))>>2)) // LSR.w #2 decay
+		return
+	}
+	if d0 >= 0x800 {
+		s := uint32(uint16(d0)<<1) + 0x3000
+		if s > 0xFFFF {
+			s = 0xFF00
+		}
+		v := uint16(s)
+		m.SetW(0x1BC62, int16(v))
+	} else {
+		m.SetW(0x1BC62, d0<<3)
+	}
+}
+
+// Tail63E2E ($63E2E): decrement the $63EE0 timer and, if an external impulse is pending
+// ($1BB46), fold it into the loads ($1BD40/42/44) and the wheel offsets ($1BD76/78/7A),
+// then clear it. (Skips the $F362 sound trigger, which touches no physics state.)
+func (m *Mem) Tail63E2E() {
+	if m.U8(0x63EE0) != 0 {
+		m.B[0x63EE0]--
+	}
+	if m.U8(0x1BB46) == 0 {
+		return
+	}
+	m.B[0x1BB46] = 0
+	d0 := int(m.W(0x1BBEE)) - int(m.W(0x1BD58))
+	if d0 < 0 {
+		d0 = 0
+	}
+	m.SetW(0x1BBEE, int16(d0))
+	imp := m.W(0x1BD56) >> 4
+	m.SetW(0x1BD76, m.W(0x1BD76)-imp)
+	m.SetW(0x1BD78, m.W(0x1BD78)-imp)
+	m.SetW(0x1BD7A, m.W(0x1BD7A)-imp)
+	m.SetW(0x1BD40, m.W(0x1BD40)+m.W(0x1BD54))
+	m.SetW(0x1BD42, m.W(0x1BD42)+m.W(0x1BD56))
+	m.SetW(0x1BD44, m.W(0x1BD44)+m.W(0x1BD58))
+	m.SetW(0x1BD54, 0)
+	m.SetW(0x1BD56, 0)
+	m.SetW(0x1BD58, 0)
+	if m.U8(0x63EE0) == 0 {
+		m.B[0x63EE0] = 5
+	}
+}
+
+// Frame6185C runs one full physics frame ($6185C): orientation matrix, wheel corners,
+// the track-surface sample, the frame transforms, the suspension (springs + loads +
+// combine), the grounded drive/tire/steer block, and finally the integration. It is the
+// composition of all the verified sub-routines, in the engine's order. Crash recovery
+// ($5B32E, active only when $1BBDF != 0) is not reimplemented; in normal driving it is a
+// no-op. Verified frame-by-frame against the engine (cmd/physverify).
+func (m *Mem) Frame6185C() {
+	m.Matrix61368()
+	m.Corners618CE()
+	m.Surface5C1D0()
+	m.ContactHeights61B70()
+	m.VelToBody6158C()
+	m.Sound60FBE()
+	m.GravToBody615E6()
+	m.Suspension61BCC() // springs + combine + self-righting
+	m.LoadProject622DC() // $622DC (called inside $61BCC; data-independent of the combine)
+	// $5B32E crash recovery: no-op when $1BBDF == 0
+	m.SetW(0x1BD46, m.W(0x1BD44)) // $62048
+	m.Tail63E2E()
+	if m.U8(0x620B6) != 0 {
+		m.B[0x620B6]--
+	}
+	if m.U8(0x1BB72) != 0 { // grounded drive/tire/steer block
+		m.Drive620B8()
+		m.SectionLocate61012()
+		m.ForceToWorld61618()
+		m.Drag621F4()
+		m.TorqueApply62138()
+		m.Torque61B26()
+		m.TorqueToWorld61672()
+	}
+	m.Force61ADC()
+	m.Integrate61950()
+}
+
 // Force61ADC: world force ($1BCF6/F8/FA) * 0.93 -> += velocity ($1BCEA/EC/EE).
 func (m *Mem) Force61ADC() {
 	m.SetW(VelX, m.W(VelX)+mul0_93(m.W(FrcX)))

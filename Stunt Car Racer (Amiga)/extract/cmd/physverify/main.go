@@ -344,6 +344,48 @@ func main() {
 		report(fmt.Sprintf("SectionLocate61012 track %d", id), bad)
 	}
 
+	// --- full frame $6185C, lockstep engine vs Go for many frames ---
+	physBlock := []uint32{0x1BCD8, 0x1BCDA, 0x1BCDC, 0x1BCDE, 0x1BCE0, 0x1BCE2, // pos X/Y/Z
+		0x1BCE4, 0x1BCE6, 0x1BCE8, // roll/yaw/pit
+		0x1BCEA, 0x1BCEC, 0x1BCEE, // vel
+		0x1BCF0, 0x1BCF2, 0x1BCF4, // angmom
+		0x1BCF6, 0x1BCF8, 0x1BCFA} // world force
+	for _, id := range []int{1, 3, 7} {
+		m := baseMem()
+		m[0x1CA33] = byte(id)
+		m, _ = runEngine(m, 0x5AE46, map[int]uint32{1: uint32(id)})
+		m, _ = runEngine(m, 0x64304, nil)
+		m, _ = runEngine(m, 0x5A794, nil)
+		m, _ = runEngine(m, 0x696FC, nil)
+		// place the car (physoracle-style) and arm the race state for normal driving.
+		g := uint32(1 & 3)
+		m[0x1BCD8] = m[0x60552+g]
+		m[0x1BCE0] = m[0x60556+g]
+		m[0x1BCE6] = m[0x6055A+g]
+		m[0x1BCDC], m[0x1BCDD] = 0x03, 0xF0
+		m[0x1BC42], m[0x1BC43] = 0x07, 0x00
+		m[0x1BB68], m[0x1BB57], m[0x1BB72] = 0x80, 1, 0x80
+		m[0x1BBDF], m[0x1BB46], m[0x63EE0], m[0x620B6] = 0, 0, 5, 5
+		m[0x64AEC], m[0x64AED], m[0x64AEE], m[0x64AEF] = 0x9C, 0xED, 0xCD, 0x02 // "genuine disk"
+		bad := 0
+		for f := 0; f < 60 && bad == 0; f++ {
+			m[0x1BB47] = byte(0x20) // hold an input
+			eng, _ := runEngine(m, 0x6185C, nil)
+			gm := physics.New(img)
+			copy(gm.B, m)
+			gm.Frame6185C()
+			for _, a := range physBlock {
+				if rW(gm.B, a) != rW(eng, a) {
+					bad++
+					fmt.Printf("  Frame6185C t%d frame%d @%X: go=%04x eng=%04x\n", id, f, a, uint16(rW(gm.B, a)), uint16(rW(eng, a)))
+					break
+				}
+			}
+			m = eng // advance from the engine's (verified-equal) state
+		}
+		report(fmt.Sprintf("Frame6185C track %d (60 frames)", id), bad)
+	}
+
 	if fails == 0 {
 		fmt.Println("ALL OK")
 	} else {

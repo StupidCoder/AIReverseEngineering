@@ -654,7 +654,8 @@ export class Physics {
   // driveTick is a PROVISIONAL drive coupling (not the verified frame6185C). The exact
   // physics needs per-frame state the original computes in its render pass -- where the
   // car sits on the track, the surface under each wheel, the section heading -- which
-  // isn't reimplemented yet (a "Part VI"). Without it the isolated physics floats in a
+  // isn't reimplemented yet (the remaining piece of the Part V gameplay). Without it the
+  // isolated physics floats in a
   // mismatched frame and tumbles. So here we (1) inject a flat ground just under the
   // wheels so the verified suspension/grip/drive engage -- the throttle/acceleration/drag
   // are the real model -- and (2) keep the chassis roughly upright, since the render

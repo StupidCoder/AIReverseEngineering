@@ -247,8 +247,14 @@ export class TrackViewer {
 
   _driveStep(dt) {
     const d = this.drive, k = this.keys;
-    const STEP = 1 / 50;
-    d.acc = Math.min(d.acc + dt, 0.2);
+    // The original physics is FIXED-TIMESTEP, not framerate-independent: each $6185C
+    // advances the sim by one tick and the constants bake the step in (the 0.93 damping,
+    // the <<6/<<7 velocity->position scales). So we run it at a fixed rate decoupled from
+    // the display via an accumulator -- one tick = one game frame (Amiga PAL VBlank, 50 Hz)
+    // -- never scaled by the render dt. The golden-trace check is per-tick, so exactness is
+    // independent of wall-clock rate; the 50 Hz only sets how fast the car feels.
+    const STEP = 1 / 50; // Amiga PAL frame
+    d.acc = Math.min(d.acc + dt, 0.2); // clamp so a stalled tab can't spiral
     while (d.acc >= STEP) {
       d.acc -= STEP;
       if (k['w']) d.throttle = Math.min(0x3800, d.throttle + 0x300);

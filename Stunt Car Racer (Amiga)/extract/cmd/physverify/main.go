@@ -248,6 +248,50 @@ func main() {
 		report(fmt.Sprintf("Setup5FE56 track %d", id), bad)
 	}
 
+	// --- $5C1D0 end-to-end surface sample over a loaded track ---
+	surfCheck := []uint32{0x1BC02, 0x1BC04, 0x1BC06, 0x1BC08,
+		0x1BCA4, 0x1BCA6, 0x1BCA8, 0x1BCAA, 0x1BCAC, 0x1BCAE,
+		0x1BC4D, 0x1BC40, 0x1BC42, 0x1BB65, 0x1BB9A, 0x1BC22, 0x1BBDA, 0x1BBA1, 0x1BBA3, 0x1BB85}
+	for _, id := range []int{1, 3, 7} {
+		m0 := baseMem()
+		m0[0x1CA33] = byte(id)
+		loaded, _ := runEngine(m0, 0x5AE46, map[int]uint32{1: uint32(id)})
+		n := int(loaded[0x1CA1A])
+		bad := 0
+		for iter := 0; iter < 1500; iter++ {
+			m := append([]byte(nil), loaded...)
+			m[0x1BB1C] = byte(rng.Intn(n)) // car's section
+			for _, a := range []uint32{0x1BD02, 0x1BD04, 0x1BD06, 0x1BD08, 0x1BD0A, 0x1BD0C} {
+				wW(m, a, int16(rng.Intn(0x4000)-0x2000)) // corner offsets
+			}
+			wW(m, 0x1BC5E, int16(rng.Intn(0x300)-0x180))
+			wW(m, 0x1BB10, int16(rng.Intn(0x10000)))
+			m[0x1BD5C] = byte(rng.Intn(256))
+			wW(m, 0x1BCE4, int16(rng.Intn(0x10000)))
+			for _, a := range []uint32{0x1BCA4, 0x1BCA8, 0x1BCAC} {
+				wL(m, a, rng.Int31()-(1<<30))
+			}
+			m[0x1BB65] = byte(rng.Intn(256))
+			m[0x1BB9A] = byte(rng.Intn(256))
+			eng, _ := runEngine(m, 0x5C1D0, nil)
+			gm := physics.New(img)
+			copy(gm.B, m)
+			gm.Surface5C1D0()
+			for _, a := range surfCheck {
+				if gm.B[a] != eng[a] || gm.B[a+1] != eng[a+1] {
+					bad++
+					if bad <= 3 {
+						fmt.Printf("  Surface5C1D0 t%d @%X: go=%02x%02x eng=%02x%02x | 1BD5C=%02x 1BCE4b=%02x 1BB65in=%02x sec=%d 1BB85 go=%d eng=%d 1BC22 go=%04x eng=%04x\n",
+							id, a, gm.B[a], gm.B[a+1], eng[a], eng[a+1],
+							m[0x1BD5C], m[0x1BCE4], m[0x1BB65], m[0x1BB1C], gm.B[0x1BB85], eng[0x1BB85], uint16(rW(gm.B, 0x1BC22)), uint16(rW(eng, 0x1BC22)))
+					}
+					break
+				}
+			}
+		}
+		report(fmt.Sprintf("Surface5C1D0 track %d", id), bad)
+	}
+
 	if fails == 0 {
 		fmt.Println("ALL OK")
 	} else {

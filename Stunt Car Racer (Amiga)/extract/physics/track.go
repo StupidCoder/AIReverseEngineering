@@ -112,3 +112,200 @@ func (m *Mem) SecRetreat5C538() {
 	}
 	m.B[0x1BB85] = byte(d1)
 }
+
+// edgeCross5C484 ($5C484): when the car's across-position runs off the end of the
+// current section's rung strip, step to the adjacent section ($5C51A/$5C538 + $5FE56)
+// and rebase the vertex index $1BBA3, mirroring the fractions if needed.
+func (m *Mem) edgeCross5C484() {
+	dc := false
+	if int8(byte(m.U8(0x1BC40))^byte(m.U8(0x1BC32))) >= 0 {
+		m.SecAdvance5C51A()
+		m.Setup5FE56(m.U8(0x1BB85))
+		dc = int8(m.U8(0x1BC32)) < 0
+	} else {
+		m.SecRetreat5C538()
+		m.Setup5FE56(m.U8(0x1BB85))
+		dc = int8(m.U8(0x1BC32)) >= 0
+	}
+	if dc { // $5C4DC
+		m.B[0x1BBA3] = byte((m.U8(0x1BB97) - 4) & 0xFF)
+		if int8(m.U8(0x1BC40)) < 0 {
+			return
+		}
+	} else { // $5C4C6
+		m.B[0x1BBA3] = 0
+		if int8(m.U8(0x1BC40)) >= 0 {
+			return
+		}
+	}
+	if v := byte((256 - m.U8(0x1BC41)) & 0xFF); v != 0 { // NEG.b, default $FF on zero
+		m.B[0x1BC41] = v
+	} else {
+		m.B[0x1BC41] = 0xFF
+	}
+	if v := byte((256 - m.U8(0x1BC4D)) & 0xFF); v != 0 {
+		m.B[0x1BC4D] = v
+	} else {
+		m.B[0x1BC4D] = 0xFF
+	}
+}
+
+// offTrack5C872 ($5C872): the wheel is past the track edge -- pin the surface to $1000
+// and set the off-track marker bit in $1BB9A.
+func (m *Mem) offTrack5C872() {
+	m.SetL(0x1BB18, 0x1000)
+	m.B[0x1BB9A] = byte((m.U8(0x1BB9A) >> 1) | 0x80)
+}
+
+// offEdge5C808 ($5C808): near the track edge, taper the sampled surface ($1BB18) toward
+// the edge or, past it, fall off (offTrack5C872); records the edge side in $1BBDA.
+func (m *Mem) offEdge5C808() {
+	v := int(m.W(0x1BC22))
+	var d0 int
+	if v < 0 {
+		d0 = -v
+	} else {
+		d0 = 0x180 - v
+		if d0 < 0 {
+			d0 = -d0
+		}
+	}
+	if d0 > 0x30 {
+		m.offTrack5C872()
+		return
+	}
+	d0 = (d0 & 0xFF) << 4
+	d3 := m.L(0x1BB18) - int32(d0) - 0x100
+	if d3 < 0x1000 {
+		m.offTrack5C872()
+		return
+	}
+	m.SetL(0x1BB18, d3)
+	if (byte(m.U8(0x1BC22))^byte(m.U8(0x1BC32)))&0x80 != 0 {
+		m.B[0x1BBDA] = 0x80
+	} else {
+		m.B[0x1BBDA] = 0x40
+	}
+}
+
+// store5C5F2 ($5C5F2): interpolate the surface ($5C554) and store it to contact point d1
+// (0/2/4 -> $1BCA4/A8/AC). Near (LOD $1BD5C>=$A) or with large roll: store directly;
+// far and near-level: average with the previous value (a low-pass).
+func (m *Mem) store5C5F2(d1 int) {
+	m.Interp5C554()
+	off := uint32(d1 << 1)
+	if m.U8(0x1BB65)&0x80 != 0 { // BCLR #7,$1BB65 ; act if it was set
+		m.B[0x1BB65] &^= 0x80
+		m.offEdge5C808()
+	} else {
+		m.B[0x1BB65] &^= 0x80
+	}
+	if int8(m.U8(0x1BD5C)) >= 0x0A {
+		m.SetL(0x1BCA4+off, m.L(0x1BB18))
+		return
+	}
+	r := m.U8(0x1BCE4)
+	if int8(r) < 0 {
+		r = (256 - r) & 0xFF // NEG.b ($80 stays $80 = -128 signed)
+	}
+	if int8(byte(r)) > 5 { // CMPI.b #5 ; BGT is signed
+		m.SetL(0x1BCA4+off, m.L(0x1BB18))
+		return
+	}
+	a := uint32(m.L(0x1BCA4 + off))
+	b := uint32(m.L(0x1BB18))
+	sum := a + b
+	var carry uint32
+	if sum < a {
+		carry = 1
+	}
+	m.SetL(0x1BCA4+off, int32((carry<<31)|(sum>>1))) // ROXR.l #1 after ADD.l
+}
+
+// mtxAlong is the engine's "MULS.W d3,d0 ; ASL.l #1 ; SWAP" used for the along/across
+// fraction scaling in $5C1D0: d3 = (base.b << 7) with bit15 cleared.
+func mulSwap(d0, d3 int) int {
+	p := int32(int16(d0)) * int32(int16(d3))
+	return int(int16((p << 1) >> 16))
+}
+
+// Surface5C1D0 ($5C1D0) is the per-frame surface-sample driver: for each of the three
+// contact points it finds the car's section ($5FE56), computes the along/across
+// fractions from the contact offset ($1BD02/$1BD08) -- flagging an off-edge in $1BB65 --
+// samples the four surrounding rung-corner heights via $5C0AA into $1BC02-08, and stores
+// the interpolated surface to $1BCA4/A8/AC via $5C5F2. This is where the physics reads
+// the Part IV track surface.
+func (m *Mem) Surface5C1D0() {
+	sec := m.U8(0x1BB1C)
+	m.B[0x1BB85] = byte(sec)
+	m.Setup5FE56(sec)
+	m.B[0x1BB9A] = 0
+	d1 := 4
+	for {
+		m.B[0x1BBF9] = byte(d1)
+		if m.U8(0x1BB1C) != m.U8(0x1BB85) {
+			s := m.U8(0x1BB1C)
+			m.B[0x1BB85] = byte(s)
+			m.Setup5FE56(s)
+			d1 = m.U8(0x1BBF9)
+		}
+		m.B[0x1BB1A] = byte(m.U8(0x1BB7B))
+		pos := int(m.W(0x1BD02+uint32(d1)))>>4 + int(m.W(0x1BC5E))
+		var d0 int
+		if uint16(pos) >= 0x180 { // off-edge
+			m.B[0x1BB65] |= 0x80
+			m.SetW(0x1BC22, int16(pos))
+			if int16(pos) < 0 {
+				d0 = 0
+			} else {
+				d0 = 0xFF
+			}
+		} else {
+			a := int(int16(pos))
+			if a < 0 {
+				a = -a
+			}
+			d0 = mulSwap(a, (m.U8(0x1BB1A)<<7)&0x7FFF)
+			if d0 >= 0x100 {
+				d0 = m.U8(0xFF) // engine's MOVE.b $FF.l clamp (0 on our flat bus)
+			}
+		}
+		m.B[0x1BC4D] = byte(d0)
+		if int8(m.U8(0x1BC32)) < 0 { // mirror along-fraction when raised
+			d0 = int(byte(d0) ^ 0xFF)
+		}
+		if d1 == 4 {
+			m.B[0x1BBA1] = byte(d0)
+		}
+		// across-fraction
+		m.B[0x1BB1A] = byte(m.U8(0x1BBD9))
+		ac := mulSwap(int(m.W(0x1BD08+uint32(d1)))>>3, (m.U8(0x1BB1A)<<7)&0x7FFF) + int(m.W(0x1BB10))
+		m.SetW(0x1BC40, int16(ac))
+		e := (m.U8(0x1BC40) << 1) & 0xFF
+		m.B[0x1BBA3] = byte(e)
+		if int8(byte(e)) < 0 || int8(byte(e)) >= int8(m.U8(0x1BB98)) {
+			m.edgeCross5C484()
+		}
+		// sample the four corner heights
+		a4 := uint32(handlePhys(int(uint16(m.W(0x1BC8C)))))
+		a5 := uint32(handlePhys(int(uint16(m.W(0x1BC90)))))
+		if int8(m.U8(0x1BC32)) < 0 { // raised -> reverse order
+			vi := (m.U8(0x1BB97) - m.U8(0x1BBA3) - 4) & 0xFF
+			m.SetW(0x1BC08, m.railHeight5C0AA(a4, a5, vi))
+			m.SetW(0x1BC06, m.railHeight5C0AA(a4, a5, (vi+1)&0xFF))
+			m.SetW(0x1BC04, m.railHeight5C0AA(a4, a5, (vi+2)&0xFF))
+			m.SetW(0x1BC02, m.railHeight5C0AA(a4, a5, (vi+3)&0xFF))
+		} else {
+			vi := m.U8(0x1BBA3)
+			m.SetW(0x1BC02, m.railHeight5C0AA(a4, a5, vi))
+			m.SetW(0x1BC04, m.railHeight5C0AA(a4, a5, (vi+1)&0xFF))
+			m.SetW(0x1BC06, m.railHeight5C0AA(a4, a5, (vi+2)&0xFF))
+			m.SetW(0x1BC08, m.railHeight5C0AA(a4, a5, (vi+3)&0xFF))
+		}
+		m.store5C5F2(m.U8(0x1BBF9))
+		d1 = int(int8(m.U8(0x1BBF9))) - 2
+		if d1 < 0 {
+			break
+		}
+	}
+}

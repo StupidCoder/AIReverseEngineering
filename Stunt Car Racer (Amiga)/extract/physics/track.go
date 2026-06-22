@@ -440,3 +440,109 @@ func (m *Mem) Surface5C1D0() {
 		}
 	}
 }
+
+// --- render coupling (Part V §7): the routines the render pass runs each frame to place
+// the car on the track. They feed the surface sample and the orientation reference the
+// physics reads. Verified per-routine against the engine in cmd/physverify. ---
+
+// Dir5FF94 reproduces $5FF94(d0): take section d0's plan-grid cell (table $1C588, low nibble
+// = X, high nibble = Y), subtract the camera reference grid ($1BB04/$1BB06), rotate by the
+// camera quadrant ($1BC30 bits 7,6), and store the camera-relative cell deltas ($65EC0/$65EC2)
+// and the plan base ($1BB22/$1BB26 = delta*8 + the plan origin $1BB2E/$1BB32). All byte math.
+func (m *Mem) Dir5FF94(d0 int) {
+	cell := m.U8(0x1C588 + uint32(d0&0xFF))
+	x := byte(cell & 0x0F)
+	y := byte(cell >> 4)
+	x -= byte(m.U8(0x1BB04))
+	y -= byte(m.U8(0x1BB06))
+	q := m.U8(0x1BC30)
+	switch {
+	case q&0x80 == 0 && q&0x40 == 0: // quadrant 0: no rotation
+	case q&0x80 == 0 && q&0x40 != 0: // quadrant 1: EXG; NEG.b d0
+		x, y = y, x
+		x = byte(-x)
+	case q&0x80 != 0 && q&0x40 == 0: // quadrant 2: NEG.b d0; NEG.b d3
+		x = byte(-x)
+		y = byte(-y)
+	default: // quadrant 3: EXG; NEG.b d3
+		x, y = y, x
+		y = byte(-y)
+	}
+	m.B[0x65EC0] = x
+	m.B[0x65EC2] = y
+	m.B[0x1BB22] = (x << 3) + byte(m.U8(0x1BB2E))
+	m.B[0x1BB26] = (y << 3) + byte(m.U8(0x1BB32))
+}
+
+// PlanPoint5C3DA reproduces $5C3DA: from the plan base $1BB22/$1BB26 (words) pick the
+// section's plan point $1BBF6/$1BBF8 by the quadrant in $1BBF2 (bits 7,6), with the
+// ±$800 half-cell offsets the engine uses for each rotation.
+func (m *Mem) PlanPoint5C3DA() {
+	q := m.U8(0x1BBF2)
+	bx := m.W(0x1BB22)
+	by := m.W(0x1BB26)
+	switch {
+	case q&0x80 == 0 && q&0x40 == 0: // quadrant 0
+		m.SetW(0x1BBF6, -bx)
+		m.SetW(0x1BBF8, -by)
+	case q&0x80 == 0 && q&0x40 != 0: // quadrant 1
+		m.SetW(0x1BBF6, -by)
+		m.SetW(0x1BBF8, int16(0x800)+bx)
+	case q&0x80 != 0 && q&0x40 == 0: // quadrant 2
+		m.SetW(0x1BBF6, int16(0x800)+bx)
+		m.SetW(0x1BBF8, int16(0x800)+by)
+	default: // quadrant 3
+		m.SetW(0x1BBF6, int16(0x800)+by)
+		m.SetW(0x1BBF8, -bx)
+	}
+}
+
+// le16 reads a little-endian signed 16-bit value from the piece-shape header (the engine
+// builds it with `MOVE.b hi(a5); ASL.w #8; MOVE.b lo(a5)`).
+func (m *Mem) le16(a uint32) int16 {
+	return int16(uint16(m.U8(a)) | uint16(m.U8(a+1))<<8)
+}
+
+// Couple5BE44 reproduces $5BE44 -- the per-frame render coupling that places the car's
+// section on the track: it runs the per-section setup ($5FE56), the plan base ($5FF94)
+// and plan point ($5C3DA), then writes the surface-sample offsets $1BC5E/$1BB10 and the
+// orientation reference $1BD5A, branching on the piece's ramp flags ($1BB4D bits 7/6).
+// Flat and ramp-type-1 (bit6) are implemented; ramp-type-2 (bit7) is $5BF50 (TODO).
+func (m *Mem) Couple5BE44() {
+	sec := m.U8(0x1BB85)
+	m.Setup5FE56(sec)
+	a5 := uint32(handlePhys(int(uint16(m.W(0x1BCBC)))))
+	m.Dir5FF94(sec)
+	m.SetW(0x1BBF2, m.W(0x1BC30)-m.W(0x1BC4A))
+
+	flags := m.U8(0x1BB4D)
+	switch {
+	case flags&0x80 != 0: // ramp type 2 ($5BF50)
+		m.couple5BF50(a5)
+	case flags&0x40 != 0: // ramp type 1 ($5BECE)
+		m.PlanPoint5C3DA()
+		m.B[0x1BB1A] = 0xB5
+		d0 := m.W(0x1BBF6) - m.W(0x1BBF8)
+		d3 := int16((0xB5 << 7) & 0x7FFF) // $5A80
+		p := int32(d0) * int32(d3)
+		p <<= 1
+		m.SetW(0x1BC5E, int16(p>>16)-m.le16(a5+2))
+		m.B[0x1BB1A] = byte(m.U8(a5 + 7))
+		d0b := m.W(0x1BBF6) + m.W(0x1BBF8)
+		d3b := int16((m.U8(0x1BB1A) << 7) & 0x7FFF)
+		p2 := int32(d0b) * int32(d3b)
+		p2 <<= 1
+		m.SetW(0x1BB10, int16(p2>>16))
+		m.SetW(0x1BD5A, m.le16(a5+4)+m.W(0x1BC4A))
+	default: // flat ($5BE9A)
+		m.PlanPoint5C3DA()
+		m.SetW(0x1BC5E, m.W(0x1BBF6)-m.le16(a5+2))
+		m.SetW(0x1BB10, m.W(0x1BBF8))
+		m.SetW(0x1BD5A, m.W(0x1BC4A))
+	}
+}
+
+// couple5BF50 is the ramp-type-2 branch of $5BE44 (curved ramp pieces). TODO.
+func (m *Mem) couple5BF50(a5 uint32) {
+	panic("couple5BF50 (ramp type 2) not yet implemented")
+}

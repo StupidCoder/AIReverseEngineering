@@ -344,6 +344,104 @@ func main() {
 		report(fmt.Sprintf("SectionLocate61012 track %d", id), bad)
 	}
 
+	// --- $5FF94 plan-base + $5C3DA plan-point (render coupling), over a loaded track ---
+	for _, id := range []int{1, 3, 7} {
+		m0 := baseMem()
+		m0[0x1CA33] = byte(id)
+		loaded, _ := runEngine(m0, 0x5AE46, map[int]uint32{1: uint32(id)})
+		n := int(loaded[0x1CA1A])
+		badA, badB := 0, 0
+		for iter := 0; iter < 2000; iter++ {
+			sec := rng.Intn(n)
+			m := append([]byte(nil), loaded...)
+			// camera state $5FF94 reads
+			m[0x1BB04] = byte(rng.Intn(256))
+			m[0x1BB06] = byte(rng.Intn(256))
+			m[0x1BC30] = byte(rng.Intn(256))
+			m[0x1BB2E] = byte(rng.Intn(256))
+			m[0x1BB32] = byte(rng.Intn(256))
+			engA, _ := runEngine(m, 0x5FF94, map[int]uint32{0: uint32(sec)})
+			gmA := physics.New(img)
+			copy(gmA.B, m)
+			gmA.Dir5FF94(sec)
+			for _, a := range []uint32{0x65EC0, 0x65EC2, 0x1BB22, 0x1BB26} {
+				if gmA.B[a] != engA[a] {
+					badA++
+					if badA <= 3 {
+						fmt.Printf("  Dir5FF94 t%d sec%d @%X: go=%02x eng=%02x\n", id, sec, a, gmA.B[a], engA[a])
+					}
+					break
+				}
+			}
+			// $5C3DA reads $1BBF2 + the plan base words; randomise them freely.
+			m2 := append([]byte(nil), loaded...)
+			m2[0x1BBF2] = byte(rng.Intn(256))
+			wW(m2, 0x1BB22, int16(rng.Intn(0x10000)))
+			wW(m2, 0x1BB26, int16(rng.Intn(0x10000)))
+			engB, _ := runEngine(m2, 0x5C3DA, nil)
+			gmB := physics.New(img)
+			copy(gmB.B, m2)
+			gmB.PlanPoint5C3DA()
+			for _, a := range []uint32{0x1BBF6, 0x1BBF8} {
+				if rW(gmB.B, a) != rW(engB, a) {
+					badB++
+					if badB <= 3 {
+						fmt.Printf("  PlanPoint5C3DA t%d @%X: go=%d eng=%d\n", id, a, rW(gmB.B, a), rW(engB, a))
+					}
+					break
+				}
+			}
+		}
+		report(fmt.Sprintf("Dir5FF94 track %d", id), badA)
+		report(fmt.Sprintf("PlanPoint5C3DA track %d", id), badB)
+	}
+
+	// --- $5BE44 render coupling, every section of a loaded track ---
+	coupleCheck := []uint32{0x1BBF2, 0x1BBF6, 0x1BBF8, 0x1BC5E, 0x1BB10, 0x1BD5A}
+	for _, id := range []int{1, 3, 7} {
+		m0 := baseMem()
+		m0[0x1CA33] = byte(id)
+		loaded, _ := runEngine(m0, 0x5AE46, map[int]uint32{1: uint32(id)})
+		n := int(loaded[0x1CA1A])
+		bad, ramp2 := 0, 0
+		for sec := 0; sec < n; sec++ {
+			for iter := 0; iter < 64; iter++ {
+				m := append([]byte(nil), loaded...)
+				m[0x1BB85] = byte(sec)
+				for _, a := range []uint32{0x1BB04, 0x1BB06, 0x1BC30, 0x1BB2E, 0x1BB32, 0x1BC4A, 0x1BC4B} {
+					m[a] = byte(rng.Intn(256))
+				}
+				// determine the branch ($1BB4D) this section takes; skip ramp-type-2 (TODO).
+				probe := physics.New(img)
+				copy(probe.B, m)
+				probe.Setup5FE56(sec)
+				if probe.B[0x1BB4D]&0x80 != 0 {
+					ramp2++
+					continue
+				}
+				eng, _ := runEngine(m, 0x5BE44, nil)
+				gm := physics.New(img)
+				copy(gm.B, m)
+				gm.Couple5BE44()
+				for _, a := range coupleCheck {
+					if rW(gm.B, a) != rW(eng, a) {
+						bad++
+						if bad <= 4 {
+							fmt.Printf("  Couple5BE44 t%d sec%d @%X: go=%d eng=%d (1BB4D=%02x)\n",
+								id, sec, a, rW(gm.B, a), rW(eng, a), gm.B[0x1BB4D])
+						}
+						break
+					}
+				}
+			}
+		}
+		tag := fmt.Sprintf("Couple5BE44 track %d", id)
+		if ramp2 > 0 {
+			tag = fmt.Sprintf("Couple5BE44 track %d (%d ramp2 skipped)", id, ramp2)
+		}
+		report(tag, bad)
+	}
+
 	// --- full frame $6185C, lockstep engine vs Go for many frames ---
 	physBlock := []uint32{0x1BCD8, 0x1BCDA, 0x1BCDC, 0x1BCDE, 0x1BCE0, 0x1BCE2, // pos X/Y/Z
 		0x1BCE4, 0x1BCE6, 0x1BCE8, // roll/yaw/pit

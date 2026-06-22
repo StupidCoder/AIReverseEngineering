@@ -272,6 +272,46 @@ func (c *CPU) sub(d, s uint32, size int) uint32 {
 	return r
 }
 
+// bcd does packed-BCD add (ABCD) or subtract (SBCD) of two bytes with the X flag,
+// setting X/C/N/Z per the 68000 (Z is only cleared, for multi-precision chains).
+func (c *CPU) bcd(d, s uint32, isAdd bool) uint32 {
+	x := uint32(0)
+	if c.X {
+		x = 1
+	}
+	var res uint32
+	var carry bool
+	if isAdd {
+		res = (s & 0x0F) + (d & 0x0F) + x
+		if res > 9 {
+			res += 6
+		}
+		res += (s & 0xF0) + (d & 0xF0)
+		carry = res > 0x99
+		if carry {
+			res -= 0xA0
+		}
+	} else {
+		res = (d & 0x0F) - (s & 0x0F) - x
+		borrowLo := int32(res) < 0
+		if borrowLo {
+			res -= 6
+		}
+		res += (d & 0xF0) - (s & 0xF0)
+		carry = int32(res)&0x100 != 0 || res > 0xFF
+		if carry {
+			res -= 0x60
+		}
+	}
+	res &= 0xFF
+	c.X, c.C = carry, carry
+	c.N = res&0x80 != 0
+	if res != 0 {
+		c.Z = false
+	}
+	return res
+}
+
 // cmp sets flags like sub but leaves X (and the destination) unchanged.
 func (c *CPU) cmp(d, s uint32, size int) {
 	x := c.X

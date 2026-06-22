@@ -283,6 +283,21 @@ func (c *CPU) execLogic(op uint16, kind byte) {
 		return
 	}
 	if op&0x0130 == 0x0100 && (op&0x00C0) != 0x00C0 { // ABCD/SBCD/EXG region
+		// ABCD ($Cxxx) / SBCD ($8xxx): bits 7-3 = 00000 (Dy,Dx) or 00001 (-(Ay),-(Ax)).
+		if sub := (op >> 3) & 0x1F; sub == 0 || sub == 1 {
+			isAdd := kind == '&'
+			if sub == 0 { // register form
+				r := c.bcd(c.D[reg2], c.D[reg], isAdd)
+				c.D[reg2] = (c.D[reg2] &^ 0xFF) | r
+			} else { // -(Ay),-(Ax)
+				c.A[reg] -= 1
+				s := c.readSize(c.A[reg], 0)
+				c.A[reg2] -= 1
+				d := c.readSize(c.A[reg2], 0)
+				c.writeSize(c.A[reg2], c.bcd(d, s, isAdd), 0)
+			}
+			return
+		}
 		if kind == '&' { // EXG lives in the AND ($Cxxx) group
 			switch (op >> 3) & 0x1F {
 			case 0x08: // EXG Dx,Dy

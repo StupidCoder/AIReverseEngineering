@@ -167,6 +167,14 @@ func main() {
 		{"LateralTire $6217A", 0x6217A, (*physics.Mem).LateralTire6217A,
 			[]uint32{physics.GrvA, physics.LoadA, physics.BVelL, physics.LoadB, physics.OnGround},
 			[]uint32{physics.BFrcA, physics.Slip}},
+		{"Drag $621F4", 0x621F4, (*physics.Mem).Drag621F4,
+			[]uint32{physics.VelX, physics.VelY, physics.VelZ, physics.FrcX, physics.FrcY, physics.FrcZ,
+				0x1BD2C, 0x1BD2E, 0x1BD30, physics.OnGround, 0x1BD46, 0x1BB9C, 0x1BCA2, 0x1BBDF, 0x1BBC7, 0x1BBB8},
+			[]uint32{physics.FrcX, physics.FrcY, physics.FrcZ}},
+		{"LoadProject $622DC", 0x622DC, (*physics.Mem).LoadProject622DC,
+			[]uint32{physics.NetLift},
+			[]uint32{0x1BD40, 0x1BD42, 0x1BD44, 0x1BD48, 0x1BD4A, 0x1BD4C,
+				0x1BB2B, 0x1BB2C, 0x1BB2D, 0x1BD4E, 0x1BD50, 0x1BD52, 0x1BB1A, 0x1BB1B, 0x1BBBB}},
 		{"TorqueApply $62138", 0x62138, (*physics.Mem).TorqueApply62138,
 			[]uint32{physics.PitchTq, physics.RollTq, physics.AmR, physics.AmY, physics.BFrcC, physics.OnGround},
 			[]uint32{physics.TqAppR, physics.TqAppY}},
@@ -192,6 +200,11 @@ func main() {
 			}
 			if t.pc == 0x61B70 {
 				wL(m, physics.PosY, rng.Int31()-(1<<30))
+			}
+			if t.pc == 0x622DC {
+				for _, a := range []uint32{0x1BCB0, 0x1BCB4, 0x1BCB8} {
+					wL(m, a, rng.Int31()-(1<<30))
+				}
 			}
 			if t.pc == 0x61BCC {
 				// 32-bit surface / chassis / rest heights, in a range that exercises the

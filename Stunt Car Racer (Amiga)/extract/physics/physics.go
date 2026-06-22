@@ -559,6 +559,125 @@ func (m *Mem) Drive620B8() {
 	m.LateralTire6217A()
 }
 
+// slope62424 ($62424): abs+clamp a slope value to 0..$FF ($1BB2B) and look up its
+// half-angle in the table at $1EECA ($1BB2D).
+func (m *Mem) slope62424(d0w int16) {
+	d0 := int(d0w)
+	if d0 < 0 {
+		d0 = -d0
+	}
+	d1 := 0xFF
+	if d0 < 0x100 {
+		d1 = d0 & 0xFF
+	}
+	m.B[0x1BB2B] = byte(d1)
+	m.B[0x1BB2D] = m.B[0x1EECA+uint32(d1>>1)]
+}
+
+// frac612A2 ($612A2): (d0 * $1BB1A) >> 8 (the low byte lands in $1BB1B).
+func (m *Mem) frac612A2(d0 int) int {
+	d3 := (m.U8(0x1BB1A) & 0xFF) * (d0 & 0xFF)
+	m.B[0x1BB1B] = byte(d3)
+	return (d3 >> 8) & 0xFFFF
+}
+
+// LoadProject622DC ($622DC): derive the road-surface slope under the car from the spring
+// compressions ($1BCB0/B4/B8) and project the net lift ($1BD38) onto the three body axes
+// -> the loads $1BD40/$1BD42/$1BD44 (the tire-load components that feed grip and drive).
+func (m *Mem) LoadProject622DC() {
+	m.SetW(0x1BD4A, 0)
+	d0 := ((m.L(0x1BCB0)+m.L(0x1BCB4))>>1 - m.L(0x1BCB8)) >> 4
+	m.SetW(0x1BD4C, int16(uint16(int16(d0))^0x8000))
+	m.slope62424(int16(d0))
+	m.B[0x1BB2C] = m.B[0x1BB2D]
+	m.B[0x1BD52] = m.B[0x1BB2B]
+
+	d0 = (m.L(0x1BCB0) - m.L(0x1BCB4)) >> 3
+	m.SetW(0x1BD48, int16(d0))
+	m.slope62424(int16(d0))
+	m.B[0x1BB1A] = m.B[0x1BB2C]
+	m.B[0x1BD50] = byte(m.frac612A2(m.U8(0x1BB2D)))
+	m.B[0x1BD4E] = byte(m.frac612A2(m.U8(0x1BB2B)))
+
+	// project the net lift onto each axis: load = (netLift * (+-factor << 7)) >> 15,
+	// the factor from $1BB1A and the sign from $1BBBB.
+	proj := func() int16 {
+		d3 := m.U8(0x1BB1A) & 0xFF
+		if int8(m.U8(0x1BBBB)) < 0 {
+			d3 = (0 - d3) & 0xFFFF // NEG.w
+		}
+		d3 = (d3 << 7) & 0xFFFF
+		p := int32(m.W(0x1BD38)) * int32(int16(uint16(d3)))
+		return int16((p << 1) >> 16)
+	}
+	m.B[0x1BB1A], m.B[0x1BBBB] = m.B[0x1BD4E], m.B[0x1BD48]
+	m.SetW(0x1BD40, proj())
+	m.B[0x1BB1A], m.B[0x1BBBB] = m.B[0x1BD50], m.B[0x1BD4A]
+	m.SetW(0x1BD42, proj())
+	m.B[0x1BB1A], m.B[0x1BBBB] = m.B[0x1BD52], m.B[0x1BD4C]
+	m.SetW(0x1BD44, proj())
+}
+
+// Drag621F4 ($621F4): pick a drag coefficient and shift, then subtract velocity*coef
+// from the world force. On the ground and gripping (small steer/slip) the coefficient is
+// a fixed $6000 with a light shift (strong, near-rigid damping); rolling free it scales
+// with the fastest body-velocity component over a $A00 deadzone (speed-proportional air
+// drag).
+func (m *Mem) Drag621F4() {
+	absw := func(v int16) int16 {
+		if v < 0 {
+			return int16(-int32(v))
+		}
+		return v
+	}
+	d7 := uint(1)
+	d0 := int16(0x6000)
+	handled := false
+	if m.U8(OnGround) != 0 {
+		s := m.U8(0x1BD46)
+		if int8(s) < 0 {
+			s ^= 0xFF
+		}
+		if s&0xFF >= 3 || int8(m.U8(0x1BB9C)) < 0 {
+			handled = true
+		} else if m.U8(0x1BCA2) != 0 {
+			d7, handled = 3, true
+		}
+	}
+	low := false
+	if !handled {
+		if m.U8(0x1BBDF) == 0 {
+			low = true
+		} else {
+			d7 = 3
+		}
+	}
+	if low {
+		d0 = absw(m.W(0x1BD2C))
+		if v := absw(m.W(0x1BD2E)); v > d0 {
+			d0 = v
+		}
+		if v := absw(m.W(0x1BD30)); v > d0 {
+			d0 = v
+		}
+		d7 = 5
+		if int8(m.U8(0x1BBC7)) < 0 && int8(m.U8(0x1BBB8)) >= 0 {
+			if uint16(d0) >= 0xA00 { // SUB.w ; BCC (no borrow)
+				d0 = int16(uint16(d0) - 0xA00)
+			} else {
+				d0 = 0
+			}
+		}
+	}
+	apply := func(va, fa uint32) {
+		hi := int16(int32(m.W(va))*int32(d0)>>16) >> d7 // MULS.W ; SWAP ; ASR.w d7
+		m.SetW(fa, m.W(fa)-hi)
+	}
+	apply(VelX, FrcX)
+	apply(VelY, FrcY)
+	apply(VelZ, FrcZ)
+}
+
 // TorqueApply62138: form the applied roll/yaw torques from the suspension/steering
 // torques and the angular momentum. $1BCFC = $1BD26 - (AmR>>4) [+ $1BD36>>2 if grounded];
 // $1BD00 = $1BD28 - (AmY>>4).

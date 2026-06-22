@@ -41,8 +41,11 @@ export class Physics {
   // and bake the code-region constants the physics reads.
   loadTrack(perTrackBuf, staticBuf) {
     this.B.fill(0);
-    this.B.set(new Uint8Array(perTrackBuf), 0x1B000);
-    this.B.set(new Uint8Array(staticBuf), 0x1C800);
+    this.B.set(new Uint8Array(staticBuf), 0x1C900);
+    const u = new Uint8Array(perTrackBuf);
+    const split = 0x1C900 - 0x1B000;
+    this.B.set(u.subarray(0, split), 0x1B000);
+    this.B.set(u.subarray(split), 0x1CA1A); // control bytes (override static's track-0 values)
     this.B.set([0, 0, 0, 217, 255, 39], 0x6125A);            // $6125A table
     this.B.set([44, 0, 10, 0, 211, 0, 245, 0, 48, 57, 0, 1], 0x61AD4); // $61AD4 limits
     this.B.set([0x9C, 0xED, 0xCD, 0x02], 0x64AEC);           // protection: genuine disk
@@ -57,9 +60,9 @@ export class Physics {
 
   mul0_93(v) { return i16((Math.imul(i16(v), DAMP)) >> 8); }
 
-  // --- trig ($64D08 sine / $64D10 cosine) ---
-  cos(a) { return this.sinSel(a, 0x0000); }
-  sin(a) { return this.sinSel(a, 0x4000); }
+  // --- trig: $64D08 is SINE (selector 0), $64D10 is COSINE (selector $4000) ---
+  sin(a) { return this.sinSel(a, 0x0000); }
+  cos(a) { return this.sinSel(a, 0x4000); }
   sinSel(a, d5) {
     let d0 = a & 0xFFFF;
     let d3 = d0 & 0x3FFF;

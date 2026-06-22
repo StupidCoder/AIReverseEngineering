@@ -24,7 +24,9 @@ const (
 	sentinel = 0xFFFFFE
 	stackTop = 0x300000
 	memLo    = 0x1B000
-	memSplit = 0x1C800 // < split: per-track (car state + section arrays); >= split: static (sin + shapes)
+	memSplit = 0x1C900 // per-track contiguous block (car state + section arrays) ends here
+	ctrlLo   = 0x1CA1A // per-track control bytes (section count, finish idx, track id $1CA33)
+	ctrlHi   = 0x1CA42 // ... up to the static sin table
 	memHi    = 0x30000
 )
 
@@ -68,8 +70,12 @@ func main() {
 
 	for id := 0; id < 8; id++ {
 		mem := initTrack(img, id)
-		// per-track init (car state + section arrays); the static data is written once.
-		if err := os.WriteFile(filepath.Join(*out, fmt.Sprintf("%d.bin", id)), mem[memLo:memSplit], 0o644); err != nil {
+		// per-track init = the array block + the small control region (so $1CA1A/$1CA33
+		// etc. are right per track); the static data (sin table + shapes) is written once.
+		perTrack := make([]byte, 0, (memSplit-memLo)+(ctrlHi-ctrlLo))
+		perTrack = append(perTrack, mem[memLo:memSplit]...)
+		perTrack = append(perTrack, mem[ctrlLo:ctrlHi]...)
+		if err := os.WriteFile(filepath.Join(*out, fmt.Sprintf("%d.bin", id)), perTrack, 0o644); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -80,8 +86,8 @@ func main() {
 		trace := goldenTrace(img, mem)
 		b, _ := json.Marshal(trace)
 		os.WriteFile(filepath.Join(*out, fmt.Sprintf("%d.trace.json", id)), b, 0o644)
-		fmt.Printf("track %d (%s): %d.bin (%d KB) + trace (%d frames)\n",
-			id, names[id], id, (memSplit-memLo)/1024, len(trace.Frames))
+		fmt.Printf("track %d (%s): %d.bin (%d bytes) + trace (%d frames)\n",
+			id, names[id], id, len(perTrack), len(trace.Frames))
 	}
 	fmt.Printf("static.bin: %d KB (sin table + piece shapes, shared)\n", (memHi-memSplit)/1024)
 }

@@ -301,6 +301,8 @@ const audio = new Audio();
 audio.preload = 'none';
 let musicTracks = [];
 let playingUrl = null;
+let repeat = localStorage.getItem('studio.repeat') !== '0'; // loop the current song; on by default
+audio.loop = repeat;
 const musicLabel = document.getElementById('musicLabel');
 const musicListEl = document.getElementById('musicList');
 const transport = document.getElementById('musicTransport');
@@ -355,6 +357,18 @@ musPlay.addEventListener('click', () => {
 });
 document.getElementById('musPrev').addEventListener('click', () => skip(-1));
 document.getElementById('musNext').addEventListener('click', () => skip(1));
+const musRepeat = document.getElementById('musRepeat');
+function syncRepeat() {
+  audio.loop = repeat;
+  musRepeat.classList.toggle('on', repeat);
+  musRepeat.title = repeat ? 'Repeat: on' : 'Repeat: off';
+}
+musRepeat.addEventListener('click', () => {
+  repeat = !repeat;
+  localStorage.setItem('studio.repeat', repeat ? '1' : '0');
+  syncRepeat();
+});
+syncRepeat();
 audio.addEventListener('play', () => { musPlay.innerHTML = PAUSE_SVG; musPlay.title = 'Pause'; });
 audio.addEventListener('pause', () => { musPlay.innerHTML = PLAY_SVG; musPlay.title = 'Play'; });
 audio.addEventListener('ended', () => skip(1));

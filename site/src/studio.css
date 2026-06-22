@@ -341,7 +341,8 @@ html, body {
 }
 .mus-btn:hover { color: var(--accent); border-color: var(--accent); }
 .mus-btn svg { width: 13px; height: 13px; display: block; }
-.mus-play { color: var(--accent); border-color: rgba(90, 209, 230, .4); background: var(--accent-dim); }
+.mus-play,
+.mus-btn.on { color: var(--accent); border-color: rgba(90, 209, 230, .4); background: var(--accent-dim); }
 .mus-seek {
   -webkit-appearance: none;
   appearance: none;

@@ -231,14 +231,19 @@ crt.source = () => {
 const CRT_KEYS = ['curvature', 'beamFocus', 'maskStrength', 'glow', 'iqBlur', 'noise', 'maskType'];
 const fmtCrt = (k, v) => k === 'maskType' ? (v < 0.5 ? 'Trinitron' : 'Shadow') : v.toFixed(2);
 
+function syncCrtControls() {
+  for (const k of CRT_KEYS) {
+    document.getElementById('c_' + k).value = crt.params[k];
+    document.getElementById('v_' + k).textContent = fmtCrt(k, crt.params[k]);
+  }
+}
+
 function wireCrt() {
   const saved = JSON.parse(localStorage.getItem('studio.crt') || '{}');
   for (const k of CRT_KEYS) {
     const el = document.getElementById('c_' + k);
     const valEl = document.getElementById('v_' + k);
     if (saved.params && saved.params[k] !== undefined) crt.set(k, saved.params[k]);
-    el.value = crt.params[k];
-    valEl.textContent = fmtCrt(k, crt.params[k]);
     el.addEventListener('input', () => {
       const v = parseFloat(el.value);
       crt.set(k, v);
@@ -246,6 +251,12 @@ function wireCrt() {
       persistCrt();
     });
   }
+  syncCrtControls();
+  document.getElementById('crtReset').addEventListener('click', () => {
+    crt.reset();
+    syncCrtControls();
+    persistCrt();
+  });
   const toggle = document.getElementById('crtToggle');
   const controls = document.getElementById('crtControls');
   const apply = (on) => {

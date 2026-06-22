@@ -324,10 +324,12 @@ html, body {
 /* ---- music transport ---- */
 .transport {
   display: flex;
-  align-items: center;
-  gap: 7px;
+  flex-direction: column;
+  gap: 9px;
   padding: 8px 4px 4px;
 }
+.transport-seek { display: flex; align-items: center; gap: 9px; }
+.transport-buttons { display: flex; align-items: center; gap: 7px; }
 .mus-btn {
   width: 30px; height: 30px;
   flex: 0 0 auto;

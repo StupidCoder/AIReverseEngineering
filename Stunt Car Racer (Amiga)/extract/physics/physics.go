@@ -270,6 +270,62 @@ func (m *Mem) TorqueToWorld61672() {
 	m.SetW(WAmP, m.MtxMul(m.W(WAmY), 0x4)+m.W(AmY))
 }
 
+// --- track-surface sample ---
+
+// Corners618CE computes the car's four contact-point lateral/longitudinal offsets
+// ($1BD02/04/06 and $1BD08/0A/0C) from its projected wheel positions ($1C264/68/6E/72/
+// 74/76, left by the renderer). $5C1D0 indexes these to place each contact point.
+func (m *Mem) Corners618CE() {
+	d4 := (m.W(0x1C26E) >> 1) - (m.W(0x1C264) >> 1)
+	d5 := (m.W(0x1C268) >> 1) - (m.W(0x1C272) >> 1)
+	d0 := m.W(0x1C274) >> 5
+	d3 := m.W(0x1C276) >> 5
+	d4 >>= 5
+	d5 >>= 5
+	m.SetW(0x1BD06, -d0)
+	m.SetW(0x1BD0C, -d3)
+	m.SetW(0x1BD02, d0-d4)
+	m.SetW(0x1BD04, d0+d4)
+	m.SetW(0x1BD08, d3-d5)
+	m.SetW(0x1BD0A, d3+d5)
+}
+
+// Interp5C554 reproduces $5C554: bilinearly interpolate the track surface height under
+// the car into $1BB18 from the four surrounding rung-corner heights ($1BC02/04 = the two
+// "near" rail samples, $1BC06/08 = "far"), by the along-fraction $1BC4D and the
+// across-fraction $1BC41 (both 0-255). The corner heights are the Part IV $5C0AA rail
+// heights the renderer leaves in $1BC02-08. A >>3/<<3 path avoids 16-bit overflow when
+// the across difference is large; the negative branch clears the product's low byte.
+func (m *Mem) Interp5C554() {
+	along := int32(m.U8(0x1BC4D))
+	left := int32(m.W(0x1BC04)-m.W(0x1BC02))*along + int32(m.W(0x1BC02))<<8
+	d0 := int32(m.W(0x1BC08)-m.W(0x1BC06))*along + int32(m.W(0x1BC06))<<8
+	across := uint32(uint16(m.U8(0x1BC41)))
+	d0 -= left // right - left
+	d4 := d0
+	if d4 < 0 {
+		d4 = -d4
+	}
+	big := d4 >= 0x8000
+	if big {
+		d0 >>= 3 // ASR.l #3
+	}
+	var p int32
+	if int16(d0) < 0 { // TST.w ; negative branch
+		w := uint16(-int16(d0)) // NEG.w
+		p = int32(uint32(w)*across) &^ 0xFF
+		p = -p
+	} else {
+		p = int32(uint32(uint16(int16(d0))) * across) // MULU.W
+	}
+	if big {
+		p <<= 3 // ASL.l #3
+	}
+	p >>= 8 // ASR.l #8
+	p += left
+	m.SetL(0x1BB18, p)
+}
+
 // --- suspension ($61BCC) ---
 
 // Suspension addresses: the three contact points (left/right/rear). Surf = track surface

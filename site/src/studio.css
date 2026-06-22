@@ -321,6 +321,56 @@ html, body {
 }
 .reset-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
 
+/* ---- music transport ---- */
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 4px 4px;
+}
+.mus-btn {
+  width: 30px; height: 30px;
+  flex: 0 0 auto;
+  display: grid; place-content: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: color .15s ease, border-color .15s ease, background .15s ease;
+}
+.mus-btn:hover { color: var(--accent); border-color: var(--accent); }
+.mus-btn svg { width: 13px; height: 13px; display: block; }
+.mus-play { color: var(--accent); border-color: rgba(90, 209, 230, .4); background: var(--accent-dim); }
+.mus-seek {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, .14);
+  outline: none;
+}
+.mus-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+.mus-seek::-moz-range-thumb {
+  width: 12px; height: 12px; border: none; border-radius: 50%;
+  background: var(--accent); cursor: pointer;
+}
+.mus-time {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 32px;
+  text-align: right;
+}
+
 /* tidy scrollbars inside the panel */
 .panel-body::-webkit-scrollbar, .list-scroll::-webkit-scrollbar { width: 8px; }
 .panel-body::-webkit-scrollbar-thumb, .list-scroll::-webkit-scrollbar-thumb {

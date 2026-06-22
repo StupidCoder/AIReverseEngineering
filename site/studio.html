@@ -49,6 +49,20 @@
       <div class="group-label">Level</div>
       <div id="levelList" class="list list-scroll"></div>
 
+      <div id="musicLabel" class="group-label">Music</div>
+      <div id="musicList" class="list list-scroll"></div>
+      <div id="musicTransport" class="transport">
+        <button id="musPrev" class="mus-btn" aria-label="Previous" title="Previous">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 6h2v12H7z"/><path d="M20 6v12l-9-6z"/></svg>
+        </button>
+        <button id="musPlay" class="mus-btn mus-play" aria-label="Play" title="Play"></button>
+        <button id="musNext" class="mus-btn" aria-label="Next" title="Next">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15 6h2v12h-2z"/><path d="M4 6v12l9-6z"/></svg>
+        </button>
+        <input id="musSeek" class="mus-seek" type="range" min="0" max="1000" value="0" />
+        <span id="musTime" class="mus-time">0:00</span>
+      </div>
+
       <div class="group-label">Display</div>
       <label class="switch">
         <input type="checkbox" id="crtToggle" />

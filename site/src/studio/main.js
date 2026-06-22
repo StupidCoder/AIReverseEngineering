@@ -19,6 +19,9 @@ const GAMES = [
     list: async (v) => (await v.init()).acts,
     show: (v, lvl, i) => v.loadAct(lvl),
     setup: (v) => v.setLayer('objects', true),
+    music: async () => ['Green Hills:greenhills', 'Bridge:bridge', 'Jungle:jungle',
+      'Labyrinth:labyrinth', 'Scrap Brain:scrapbrain', 'Sky Base:skybase', 'Special Stage:special']
+      .map(s => { const [name, f] = s.split(':'); return { name, url: `public/sonic/music/${f}.mp3` }; }),
   },
   {
     id: 'fort', name: 'Fort Apocalypse', system: 'Commodore 64',
@@ -34,6 +37,8 @@ const GAMES = [
     make: (V, el, hud) => new V(el, hud),
     list: async (v) => (await v.init()).levels,
     show: (v, lvl, i) => v.loadLevel(lvl),
+    music: async () => (await fetch('public/turrican/music/manifest.json').then(r => r.json()))
+      .map(m => ({ name: turricanTrackName(m), url: `public/turrican/music/${m.file}` })),
   },
   {
     id: 'marble', name: 'Marble Madness', system: 'Amiga',
@@ -41,6 +46,8 @@ const GAMES = [
     make: (V, el, hud) => new V(el, hud),
     list: async (v) => (await v.init()).levels,
     show: (v, lvl, i) => v.loadLevel(lvl),
+    music: async () => (await fetch('public/marble/music/manifest.json').then(r => r.json()))
+      .map(m => ({ name: m.course, url: `public/marble/music/${m.file}` })),
   },
   {
     id: 'stuntcar', name: 'Stunt Car Racer', system: 'Amiga', render: '3d',
@@ -57,6 +64,14 @@ const GAMES = [
     show: (v, lvl, i) => v.loadShip(i),
   },
 ];
+
+// Turrican's manifest labels worlds 0-based with hex start offsets; make them readable.
+function turricanTrackName(m) {
+  let l = String(m.label || 'Music').replace(/world (\d+)/i, (_, n) => 'World ' + (Number(n) + 1));
+  l = l.charAt(0).toUpperCase() + l.slice(1);
+  if (m.start && m.start !== '0') l += ` · $${m.start}`;
+  return l;
+}
 
 const stage = document.getElementById('stage');
 const hud = document.getElementById('hud');
@@ -139,6 +154,7 @@ async function selectGame(id) {
     activeId = id;
     buildLevelList(m);
     markActiveLevel(m.current);
+    await loadGameMusic(game);
     updateHud(m);
     hideTitlecard();
   } catch (err) {
@@ -277,6 +293,82 @@ function persistCrt() {
   const params = {};
   for (const k of CRT_KEYS) params[k] = crt.params[k];
   localStorage.setItem('studio.crt', JSON.stringify({ enabled: crt.enabled, params }));
+}
+
+// ---- Music player (per-game song list + transport; a jukebox that keeps playing
+//      across game/level switches) ----
+const audio = new Audio();
+audio.preload = 'none';
+let musicTracks = [];
+let playingUrl = null;
+const musicLabel = document.getElementById('musicLabel');
+const musicListEl = document.getElementById('musicList');
+const transport = document.getElementById('musicTransport');
+const musPlay = document.getElementById('musPlay');
+const musSeek = document.getElementById('musSeek');
+const musTime = document.getElementById('musTime');
+const PLAY_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5v14l12-7z"/></svg>';
+const PAUSE_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h3v14H7zM14 5h3v14h-3z"/></svg>';
+musPlay.innerHTML = PLAY_SVG;
+
+const fmtTime = (s) => { s = Math.max(0, s | 0); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+
+function renderMusicList() {
+  musicListEl.innerHTML = '';
+  musicTracks.forEach((t, i) => {
+    const b = document.createElement('button');
+    b.className = 'item' + (t.url === playingUrl ? ' active' : '');
+    b.innerHTML = `<span class="name">${t.name}</span>`;
+    b.addEventListener('click', () => playTrack(i));
+    musicListEl.appendChild(b);
+  });
+}
+
+function updateMusicUI() {
+  const hasMusic = musicTracks.length > 0;
+  const loaded = !!audio.src;
+  const show = hasMusic || loaded;
+  musicLabel.style.display = show ? '' : 'none';
+  musicListEl.style.display = hasMusic ? '' : 'none';
+  transport.style.display = show ? 'flex' : 'none';
+}
+
+function playTrack(i) {
+  const t = musicTracks[i];
+  if (!t) return;
+  if (playingUrl !== t.url) { audio.src = t.url; playingUrl = t.url; }
+  audio.play().catch(() => {});
+  renderMusicList();
+  updateMusicUI();
+}
+
+function skip(d) {
+  if (!musicTracks.length) return;
+  let idx = musicTracks.findIndex(t => t.url === playingUrl);
+  if (idx < 0) idx = d > 0 ? -1 : 0;
+  playTrack((idx + d + musicTracks.length) % musicTracks.length);
+}
+
+musPlay.addEventListener('click', () => {
+  if (!audio.src) { if (musicTracks.length) playTrack(0); return; }
+  if (audio.paused) audio.play().catch(() => {}); else audio.pause();
+});
+document.getElementById('musPrev').addEventListener('click', () => skip(-1));
+document.getElementById('musNext').addEventListener('click', () => skip(1));
+audio.addEventListener('play', () => { musPlay.innerHTML = PAUSE_SVG; musPlay.title = 'Pause'; });
+audio.addEventListener('pause', () => { musPlay.innerHTML = PLAY_SVG; musPlay.title = 'Play'; });
+audio.addEventListener('ended', () => skip(1));
+audio.addEventListener('timeupdate', () => {
+  if (audio.duration) musSeek.value = String(Math.round(audio.currentTime / audio.duration * 1000));
+  musTime.textContent = fmtTime(audio.currentTime);
+});
+musSeek.addEventListener('input', () => { if (audio.duration) audio.currentTime = (musSeek.value / 1000) * audio.duration; });
+
+async function loadGameMusic(game) {
+  try { musicTracks = game.music ? await game.music() : []; }
+  catch (e) { console.error('studio: music load failed', game.id, e); musicTracks = []; }
+  renderMusicList();
+  updateMusicUI();
 }
 
 // ---- boot ----

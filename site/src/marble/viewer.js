@@ -54,7 +54,7 @@ export class MarbleViewer {
   }
 
   async init() {
-    await this.app.init({ background: 0x000000, antialias: false, resizeTo: this.el });
+    await this.app.init({ background: 0x000000, antialias: false, resizeTo: this.el, preserveDrawingBuffer: true });
     this.app.canvas.classList.add('mm-pixi');
     this.el.appendChild(this.app.canvas);
     this.app.stage.addChild(this.world);
@@ -113,7 +113,7 @@ export class MarbleViewer {
 
   // --- three.js slope view ------------------------------------------------
   _initThree() {
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     renderer.domElement.classList.add('mm-three');
     this.el.appendChild(renderer.domElement);

@@ -24,8 +24,8 @@
     <div class="kicker">Reconstructed from the original binaries</div>
     <h1>AI Reverse Engineering</h1>
     <p>Assets decoded from six retro games — pick a game and level from the menu.</p>
-    <div id="spinner" class="spinner"></div>
   </div>
+  <div id="spinner" class="spinner"></div>
 
   <!-- top-left: open the control window -->
   <button id="menuBtn" class="fab" aria-label="Menu" title="Menu">
@@ -48,6 +48,22 @@
       <div id="gameList" class="list"></div>
       <div class="group-label">Level</div>
       <div id="levelList" class="list list-scroll"></div>
+
+      <div class="group-label">Display</div>
+      <label class="switch">
+        <input type="checkbox" id="crtToggle" />
+        <span class="track"><span class="knob"></span></span>
+        <span class="switch-label">CRT filter</span>
+      </label>
+      <div id="crtControls" class="crt-controls">
+        <div class="ctl"><label>Curvature<span id="v_curvature"></span></label><input type="range" id="c_curvature" min="0" max="10" step="0.1" /></div>
+        <div class="ctl"><label>Scanline focus<span id="v_beamFocus"></span></label><input type="range" id="c_beamFocus" min="0.2" max="1.0" step="0.01" /></div>
+        <div class="ctl"><label>Mask intensity<span id="v_maskStrength"></span></label><input type="range" id="c_maskStrength" min="0" max="1.0" step="0.01" /></div>
+        <div class="ctl"><label>Halation<span id="v_glow"></span></label><input type="range" id="c_glow" min="0" max="1.0" step="0.01" /></div>
+        <div class="ctl"><label>Chroma blur<span id="v_iqBlur"></span></label><input type="range" id="c_iqBlur" min="0" max="5.0" step="0.1" /></div>
+        <div class="ctl"><label>Signal noise<span id="v_noise"></span></label><input type="range" id="c_noise" min="0" max="0.5" step="0.01" /></div>
+        <div class="ctl"><label>Mask type<span id="v_maskType"></span></label><input type="range" id="c_maskType" min="0" max="1" step="1" /></div>
+      </div>
     </div>
   </aside>
 

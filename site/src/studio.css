@@ -50,6 +50,18 @@ html, body {
 #stage [data-render="3d"] canvas,
 #stage canvas.mm-three { image-rendering: auto; }
 
+/* the global CRT post-process overlay sits on top of the viewers; pointer-events pass
+   through so the viewer's own drag/zoom/rotate still work underneath */
+#crt {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  z-index: 10;
+  pointer-events: none;
+  image-rendering: auto;
+}
+
 /* ---- title / loading card (shown until a viewer paints) ---- */
 #titlecard {
   position: fixed;
@@ -83,12 +95,17 @@ html, body {
 }
 #titlecard p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
 .spinner {
-  width: 26px; height: 26px; margin: 14px auto 0;
+  position: fixed;
+  left: 50%; bottom: 40px;
+  width: 26px; height: 26px;
+  margin-left: -13px;
   border: 2px solid var(--line-strong);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin .8s linear infinite;
   opacity: 0; transition: opacity .2s;
+  pointer-events: none;
+  z-index: 16;
 }
 .spinner.on { opacity: 1; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -217,6 +234,75 @@ html, body {
 }
 .item.active .sub { color: var(--accent); }
 .item.active .name { color: #fff; }
+
+/* ---- CRT toggle switch + controls ---- */
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 4px 9px;
+  cursor: pointer;
+  user-select: none;
+}
+.switch input { position: absolute; opacity: 0; pointer-events: none; }
+.switch .track {
+  position: relative;
+  width: 36px; height: 20px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, .12);
+  border: 1px solid var(--line-strong);
+  transition: background .15s ease, border-color .15s ease;
+  flex: 0 0 auto;
+}
+.switch .knob {
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: #c7ccd8;
+  transition: transform .16s ease, background .16s ease;
+}
+.switch input:checked + .track { background: var(--accent-dim); border-color: rgba(90, 209, 230, .55); }
+.switch input:checked + .track .knob { transform: translateX(16px); background: var(--accent); }
+.switch input:disabled + .track { opacity: .4; }
+.switch-label { font-size: 13.5px; color: var(--text); }
+
+.crt-controls {
+  display: none;
+  flex-direction: column;
+  gap: 7px;
+  padding: 4px 4px 2px;
+}
+.crt-controls.shown { display: flex; }
+.ctl { display: flex; flex-direction: column; gap: 4px; }
+.ctl label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.ctl label span { font-family: var(--mono); color: var(--accent); font-size: 11px; }
+.ctl input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, .14);
+  outline: none;
+}
+.ctl input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 0 0 3px rgba(90, 209, 230, .14);
+}
+.ctl input[type="range"]::-moz-range-thumb {
+  width: 13px; height: 13px; border: none; border-radius: 50%;
+  background: var(--accent); cursor: pointer;
+}
 
 /* tidy scrollbars inside the panel */
 .panel-body::-webkit-scrollbar, .list-scroll::-webkit-scrollbar { width: 8px; }

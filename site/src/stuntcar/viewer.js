@@ -16,7 +16,7 @@ import { Physics } from './physics.js';
 export class TrackViewer {
   constructor(el) {
     this.el = el;
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     renderer.setClearColor(0x0a0d12, 1);
     el.appendChild(renderer.domElement);

@@ -49,7 +49,7 @@ export class TurricanViewer {
   }
 
   async init() {
-    await this.app.init({ background: 0x101018, antialias: false, resizeTo: this.el });
+    await this.app.init({ background: 0x101018, antialias: false, resizeTo: this.el, preserveDrawingBuffer: true });
     this.el.appendChild(this.app.canvas);
     this.world.addChild(this.tileLayer);
     this.world.addChild(this.objLayer);       // objects draw on top of the tiles

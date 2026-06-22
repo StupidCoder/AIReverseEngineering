@@ -311,7 +311,7 @@ export class ShipViewer {
     this.ships = doc.ships;
 
     const fov = 45;
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.viewport.appendChild(this.renderer.domElement);
     this.scene = new THREE.Scene();

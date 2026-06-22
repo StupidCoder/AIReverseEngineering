@@ -5,6 +5,11 @@
 // Each game exposes a slightly different viewer API, so a small adapter per game normalises
 // "create a viewer", "list the levels (named)", and "show level i". Viewers are created lazily
 // on first visit and cached (kept mounted but hidden) so switching back is instant.
+//
+// A global CRT filter (crt.js) overlays all of them: a post-process that captures whichever
+// viewer is active and re-renders it through a physical CRT pipeline.
+
+import { CRT } from './crt.js';
 
 const GAMES = [
   {
@@ -162,7 +167,11 @@ function updateHud(m) {
   hud.innerHTML = `<b>${m.game.name}</b> · ${m.game.system} &nbsp;—&nbsp; ${lvl.name || `Level ${m.current + 1}`}`;
 }
 
-function hideTitlecard() { titlecard.classList.add('hidden'); }
+function hideTitlecard() {
+  if (titlecard.style.display === 'none') return;
+  titlecard.classList.add('hidden');
+  setTimeout(() => { titlecard.style.display = 'none'; }, 500); // fade out, then drop it for good
+}
 
 // ---- menu / panel ----
 document.getElementById('menuBtn').addEventListener('click', () => panel.classList.toggle('open'));
@@ -207,8 +216,57 @@ document.addEventListener('fullscreenchange', () => {
   fsBtn.innerHTML = on ? COLLAPSE : EXPAND;
 });
 
+// ---- CRT filter (global post-process over the active viewer) ----
+const crt = new CRT(stage);
+crt.source = () => {
+  const m = activeId && mounts.get(activeId);
+  if (!m) return [];
+  return [...m.el.querySelectorAll('canvas')].filter(c => getComputedStyle(c).display !== 'none');
+};
+
+const CRT_KEYS = ['curvature', 'beamFocus', 'maskStrength', 'glow', 'iqBlur', 'noise', 'maskType'];
+const fmtCrt = (k, v) => k === 'maskType' ? (v < 0.5 ? 'Trinitron' : 'Shadow') : v.toFixed(2);
+
+function wireCrt() {
+  const saved = JSON.parse(localStorage.getItem('studio.crt') || '{}');
+  for (const k of CRT_KEYS) {
+    const el = document.getElementById('c_' + k);
+    const valEl = document.getElementById('v_' + k);
+    if (saved.params && saved.params[k] !== undefined) crt.set(k, saved.params[k]);
+    el.value = crt.params[k];
+    valEl.textContent = fmtCrt(k, crt.params[k]);
+    el.addEventListener('input', () => {
+      const v = parseFloat(el.value);
+      crt.set(k, v);
+      valEl.textContent = fmtCrt(k, v);
+      persistCrt();
+    });
+  }
+  const toggle = document.getElementById('crtToggle');
+  const controls = document.getElementById('crtControls');
+  const apply = (on) => {
+    crt.setEnabled(on);
+    controls.classList.toggle('shown', on);
+    persistCrt();
+  };
+  const forced = new URLSearchParams(location.search).get('crt');
+  const startOn = (forced === '1' || (forced !== '0' && !!saved.enabled)) && crt.ok;
+  toggle.checked = startOn;
+  controls.classList.toggle('shown', toggle.checked);
+  toggle.addEventListener('change', () => apply(toggle.checked));
+  if (!crt.ok) { toggle.disabled = true; }
+  if (toggle.checked) crt.setEnabled(true);
+}
+
+function persistCrt() {
+  const params = {};
+  for (const k of CRT_KEYS) params[k] = crt.params[k];
+  localStorage.setItem('studio.crt', JSON.stringify({ enabled: crt.enabled, params }));
+}
+
 // ---- boot ----
 buildGameList();
+wireCrt();
 panel.classList.add('open');          // start with the control window open (discoverable)
 // optional deep link: ?game=sonic&level=3
 const params = new URLSearchParams(location.search);

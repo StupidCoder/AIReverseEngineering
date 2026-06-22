@@ -46,7 +46,7 @@ export class FortViewer {
   }
 
   async init() {
-    await this.app.init({ background: 0x000000, antialias: false, resizeTo: this.el });
+    await this.app.init({ background: 0x000000, antialias: false, resizeTo: this.el, preserveDrawingBuffer: true });
     this.el.appendChild(this.app.canvas);
     this.world.addChild(this.tileLayer, this.objectLayer);
     this.app.stage.addChild(this.world);

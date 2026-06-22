@@ -219,6 +219,35 @@ func main() {
 		}
 		report(t.name, bad)
 	}
+	// --- $5FE56 per-section setup: needs a loaded track ---
+	setBytes := []uint32{0x1BB79, 0x1BBDC, 0x1BC4A, 0x1BC32, 0x1BB86, 0x1BB4D, 0x1BB97,
+		0x1BB59, 0x1BB98, 0x1BB5A, 0x1BB6A, 0x1BC44, 0x1BB7B, 0x1BBD9, 0x1BBD4,
+		0x1BC8C, 0x1BC8D, 0x1BC90, 0x1BC91, 0x1BC0E, 0x1BC0F, 0x1BC10, 0x1BC11, 0x1BCBC, 0x1BCBD}
+	for _, id := range []int{1, 3, 7} {
+		m := baseMem()
+		m[0x1CA33] = byte(id)
+		loaded, _ := runEngine(m, 0x5AE46, map[int]uint32{1: uint32(id)})
+		n := int(loaded[0x1CA1A])
+		bad := 0
+		for sec := 0; sec < n; sec++ {
+			eng, _ := runEngine(loaded, 0x5FE56, map[int]uint32{1: uint32(sec)})
+			gm := physics.New(img)
+			copy(gm.B, loaded)
+			gm.Setup5FE56(sec)
+			for _, a := range setBytes {
+				if gm.B[a] != eng[a] {
+					bad++
+					if bad <= 3 {
+						fmt.Printf("  Setup5FE56 t%d sec%d @%X: go=%02x eng=%02x | 1BCBC go=%02x%02x eng=%02x%02x  type=%02x\n",
+							id, sec, a, gm.B[a], eng[a], gm.B[0x1BCBC], gm.B[0x1BCBD], eng[0x1BCBC], eng[0x1BCBD], eng[0x1C5EC+uint32(sec)])
+					}
+					break
+				}
+			}
+		}
+		report(fmt.Sprintf("Setup5FE56 track %d", id), bad)
+	}
+
 	if fails == 0 {
 		fmt.Println("ALL OK")
 	} else {

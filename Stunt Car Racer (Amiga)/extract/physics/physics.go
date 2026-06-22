@@ -62,8 +62,21 @@ const (
 	WAmP = 0x1BD3E
 	Mtx  = 0x1C230 // orientation matrix (words at +$4.. built by $61368)
 	angLimits = 0x61AD4
+	Tmpl = 0x1EC46 // matrix-element template (which slot each transform term uses)
+	Hdg  = 0x1BD5A // section heading (subtracted from yaw in the matrix build)
+
+	BVelL = 0x1BD2C // body velocity (longitudinal / lateral / vertical)
+	BVelM = 0x1BD2E
+	BVelV = 0x1BD30
+	GrvA = 0x1BD0E // gravity expressed in body frame ($615E6)
+	GrvB = 0x1BD10
+	GrvC = 0x1BD12
+	BFrcA = 0x1BD32 // body force components (rotated to world by $61618)
+	BFrcB = 0x1BD34
+	BFrcC = 0x1BD36
 
 	damp = 0xEE // 238/256 = 0.9297 per-frame damping
+	grav = 0x13D // gravity constant magnitude (317); $615E6 uses -317/+317
 )
 
 // mul0_93 reproduces the engine's "* $EE >> 8" damping: word in, damped word out.
@@ -116,6 +129,145 @@ func (m *Mem) MtxMul(value int16, idx int) int16 {
 	p := int32(value) * int32(d3)
 	p <<= 1
 	return int16(p >> 16)
+}
+
+// --- orientation matrix and frame transforms ---
+
+// mt/smt read/write a matrix word by its byte offset within $1C230.
+func (m *Mem) mt(off uint32) int16     { return m.W(Mtx + off) }
+func (m *Mem) smt(off uint32, v int16) { m.SetW(Mtx+off, v) }
+
+// prod is the engine's "MULS.W d5,d4 ; ASL.l #1 ; SWAP" applied in place to a matrix
+// slot: m[off] = (m[off] * d5) >> 15.
+func (m *Mem) prod(off uint32, d5 int16) {
+	p := int32(m.mt(off)) * int32(d5)
+	m.smt(off, int16((p<<1)>>16))
+}
+
+// Matrix61368 builds the chassis orientation matrix at $1C230 from the three Euler
+// angles (yaw $1BCE6 less the section heading $1BD5A, roll $1BCE4, pitch $1BCE8) — a
+// literal transcription of $61368: seed the slots with sin/cos of each angle, multiply
+// them together into the composite rotation, then form the cross terms.
+func (m *Mem) Matrix61368() {
+	sy := m.Sin(m.W(Yaw))
+	for _, o := range []uint32{0x4, 0xC, 0xE, 0x14, 0x16} {
+		m.smt(o, sy)
+	}
+	cy := m.Cos(m.W(Yaw))
+	for _, o := range []uint32{0x6, 0x10, 0x12, 0x18, 0x1A} {
+		m.smt(o, cy)
+	}
+	yh := m.W(Yaw) - m.W(Hdg)
+	sh := m.Sin(yh)
+	for _, o := range []uint32{0x34, 0x42, 0x44} {
+		m.smt(o, sh)
+	}
+	ch := m.Cos(yh)
+	for _, o := range []uint32{0x38, 0x3E, 0x46} {
+		m.smt(o, ch)
+	}
+	m.smt(0x8, m.Sin(m.W(Roll)))
+	cr := m.Cos(m.W(Roll))
+	for _, o := range []uint32{0xA, 0x1C, 0x1E} {
+		m.smt(o, cr)
+	}
+	m.smt(0x22, m.Cos(m.W(Pit)))
+	m.smt(0x20, m.Sin(m.W(Pit)))
+
+	// in-place product cascades (each: m[d3] = m[d3]*d5 >> 15 over a slot range).
+	d5 := m.mt(0x8) // sin roll
+	for o := uint32(0xC); o <= 0x12; o += 2 {
+		m.prod(o, d5)
+	}
+	for o := uint32(0x34); o <= 0x38; o += 4 {
+		m.prod(o, d5)
+	}
+	m.smt(0x0, m.mt(0xC))
+	m.smt(0x2, m.mt(0x10))
+	d5 = m.mt(0xA) // cos roll
+	for o := uint32(0x4); o <= 0x6; o += 2 {
+		m.prod(o, d5)
+	}
+	for o := uint32(0x44); o <= 0x46; o += 2 {
+		m.prod(o, d5)
+	}
+	d5 = m.mt(0x20) // sin pit
+	for o := uint32(0xC); o <= 0x1C; o += 4 {
+		m.prod(o, d5)
+	}
+	for o := uint32(0x34); o <= 0x38; o += 4 {
+		m.prod(o, d5)
+	}
+	d5 = m.mt(0x22) // cos pit
+	for o := uint32(0xE); o <= 0x1E; o += 4 {
+		m.prod(o, d5)
+	}
+	for o := uint32(0x3E); o <= 0x42; o += 4 {
+		m.prod(o, d5)
+	}
+	m.smt(0x28, m.mt(0x18)-m.mt(0xE))
+	m.smt(0x2A, -m.mt(0x12)-m.mt(0x14))
+	m.smt(0x2C, m.mt(0x1A)+m.mt(0xC))
+	m.smt(0x2E, m.mt(0x10)-m.mt(0x16))
+	m.smt(0x30, -m.mt(0x1C))
+	m.smt(0x24, -m.mt(0x20))
+}
+
+// tmpl reads a template byte (matrix-slot selector) at $1EC46 + off.
+func (m *Mem) tmpl(off uint32) int { return m.U8(Tmpl + off) }
+
+// VelToBody6158C rotates the world velocity ($1BCEA/EC/EE) into the body frame,
+// writing $1BD30 (d2=2) and $1BD2C (d2=0) — the engine's two-component form ($6158C
+// steps d2 by 2). Each output sums three velocity*matrix terms via the template.
+func (m *Mem) VelToBody6158C() {
+	for d2 := uint32(2); ; d2 -= 2 {
+		d5 := int16(0)
+		d5 += m.MtxMul(m.W(VelX), m.tmpl(d2+0))
+		d5 += m.MtxMul(m.W(VelY), m.tmpl(d2+3))
+		d5 += m.MtxMul(m.W(VelZ), m.tmpl(d2+6))
+		m.SetW(BVelL+(d2<<1), d5)
+		if d2 == 0 {
+			break
+		}
+	}
+}
+
+// GravToBody615E6 expresses the constant world-down gravity vector in the body frame
+// ($1BD0E/10/12) by multiplying +-317 through three matrix slots.
+func (m *Mem) GravToBody615E6() {
+	m.SetW(GrvB, m.MtxMul(-grav, 0xF)) // $61338 (-317), idx $F -> $1BD10
+	m.SetW(GrvC, m.MtxMul(-grav, 0x4)) // -> $1BD12
+	m.SetW(GrvA, m.MtxMul(grav, 0xE))  // $61340 (+317), idx $E -> $1BD0E
+}
+
+// ForceToWorld61618 rotates the body force ($1BD32/34/36) into world force
+// ($1BCF6/F8/FA); three components (d2 steps by 1).
+func (m *Mem) ForceToWorld61618() {
+	for d2 := uint32(2); ; d2 -= 1 {
+		d5 := int16(0)
+		d5 += m.MtxMul(m.W(BFrcA), m.tmpl(d2+0x9))
+		d5 += m.MtxMul(m.W(BFrcB), m.tmpl(d2+0xC))
+		d5 += m.MtxMul(m.W(BFrcC), m.tmpl(d2+0xF))
+		m.SetW(FrcX+(d2<<1), d5)
+		if d2 == 0 {
+			break
+		}
+	}
+}
+
+// TorqueToWorld61672 rotates body angular momentum ($1BCF0/F2) into world angular rate
+// ($1BD3A/3C), then forms $1BD3E from $1BD3C and the yaw momentum $1BCF4.
+func (m *Mem) TorqueToWorld61672() {
+	for d2 := uint32(1); ; d2 -= 1 {
+		d5 := int16(0)
+		d5 += m.MtxMul(m.W(AmR), m.tmpl(d2+0x12))
+		d5 += m.MtxMul(m.W(AmP), m.tmpl(d2+0x14))
+		m.SetW(WAmR+(d2<<1), d5)
+		if d2 == 0 {
+			break
+		}
+	}
+	m.SetW(WAmP, m.MtxMul(m.W(WAmY), 0x4)+m.W(AmY))
 }
 
 // Force61ADC: world force ($1BCF6/F8/FA) * 0.93 -> += velocity ($1BCEA/EC/EE).

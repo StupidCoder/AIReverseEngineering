@@ -107,42 +107,62 @@ func main() {
 	report("Sin $64D08", sinBad)
 	report("Cos $64D10", cosBad)
 
-	// --- integrator routines: synthetic state, compare full state block ---
-	addrs := []uint32{
+	// --- stateful routines: randomise the inputs they read, compare the outputs ---
+	matrixSlots := []uint32{}
+	for o := uint32(0); o <= 0x46; o += 2 {
+		matrixSlots = append(matrixSlots, physics.Mtx+o)
+	}
+	stateBlock := []uint32{
 		physics.PosX, physics.PosY, physics.PosZ, physics.Roll, physics.Yaw, physics.Pit,
 		physics.VelX, physics.VelY, physics.VelZ, physics.AmR, physics.AmP, physics.AmY,
 	}
 	type tc struct {
-		name string
-		pc   uint32
-		fn   func(*physics.Mem)
+		name        string
+		pc          uint32
+		fn          func(*physics.Mem)
+		seed, check []uint32
 	}
+	intSeed := []uint32{physics.VelX, physics.VelY, physics.VelZ, physics.AmR, physics.AmP, physics.AmY,
+		physics.FrcX, physics.FrcY, physics.FrcZ, physics.TqR, physics.TqP, physics.TqY,
+		physics.WAmR, physics.WAmY, physics.WAmP, physics.Roll, physics.Yaw, physics.Pit}
 	cases := []tc{
-		{"Force61ADC $61ADC", 0x61ADC, (*physics.Mem).Force61ADC},
-		{"Torque61B26 $61B26", 0x61B26, (*physics.Mem).Torque61B26},
-		{"Integrate61950 $61950", 0x61950, (*physics.Mem).Integrate61950},
+		{"Force61ADC $61ADC", 0x61ADC, (*physics.Mem).Force61ADC, intSeed, stateBlock},
+		{"Torque61B26 $61B26", 0x61B26, (*physics.Mem).Torque61B26, intSeed, stateBlock},
+		{"Integrate61950 $61950", 0x61950, (*physics.Mem).Integrate61950, intSeed, stateBlock},
+		{"Matrix61368 $61368", 0x61368, (*physics.Mem).Matrix61368,
+			[]uint32{physics.Roll, physics.Yaw, physics.Pit, physics.Hdg}, matrixSlots},
+		{"VelToBody $6158C", 0x6158C, (*physics.Mem).VelToBody6158C,
+			append(append([]uint32{}, matrixSlots...), physics.VelX, physics.VelY, physics.VelZ),
+			[]uint32{physics.BVelL, physics.BVelV}},
+		{"GravToBody $615E6", 0x615E6, (*physics.Mem).GravToBody615E6,
+			matrixSlots, []uint32{physics.GrvA, physics.GrvB, physics.GrvC}},
+		{"ForceToWorld $61618", 0x61618, (*physics.Mem).ForceToWorld61618,
+			append(append([]uint32{}, matrixSlots...), physics.BFrcA, physics.BFrcB, physics.BFrcC),
+			[]uint32{physics.FrcX, physics.FrcY, physics.FrcZ}},
+		{"TorqueToWorld $61672", 0x61672, (*physics.Mem).TorqueToWorld61672,
+			append(append([]uint32{}, matrixSlots...), physics.AmR, physics.AmP, physics.AmY, physics.WAmY),
+			[]uint32{physics.WAmR, physics.WAmY, physics.WAmP}},
 	}
 	for _, t := range cases {
 		bad := 0
 		for iter := 0; iter < 3000; iter++ {
 			m := baseMem()
-			// randomise the state the routine reads.
-			for _, a := range []uint32{physics.VelX, physics.VelY, physics.VelZ, physics.AmR, physics.AmP, physics.AmY,
-				physics.FrcX, physics.FrcY, physics.FrcZ, physics.TqR, physics.TqP, physics.TqY,
-				physics.WAmR, physics.WAmY, physics.WAmP, physics.Roll, physics.Yaw, physics.Pit} {
+			for _, a := range t.seed {
 				wW(m, a, int16(rng.Intn(0x10000)))
 			}
-			wL(m, physics.PosX, rng.Int31()-(1<<30))
-			wL(m, physics.PosY, rng.Int31()-(1<<30))
-			wL(m, physics.PosZ, rng.Int31()-(1<<30))
-			m[0x1BB75] = byte(rng.Intn(256))
-			m[0x1BB9A] = byte(rng.Intn(256))
-
+			// give the integrator some 32-bit positions and the $619E4 flag bytes too.
+			if t.pc == 0x61950 {
+				wL(m, physics.PosX, rng.Int31()-(1<<30))
+				wL(m, physics.PosY, rng.Int31()-(1<<30))
+				wL(m, physics.PosZ, rng.Int31()-(1<<30))
+				m[0x1BB75] = byte(rng.Intn(256))
+				m[0x1BB9A] = byte(rng.Intn(256))
+			}
 			eng, _ := runEngine(m, t.pc, nil)
 			gmem := physics.New(img)
 			copy(gmem.B, m)
 			t.fn(gmem)
-			for _, a := range addrs {
+			for _, a := range t.check {
 				if rW(gmem.B, a) != rW(eng, a) {
 					bad++
 					if bad <= 3 {

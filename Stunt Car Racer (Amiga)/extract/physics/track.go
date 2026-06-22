@@ -546,3 +546,83 @@ func (m *Mem) Couple5BE44() {
 func (m *Mem) couple5BF50(a5 uint32) {
 	panic("couple5BF50 (ramp type 2) not yet implemented")
 }
+
+// refGrid600A6 reproduces $600A6: from the camera quadrant (d0q = $1BC30) derive the camera
+// reference grid cell ($1BB04/$1BB07 from posX, $1BB06/$1BB09 from posZ) and the camera-space
+// car position ($1BCCC/$1BCD4) reflected by the quadrant.
+func (m *Mem) refGrid600A6(d0q uint16) {
+	m.B[0x1BB19] = byte(d0q >> 8)
+	if m.W(0x1BCDA) == 0 {
+		m.SetW(0x1BCDA, 1)
+	}
+	hx := uint16((uint32(m.L(0x1BCD8)) << 1) >> 16)
+	m.B[0x1BB07] = byte(hx)
+	m.B[0x1BB04] = byte(hx >> 8)
+	if m.W(0x1BCE2) == 0 {
+		m.SetW(0x1BCE2, 1)
+	}
+	hz := uint16((uint32(m.L(0x1BCE0)) << 1) >> 16)
+	m.B[0x1BB09] = byte(hz)
+	m.B[0x1BB06] = byte(hz >> 8)
+	q := m.U8(0x1BB19)
+	const refl = 0x8000000
+	switch {
+	case q&0x80 == 0 && q&0x40 == 0:
+		m.SetL(0x1BCCC, m.L(0x1BCD8))
+		m.SetL(0x1BCD4, m.L(0x1BCE0))
+	case q&0x80 == 0 && q&0x40 != 0:
+		m.SetL(0x1BCD4, m.L(0x1BCD8))
+		m.SetL(0x1BCCC, refl-m.L(0x1BCE0))
+	case q&0x80 != 0 && q&0x40 == 0:
+		m.SetL(0x1BCCC, refl-m.L(0x1BCD8))
+		m.SetL(0x1BCD4, refl-m.L(0x1BCE0))
+	default:
+		m.SetL(0x1BCD4, refl-m.L(0x1BCD8))
+		m.SetL(0x1BCCC, m.L(0x1BCE0))
+	}
+}
+
+// Camera60190 reproduces $60190: quantise the car heading into the camera quadrant $1BC30,
+// run the camera-relative transform ($600A6), and set the camera height $1BBFA and plan
+// origin $1BB2E/$1BB32 (and fine heading $1BC2E) the coupling reads.
+func (m *Mem) Camera60190() {
+	q := int16((uint16(m.W(0x1BCE6)) + 0x2000) & 0xC000)
+	m.SetW(0x1BC30, q)
+	m.refGrid600A6(uint16(q))
+	m.SetW(0x1BCD0, int16(uint16(uint32(m.L(0x1BCDC))>>11)))
+	d3 := int16(0x780)
+	d0 := m.W(0x1BD38)
+	if uint16(d0) >= 0x500 {
+		d0 <<= 1
+		d3 = 0x280
+	}
+	d0 += d3
+	if roll := m.W(0x1BCE4); roll < 0 {
+		d0 -= roll >> 1
+	}
+	d0 >>= 4
+	d0 += m.W(0x1BCD0)
+	m.SetW(0x1BBFA, d0)
+	cx := -int16(uint16(uint32(m.L(0x1BCCC))>>12)&0x7FF)
+	m.B[0x1BB23] = byte(cx)
+	m.B[0x1BB2E] = byte(uint16(cx) >> 8)
+	cz := -int16(uint16(uint32(m.L(0x1BCD4))>>12)&0x7FF)
+	m.B[0x1BB27] = byte(cz)
+	m.B[0x1BB32] = byte(uint16(cz) >> 8)
+	m.SetW(0x1BC2E, int16((uint16(m.W(0x1BCE6))+0x2000)&0x3FFE)-0x2000)
+}
+
+// Section5FE04 reproduces $5FE04: the section under the camera grid ($1BB04/$1BB06 + the
+// view offset $1BBD5/$1BBD6) via the plan grid table $1C280. offGrid mirrors the carry flag.
+func (m *Mem) Section5FE04() (sec int, offGrid bool) {
+	gy := byte(m.U8(0x1BB06)) + byte(m.U8(0x1BBD6))
+	if gy >= 0x10 {
+		return 0, true
+	}
+	m.B[0x1BB1B] = gy << 4
+	gx := byte(m.U8(0x1BB04)) + byte(m.U8(0x1BBD5))
+	if gx >= 0x10 {
+		return 0, true
+	}
+	return m.U8(0x1C280 + uint32((gx&0x0F)|m.B[0x1BB1B])), false
+}

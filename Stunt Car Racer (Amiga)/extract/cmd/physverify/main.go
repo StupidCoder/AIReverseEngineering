@@ -442,6 +442,58 @@ func main() {
 		report(tag, bad)
 	}
 
+	// --- $60190 camera-follow (incl $600A6) + $5FE04 section lookup ---
+	{
+		m0 := baseMem()
+		m0[0x1CA33] = byte(1)
+		loaded, _ := runEngine(m0, 0x5AE46, map[int]uint32{1: 1})
+		camCheck := []uint32{0x1BC30, 0x1BB04, 0x1BB06, 0x1BB07, 0x1BB09, 0x1BB19,
+			0x1BCCC, 0x1BCCE, 0x1BCD4, 0x1BCD6, 0x1BCD0, 0x1BBFA,
+			0x1BB23, 0x1BB27, 0x1BB2E, 0x1BB32, 0x1BC2E}
+		badCam, badSec := 0, 0
+		for iter := 0; iter < 4000; iter++ {
+			m := append([]byte(nil), loaded...)
+			wL(m, 0x1BCD8, rng.Int31()-(1<<30)) // posX
+			wL(m, 0x1BCDC, rng.Int31()-(1<<30)) // posY
+			wL(m, 0x1BCE0, rng.Int31()-(1<<30)) // posZ
+			wW(m, 0x1BCE4, int16(rng.Intn(0x10000)))
+			wW(m, 0x1BCE6, int16(rng.Intn(0x10000)))
+			wW(m, 0x1BD38, int16(rng.Intn(0x10000)))
+			eng, _ := runEngine(m, 0x60190, nil)
+			gm := physics.New(img)
+			copy(gm.B, m)
+			gm.Camera60190()
+			for _, a := range camCheck {
+				if rW(gm.B, a) != rW(eng, a) {
+					badCam++
+					if badCam <= 4 {
+						fmt.Printf("  Camera60190 @%X: go=%04x eng=%04x\n", a, uint16(rW(gm.B, a)), uint16(rW(eng, a)))
+					}
+					break
+				}
+			}
+			// $5FE04 section lookup: small on-grid camera grid + offsets.
+			m2 := append([]byte(nil), loaded...)
+			m2[0x1BB04] = byte(rng.Intn(0x0C))
+			m2[0x1BB06] = byte(rng.Intn(0x0C))
+			m2[0x1BBD5] = byte(rng.Intn(4))
+			m2[0x1BBD6] = byte(rng.Intn(4))
+			engS, dS := runEngine(m2, 0x5FE04, nil)
+			gm2 := physics.New(img)
+			copy(gm2.B, m2)
+			sec, off := gm2.Section5FE04()
+			if !off && (byte(sec) != byte(dS[0]) || gm2.B[0x1BB1B] != engS[0x1BB1B]) {
+				badSec++
+				if badSec <= 4 {
+					fmt.Printf("  Section5FE04: go sec=%d 1BB1B=%02x | eng d0=%02x 1BB1B=%02x\n",
+						sec, gm2.B[0x1BB1B], byte(dS[0]), engS[0x1BB1B])
+				}
+			}
+		}
+		report("Camera60190", badCam)
+		report("Section5FE04", badSec)
+	}
+
 	// --- full frame $6185C, lockstep engine vs Go for many frames ---
 	physBlock := []uint32{0x1BCD8, 0x1BCDA, 0x1BCDC, 0x1BCDE, 0x1BCE0, 0x1BCE2, // pos X/Y/Z
 		0x1BCE4, 0x1BCE6, 0x1BCE8, // roll/yaw/pit

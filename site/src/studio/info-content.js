@@ -285,6 +285,127 @@ bases blinking.</p>
 to 9999 when the fort is destroyed, the fuel gauge (four BCD digits), the "MEN TO RESCUE" count, and a
 message row for flashing texts such as "LOW ON FUEL". The digits are drawn with leading-zero blanking.</p>
 `,
+    gameplay: `
+<div class="info-eyebrow">Fort Apocalypse · Gameplay</div>
+<p>Fort Apocalypse is a rescue-and-destroy game: you pilot the Rocket Copter through a surface and a
+fortress of caverns, lift out trapped men and blow the enemy's reactor core, against tanks, mines,
+homing missiles and a hunting enemy helicopter. Almost every interaction in the game follows from one
+unusual rule about what counts as solid.</p>
+
+<h2>The collision model</h2>
+<ul>
+  <li><strong>Solidity is defined by pixels, not tables.</strong> The core test takes the character
+  drawn under an actor and scans its eight charset bytes; any non-zero byte is a hit. So blanking a
+  character's definition makes every cell drawn with it non-solid <em>at once</em> — the basis for all
+  the dynamic walls and barriers below.</li>
+  <li><strong>Character-based actors carry their own collision.</strong> Tanks, mines, missiles and
+  prisoners draw themselves into the map buffer (saving the background underneath) and react to the
+  character codes they find around them.</li>
+  <li><strong>Hardware sprites use the VIC collision latches</strong>, read once per frame —
+  sprite-to-sprite and sprite-to-background.</li>
+  <li><strong>Bullets bridge the two worlds.</strong> They fly as sprites but stamp an explosion
+  character (<code>$20</code>) into the map on impact, and the character actors die from touching it.</li>
+</ul>
+
+<h2>The player — Rocket Copter</h2>
+<p>Left and right build a <strong>bank</strong> that steers the copter, aims its gun and indexes the
+sprite shape so it visibly tilts; up and down move it directly; and gravity pulls it down at a rate set
+by the gravity option. The camera keeps the copter within a horizontal band and scrolls the cylindrical
+world beneath it. (The title attract mode flies the copter by replaying a recorded joystick sequence.)</p>
+<p>Contact with terrain is fatal <em>unless</em> the cell is a legal landing surface — the landing pad,
+a fuel depot, the walkway floor, or a prisoner — in which case the copter bounces gently and the spot
+becomes the <strong>respawn checkpoint</strong>. Setting down on a fuel depot refuels, the depot draining
+visibly as it does. Fuel falls slowly in flight; at zero the engine sputters and "LOW ON FUEL" flashes.
+A crash — from enemy or enemy-bullet contact, or a hard landing on an empty tank — sends the copter into
+a flashing fall and costs a life; running out of lives ends the game. Brief grace timers protect the
+moments just after spawning or teleporting.</p>
+
+<h2>Bullets</h2>
+<p>The gun fires from the nose along the current bank angle — from full-left, through level (which fires
+<em>straight down</em>), to full-right — using the same bank-to-trajectory mapping as the enemy's gun.
+Two impacts are special: the reactor core on level 1 triggers the <strong>fort-destruction sequence</strong>
+(an expanding explosion, sixteen colour flashes, a 9999 bonus), and destructible rock is permanently
+cleared. Every other hit stamps the explosion character into the cell, and what follows depends on the
+victim. Against plain terrain the explosion lingers a few frames, then the original character is restored.
+Against an object — a mine, tank, missile or prisoner — the bullet is freed at once and the object's own
+engine finds the explosion in its cell, dies, and restores its background. So a direct hit kills any of
+them; the sole exception is the enemy helicopter, a sprite that dies through the collision latch instead.
+A consequence worth noting: prisoners can be shot, by you or by the enemy.</p>
+
+<h2>The enemy helicopter</h2>
+<p>Only one is active at a time. After a delay it spawns at a random patrol point — but never within
+roughly 34 columns or 8 rows of the player, so it cannot materialise on top of you. It then hunts by
+<strong>pure per-axis pursuit</strong>: each tick it steps one cell toward the player horizontally and
+then vertically, with no pathfinding, testing the cells ahead so it only advances into clear corridor.
+It banks into its motion — which in turn aims its shots — and fires periodically while on screen. It
+cannot chase you across the cylinder's wrap. Off-camera it keeps hunting in map coordinates, with only
+its sprite and gun going live once it is back in view, and a watchdog quietly resets it to a fresh patrol
+point if it spends too long stuck off-screen while you are underground. Its only exits are death — flying
+into terrain, or being hit by a player bullet — after which it explodes and waits to respawn. Its
+climbing is notably erratic, incidentally: an easter-egg signature left in the binary overwrote one
+opcode in its upward-probe routine, so its ceiling checks read a garbage column and it often stalls or
+clips going up.</p>
+
+<h2>Tanks, missiles and mines</h2>
+<p>These are the character-based enemies. <strong>Tanks</strong> — six per level — are three body cells
+plus a turret that always aims at the player; they patrol horizontally, reverse at obstacles, and
+respawn at fixed home positions once cleared. Each tank can launch one <strong>homing missile</strong>
+when the player passes within range above it: the missile flies in its facing direction, steering toward
+the player's row, and falls once its fuel runs out, the player slips behind it, or it leaves its column
+range — detonating on anything solid. <strong>Self-Propelled Mines</strong> (the manual's name for the
+small drones) patrol the corridors in numbers set by difficulty; they spawn at random empty cells, fly
+horizontally and reverse at obstacles, and do not respawn once destroyed until the next level. All three
+die the same way — an explosion character or a missile in their cell — and because a missile's own
+character kills the mines, tanks and prisoners it passes through, missiles can be lured into the other
+enemies.</p>
+
+<h2>Prisoners — "men to rescue"</h2>
+<p>Eight per level, placed wherever the level builder finds a floor cell with rock directly above. Each
+runs back and forth along its walkway. Flying into one within a few cells rescues him: he boards, the
+rescued count rises, and the on-screen tally is reprinted. He can also be killed — by shooting away the
+floor beneath him, or by an explosion or missile — so a stray shot, yours or the enemy's, can kill the
+very men you need. Either way he leaves the "men to rescue" count, and <strong>both level exits stay
+locked until that count reaches zero</strong>.</p>
+
+<h2>The dynamic fortress</h2>
+<p>None of the fortress's walls, gates and hazards use object slots. The map cells never change; their
+character glyphs are <strong>redefined at runtime</strong>, and because solidity is pixel-based,
+redefining one glyph opens or closes every cell drawn with it simultaneously. This drives:</p>
+<ul>
+  <li><strong>Reactor gate walls</strong> — two gates on level 1; at each life one is filled solid and
+  the other left passable, chosen at random, so the safe route changes every life. Destroying the core
+  opens both for the escape.</li>
+  <li><strong>Sweeping walls</strong> — a band of four glyphs of which exactly one is solid at a time,
+  advancing in phase so a wall section appears to march along the corridor. Its direction is reversed by
+  every shot you fire, anywhere on the map.</li>
+  <li><strong>Laser grids</strong> — four glyphs re-rolled every couple of seconds, each independently
+  lit or dark at even odds; a lit segment is lethal, a dark one open air. There is no pattern to learn —
+  passage is a gamble.</li>
+  <li><strong>Energy barriers</strong> — two interleaved groups that are blank except for a brief lethal
+  flash each cycle, the two groups flashing in alternation. On level 0 they form diagonal "scissor gates"
+  across the cavern passages; on level 1 they are rails and shaft columns. Destroying the fort forces
+  them permanently blank.</li>
+</ul>
+<p>The barriers double as the level-0 transport system. Flying into a lit barrier on level 0 from beneath
+a scissor gate does not kill — it <strong>teleports</strong> the copter to one of four random cavern drop
+points, each beside another gate, with a grace flag so the arrival cannot crash. On level 1 a barrier
+always kills; there the hazard of the gates is the rock around the funnel, not the barrier itself. (Some
+walls also carry a purely cosmetic shimmer that never affects collision.)</p>
+
+<h2>Difficulty</h2>
+<p>Three options on the title screen tune a run: <strong>Gravity Skill</strong> (how fast the copter
+sinks), <strong>Pilot Skill</strong> (the speed of the enemy helicopter, tanks, missiles, barriers and
+sweeping walls, plus the number of active mines — 13, 26 or 39), and <strong>Robo Pilots</strong> (three,
+five or seven lives).</p>
+
+<h2>Progression and rank</h2>
+<p>Two playfields loop with rising difficulty. Clear and rescue the surface — <em>Vaults of Draconis</em>
+— then land on the bottom-centre pad and sink through the floor into the fortress, <em>Crystalline
+Caves</em>; there, rescue the men and shoot the reactor core, then fly out the top opening. The third pass
+is the surface again, harder, and landing back on the base deck ends the mission. The debrief tallies
+rescued men and bonuses into a <strong>rank from 0 to 15</strong>, shown as one of four bird names —
+Sparrow, Condor, Hawk, Eagle — and a class number from 4 up to 1, with Eagle Class 1 at the very top.</p>
+`,
   },
   turrican: {},
   marble: {},

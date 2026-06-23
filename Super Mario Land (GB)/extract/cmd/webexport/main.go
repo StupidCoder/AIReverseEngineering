@@ -11,9 +11,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	"image/color"
 	"image/png"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"stupidcoder.com/tools/gameboy"
 	"supermarioland/extract/level"
@@ -46,9 +48,14 @@ func main() {
 
 	var metas []levelMeta
 	for world := 1; world <= 4; world++ {
-		// Tiles: warp the oracle into this world and read back VRAM + the BG palette.
+		// Tiles: warp the oracle into this world and read back VRAM + palettes.
 		vram, lcdc, bgp := worldTiles(data, byte(world))
+		obp0 := objPalette(data, byte(world))
 		saveAtlas(filepath.Join(out, fmt.Sprintf("world%d.png", world)), vram, lcdc, bgp)
+		// Object sprite icons: one composited metasprite per known type, in this world's
+		// OBJ tiles, packed into an atlas the viewer blits at each placement.
+		objAtlas := fmt.Sprintf("world%d-obj.png", world)
+		objTypes := saveObjIcons(data, filepath.Join(out, objAtlas), vram, obp0)
 
 		for lv := 1; lv <= 3; lv++ {
 			id := byte(world<<4 | lv)
@@ -73,15 +80,84 @@ func main() {
 			writeJSON(filepath.Join(out, file), map[string]any{
 				"world": world, "level": lv,
 				"width": w, "height": 16,
-				"atlas":   fmt.Sprintf("world%d.png", world),
-				"cells":   cells,
-				"objects": ojson,
+				"atlas":     fmt.Sprintf("world%d.png", world),
+				"cells":     cells,
+				"objects":   ojson,
+				"objAtlas":  objAtlas,
+				"objCell":   objCell,
+				"objOrigin": objOrigin, // sprite-origin offset within a cell (x,y)
+				"objTypes":  objTypes,  // type id -> icon index in the atlas (row of cells)
 			})
 			metas = append(metas, levelMeta{world, lv, name, file, w, 16})
 		}
 	}
 	writeJSON(filepath.Join(out, "meta.json"), map[string]any{"levels": metas})
 	fmt.Printf("wrote %d levels + 4 world atlases to %s\n", len(metas), out)
+}
+
+// Object-icon atlas geometry: each known type's metasprite is composited into one
+// objCell-square cell (stacked vertically). objOrigin is the cell pixel where the
+// metasprite's cursor origin (0,0) sits, so the viewer can line an icon up with a
+// placement: it blits the cell so objOrigin lands on the object's world anchor.
+const objCell = 24
+
+var objOrigin = [2]int{12, 12}
+
+// saveObjIcons composites one metasprite per known object type into a vertical atlas (in
+// this world's OBJ tiles + sprite palette) and returns type id -> icon index. Types not in
+// level.TypeFrame are omitted (the viewer falls back to a marker for them).
+func saveObjIcons(rom []byte, path string, vram []byte, obp0 byte) map[string]int {
+	// Stable order so the atlas is deterministic.
+	var types []int
+	for t := range level.TypeFrame {
+		types = append(types, int(t))
+	}
+	sort.Ints(types)
+
+	img := image.NewNRGBA(image.Rect(0, 0, objCell, objCell*len(types)))
+	out := map[string]int{}
+	for i, t := range types {
+		out[fmt.Sprintf("%d", t)] = i
+		ox := objOrigin[0]
+		oy := i*objCell + objOrigin[1]
+		for _, s := range level.DecodeMetasprite(rom, int(level.TypeFrame[byte(t)])) {
+			for half := 0; half < 2; half++ { // 8x16: top tile, then tile|1
+				tl := gameboy.DecodeTile(vram[int(s.Tile|byte(half))*16:])
+				for py := 0; py < 8; py++ {
+					for px := 0; px < 8; px++ {
+						v := tl[py][px]
+						if v == 0 {
+							continue // OBJ colour 0 = transparent
+						}
+						g := []uint8{0xff, 0xaa, 0x55, 0x00}[(obp0>>(2*v))&3]
+						img.Set(ox+s.DX+px, oy+s.DY+half*8+py, color.NRGBA{g, g, g, 0xff})
+					}
+				}
+			}
+		}
+	}
+	f, err := os.Create(path)
+	must(err)
+	defer f.Close()
+	must(png.Encode(f, img))
+	return out
+}
+
+// objPalette warps the oracle into `world` and returns its OBP0 sprite palette register.
+func objPalette(rom []byte, world byte) byte {
+	m := gameboy.NewMachine(rom)
+	m.RunFrames(80)
+	for f := 0; f < 6; f++ {
+		m.Buttons = gameboy.BtnStart
+		m.RunFrame()
+	}
+	m.Buttons = 0
+	id := byte(world<<4 | 1)
+	for f := 0; f < 40; f++ {
+		m.Write(0xFFB4, id)
+		m.RunFrame()
+	}
+	return m.Read(0xFF48)
 }
 
 // worldTiles boots the ROM, nudges it into `world` by forcing the level id through the

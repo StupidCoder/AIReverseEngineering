@@ -2,7 +2,7 @@
 // a row-major grid of 8×8 background tile indices (decoded by extract/level from the
 // ROM), drawn from the world's 256-tile atlas. Drag to pan, scroll to zoom. The
 // collision and object layers will hang off this later.
-import { Application, Container, Graphics } from 'pixi.js';
+import { Application, Container, Graphics, Sprite, Texture, Rectangle } from 'pixi.js';
 import { composeTilemap } from '../tilemap-compose.js';
 
 const DATA = 'public/sml/';
@@ -66,7 +66,7 @@ export class SMLViewer {
     this.layer = container;
     this.src = src;
     this.world.addChild(this.layer);
-    this._buildObjects(level.objects || []);
+    await this._buildObjects(level);
     this.levelW = level.width * TILE;
     this.levelH = level.height * TILE;
     this._fitDefault();
@@ -74,19 +74,42 @@ export class SMLViewer {
     if (this.hud) this.hud.textContent = `${this.name} · ${level.width}×${level.height} tiles · ${nObj} objects`;
   }
 
-  // Draw the object/enemy placements as a marker overlay (tile-cell boxes, coloured by
-  // type; the second-quest "hard" flag gets a brighter outline).
-  _buildObjects(objects) {
+  // Object/enemy overlay: known types are drawn as their real metasprite (sliced from the
+  // per-world object-icon atlas the exporter composites from ROM); unknown types fall back
+  // to a type-coloured marker box. The two share one container so the layer toggles together.
+  async _buildObjects(level) {
     if (this.objLayer) { this.world.removeChild(this.objLayer); this.objLayer.destroy({ children: true }); }
+    const objects = level.objects || [];
+    const layer = new Container();
     const g = new Graphics();
-    for (const o of objects) {
-      const x = o.col * TILE, y = o.row * TILE;
-      g.rect(x + 0.5, y + 0.5, TILE - 1, TILE - 1);
-      g.fill({ color: objColor(o.type), alpha: 0.55 });
-      g.rect(x + 0.5, y + 0.5, TILE - 1, TILE - 1);
-      g.stroke({ width: o.hard ? 1 : 0.5, color: o.hard ? 0xffffff : 0x101010, alpha: 0.9 });
+    layer.addChild(g);
+
+    // Load this world's object-icon atlas once.
+    const cell = level.objCell || 24;
+    const [orgX, orgY] = level.objOrigin || [12, 12];
+    const types = level.objTypes || {};
+    let iconSrc = null;
+    if (level.objAtlas) {
+      const img = await this._loadImage(DATA + level.objAtlas);
+      iconSrc = Texture.from(img).source;
+      iconSrc.scaleMode = 'nearest';
     }
-    this.objLayer = g;
+
+    for (const o of objects) {
+      const idx = types[o.type];
+      if (iconSrc && idx !== undefined) {
+        // world anchor matches the offline render: (col*8, row*8 - 8)
+        const tex = new Texture({ source: iconSrc, frame: new Rectangle(0, idx * cell, cell, cell) });
+        const sp = new Sprite(tex);
+        sp.position.set(o.col * TILE - orgX, (o.row * TILE - 8) - orgY);
+        layer.addChild(sp);
+        continue;
+      }
+      const x = o.col * TILE, y = o.row * TILE;
+      g.rect(x + 0.5, y + 0.5, TILE - 1, TILE - 1).fill({ color: objColor(o.type), alpha: 0.55 });
+      g.rect(x + 0.5, y + 0.5, TILE - 1, TILE - 1).stroke({ width: o.hard ? 1 : 0.5, color: o.hard ? 0xffffff : 0x101010, alpha: 0.9 });
+    }
+    this.objLayer = layer;
     this.objLayer.visible = this._showObjects;
     this.world.addChild(this.objLayer);
   }

@@ -238,6 +238,32 @@ html, body {
 .item.active .sub { color: var(--accent); }
 .item.active .name { color: #fff; }
 
+/* ---- system accordion (game list: systems -> games) ---- */
+.sys-group { display: flex; flex-direction: column; }
+.sys-header {
+  flex-direction: row;   /* override .item's column layout */
+  align-items: center;
+  font-weight: 600;
+}
+.sys-header .name { flex: 1; }
+.sys-header .chevron {
+  width: 15px; height: 15px;
+  flex: 0 0 auto;
+  color: var(--faint);
+  transition: transform .18s ease, color .18s ease;
+}
+.sys-group.open > .sys-header { color: #fff; }
+.sys-group.open > .sys-header .chevron { transform: rotate(90deg); color: var(--accent); }
+.sys-games {
+  display: none;
+  flex-direction: column;
+  gap: 3px;
+  margin: 2px 0 4px 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+.sys-group.open > .sys-games { display: flex; }
+
 /* ---- CRT toggle switch + controls ---- */
 .switch {
   display: flex;
@@ -269,6 +295,21 @@ html, body {
 .switch input:checked + .track .knob { transform: translateX(16px); background: var(--accent); }
 .switch input:disabled + .track { opacity: .4; }
 .switch-label { font-size: 13.5px; color: var(--text); }
+
+.crt-row { display: flex; align-items: center; justify-content: space-between; }
+.gear-btn {
+  width: 28px; height: 28px;
+  flex: 0 0 auto;
+  display: grid; place-content: center;
+  border: none; border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color .15s ease, background .15s ease, transform .2s ease;
+}
+.gear-btn:hover { color: var(--text); background: rgba(255, 255, 255, .06); }
+.gear-btn.on { color: var(--accent); transform: rotate(40deg); }
+.gear-btn svg { width: 16px; height: 16px; display: block; }
 
 .crt-controls {
   display: none;

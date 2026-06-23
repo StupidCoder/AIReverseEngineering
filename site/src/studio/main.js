@@ -86,20 +86,59 @@ const mounts = new Map(); // gameId -> { game, el, viewer, levels, current }
 let activeId = null;
 let busy = false;
 
-// ---- the game list (always available) ----
+// ---- the game list: systems (collapsible, one open at a time) -> games ----
+const SYSTEMS = [
+  { full: 'Amiga', short: 'Amiga' },
+  { full: 'Commodore 64', short: 'C64' },
+  { full: 'Sega Game Gear', short: 'Game Gear' },
+];
+const CHEVRON = '<svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
+
 function buildGameList() {
-  for (const game of GAMES) {
-    const b = document.createElement('button');
-    b.className = 'item';
-    b.dataset.game = game.id;
-    b.innerHTML = `<span class="name">${game.name}</span><span class="sub">${game.system}</span>`;
-    b.addEventListener('click', () => selectGame(game.id));
-    gameList.appendChild(b);
+  gameList.innerHTML = '';
+  for (const sys of SYSTEMS) {
+    const games = GAMES.filter(g => g.system === sys.full);
+    if (!games.length) continue;
+    const group = document.createElement('div');
+    group.className = 'sys-group';
+    group.dataset.sys = sys.full;
+
+    const header = document.createElement('button');
+    header.className = 'item sys-header';
+    header.innerHTML = `<span class="name">${sys.short}</span>${CHEVRON}`;
+    header.addEventListener('click', () => toggleSystem(sys.full));
+    group.appendChild(header);
+
+    const sub = document.createElement('div');
+    sub.className = 'sys-games';
+    for (const game of games) {
+      const b = document.createElement('button');
+      b.className = 'item game-item';
+      b.dataset.game = game.id;
+      b.innerHTML = `<span class="name">${game.name}</span>`;
+      b.addEventListener('click', () => selectGame(game.id));
+      sub.appendChild(b);
+    }
+    group.appendChild(sub);
+    gameList.appendChild(group);
   }
 }
 
+function openSystem(sysFull) {
+  for (const group of gameList.querySelectorAll('.sys-group')) {
+    group.classList.toggle('open', group.dataset.sys === sysFull);
+  }
+}
+
+function toggleSystem(sysFull) {
+  const group = gameList.querySelector(`.sys-group[data-sys="${sysFull}"]`);
+  openSystem(group && group.classList.contains('open') ? null : sysFull);
+}
+
 function markActiveGame(id) {
-  for (const b of gameList.children) b.classList.toggle('active', b.dataset.game === id);
+  const game = GAMES.find(g => g.id === id);
+  for (const b of gameList.querySelectorAll('.game-item')) b.classList.toggle('active', b.dataset.game === id);
+  if (game) openSystem(game.system); // unfold the active game's system
 }
 
 // ---- level list (rebuilt per game) ----
@@ -276,18 +315,17 @@ function wireCrt() {
   });
   const toggle = document.getElementById('crtToggle');
   const controls = document.getElementById('crtControls');
-  const apply = (on) => {
-    crt.setEnabled(on);
-    controls.classList.toggle('shown', on);
-    persistCrt();
-  };
+  const gear = document.getElementById('crtSettings');
+  toggle.addEventListener('change', () => { crt.setEnabled(toggle.checked); persistCrt(); });
+  gear.addEventListener('click', () => gear.classList.toggle('on', controls.classList.toggle('shown')));
+
+  // enabled by default; only an explicit prior "off" (or ?crt=0) turns it off.
   const forced = new URLSearchParams(location.search).get('crt');
-  const startOn = (forced === '1' || (forced !== '0' && !!saved.enabled)) && crt.ok;
+  const startOn = (forced === '1' || (forced !== '0' && saved.enabled !== false)) && crt.ok;
   toggle.checked = startOn;
-  controls.classList.toggle('shown', toggle.checked);
-  toggle.addEventListener('change', () => apply(toggle.checked));
-  if (!crt.ok) { toggle.disabled = true; }
-  if (toggle.checked) crt.setEnabled(true);
+  if (!crt.ok) toggle.disabled = true;
+  if (startOn) crt.setEnabled(true);
+  // the settings panel stays folded until the gear is clicked
 }
 
 function persistCrt() {
@@ -296,8 +334,8 @@ function persistCrt() {
   localStorage.setItem('studio.crt', JSON.stringify({ enabled: crt.enabled, params }));
 }
 
-// ---- Music player (per-game song list + transport; a jukebox that keeps playing
-//      across game/level switches) ----
+// ---- Music player (per-game song list + transport). Switching games stops the music;
+//      switching levels within a game leaves it playing. ----
 const audio = new Audio();
 audio.preload = 'none';
 let musicTracks = [];
@@ -329,7 +367,7 @@ function renderMusicList() {
 
 function updateMusicUI() {
   const hasMusic = musicTracks.length > 0;
-  const loaded = !!audio.src;
+  const loaded = !!playingUrl;
   const show = hasMusic || loaded;
   musicLabel.style.display = show ? '' : 'none';
   musicListEl.style.display = hasMusic ? '' : 'none';
@@ -353,7 +391,7 @@ function skip(d) {
 }
 
 musPlay.addEventListener('click', () => {
-  if (!audio.src) { if (musicTracks.length) playTrack(0); return; }
+  if (!playingUrl) { if (musicTracks.length) playTrack(0); return; }
   if (audio.paused) audio.play().catch(() => {}); else audio.pause();
 });
 document.getElementById('musPrev').addEventListener('click', () => skip(-1));
@@ -379,7 +417,17 @@ audio.addEventListener('timeupdate', () => {
 });
 musSeek.addEventListener('input', () => { if (audio.duration) audio.currentTime = (musSeek.value / 1000) * audio.duration; });
 
+function stopMusic() {
+  audio.pause();
+  try { audio.currentTime = 0; } catch {}
+  playingUrl = null;
+  musPlay.innerHTML = PLAY_SVG; musPlay.title = 'Play';
+  musSeek.value = '0';
+  musTime.textContent = '0:00';
+}
+
 async function loadGameMusic(game) {
+  stopMusic(); // switching games stops the music
   try { musicTracks = game.music ? await game.music() : []; }
   catch (e) { console.error('studio: music load failed', game.id, e); musicTracks = []; }
   renderMusicList();

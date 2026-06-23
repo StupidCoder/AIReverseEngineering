@@ -111,6 +111,9 @@ func (m *Machine) VRAM() []byte { return m.vram[:] }
 func (m *Machine) OAM() []byte  { return m.oam[:] }
 func (m *Machine) WRAM() []byte { return m.wram[:] }
 
+// ROMBank returns the bank currently paged into $4000-$7FFF.
+func (m *Machine) ROMBank() int { return m.romBank }
+
 // --- sm83.Bus --------------------------------------------------------------
 
 func (m *Machine) Read(a uint16) byte {

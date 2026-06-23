@@ -27,7 +27,7 @@ and adds Game-Boy-specific opcodes (`LDH`, `LD (C),A`, `LD (a16),A`, `STOP`, `SW
 **`cmd/dissm83`** CLI — has been built for this game (mirroring `tools/z80`); the
 hand decodes below were confirmed against it. All addresses are CPU addresses
 (16-bit, `$0000`–`$FFFF`) unless a *file offset* is called out; bytes are 8-bit.
-Parts I–III are complete; Parts IV–V are stubbed.
+Parts I–IV are complete; Part V is stubbed.
 
 ---
 
@@ -55,6 +55,12 @@ Parts I–III are complete; Parts IV–V are stubbed.
   - [5. The VBlank update chain](#5-the-vblank-update-chain)
   - [6. RAM, HRAM and the bank shadows](#6-ram-hram-and-the-bank-shadows)
 - [Part IV — Graphics and data formats](#part-iv--graphics-and-data-formats)
+  - [1. The 2bpp tile](#1-the-2bpp-tile)
+  - [2. Tile addressing and the background maps](#2-tile-addressing-and-the-background-maps)
+  - [3. Palettes](#3-palettes)
+  - [4. Sprites (OAM)](#4-sprites-oam)
+  - [5. How a level is drawn](#5-how-a-level-is-drawn)
+  - [6. The level data format (frontier)](#6-the-level-data-format-frontier)
 - [Part V — Game mechanics](#part-v--game-mechanics)
 - [Appendix A — Toolchain and reproduction](#appendix-a--toolchain-and-reproduction)
 
@@ -574,8 +580,96 @@ model for the parts to come.
 
 # Part IV — Graphics and data formats
 
-*Stubbed.* The 2bpp tile format, the `$9800`/`$9C00` background maps, OAM sprites and
-the DMG palettes; the level and object data.
+The Game Boy's graphics are **fixed hardware formats** — the game fills VRAM and OAM,
+and the LCD controller composes the picture from them. So Part IV has two halves: the
+hardware encodings (the same for every DMG game, and decoded once in `tools/gameboy`),
+and how Super Mario Land arranges its data on top of them. Everything below was
+verified by **decoding the bytes the game itself wrote** — the images here are
+rendered straight from the VRAM/OAM of a real run on the `tools/gameboy` oracle, not
+from a reference.
+
+## 1. The 2bpp tile
+
+Every Game Boy graphic is built from 8×8 **tiles**. A tile is **16 bytes** — two per
+row — and is *2 bits per pixel* (four shades). The two bytes of a row are the **low
+and high bitplane**: pixel *x*'s value is bit `7−x` of the first byte plus bit `7−x` of
+the second byte shifted up one. Tile memory is `$8000`–`$97FF` = **384 tiles** in three
+128-tile blocks. Decoding all of SML's loaded tiles gives its font, HUD and logo:
+
+![SML tile sheet — font, HUD, the SUPER MARIO LAND logo](rendered/title-tiles.png)
+
+## 2. Tile addressing and the background maps
+
+The background is a **32×32 grid of one-byte tile indices** — a *tile map*. There are
+two maps, at `$9800` and `$9C00`, and `LCDC` (`$FF40`) chooses how they are read:
+
+- **bit 3** selects which map the background uses (`$9800` or `$9C00`); **bit 6** does
+  the same for the window layer;
+- **bit 4** selects tile-data addressing: `1` = unsigned indices from `$8000`
+  (`0`–`255` → `$8000`–`$8FFF`); `0` = **signed** indices from `$9000` (`−128`–`127`,
+  i.e. the window `$8800`–`$97FF`).
+
+Super Mario Land runs with `LCDC = $C3`: background map `$9800`, **signed `$8800`
+addressing**, OBJ on. Composing the `$9800` map with that addressing reproduces the
+title screen exactly:
+
+![SML title screen, composed from the $9800 map](rendered/title-bg.png)
+
+The **window** (the second map, `$9C00`) is SML's **fixed status bar**. It is switched
+on in the VBlank handler (Part III §5) and the `STAT` raster split (Part II §5) floats
+the scrolling playfield beneath it.
+
+## 3. Palettes
+
+The DMG is monochrome: four shades, no colour. Three registers map a pixel's 2-bit
+value to a shade — **`BGP` (`$FF47`)** for the background, **`OBP0`/`OBP1`
+(`$FF48`/`$FF49`)** for sprites — each packing four 2-bit shade numbers (value 0 in
+bits 1-0, value 1 in bits 3-2, …). SML sets `BGP = $E4` (`11 10 01 00` — the identity
+ramp, darkest value = darkest shade). Sprite value 0 is always *transparent*, so the
+object palettes only define three visible shades.
+
+## 4. Sprites (OAM)
+
+Moving objects are **sprites**, described by the 160-byte **OAM** table at `$FE00` —
+**40 entries of 4 bytes**: Y (screen Y + 16), X (screen X + 8), tile number, and an
+attribute byte (bit 7 priority-behind-BG, bit 6 Y-flip, bit 5 X-flip, bit 4 OBP0/OBP1
+select). SML uses 8×8 sprites (`LCDC` bit 2 = 0). The table is not written directly
+during the frame; the game maintains a **shadow copy at `$C000`** and the VBlank
+handler DMA-copies it into OAM through the HRAM routine (Parts II–III). Compositing the
+scrolled background with the decoded OAM reproduces an in-level frame — World 1-1,
+with Mario and the HUD:
+
+![World 1-1, background + sprites](rendered/level-1-1.png)
+
+## 5. How a level is drawn
+
+A level is far wider than the 32-tile map, so it is **streamed a column at a time** as
+the screen scrolls. The column builder at **`$2260`** copies a 16-tile column from a
+WRAM **column buffer at `$C0B0`** into the background map (`LD H,$98` / `LD DE,$C0B0` /
+`LD (HL),A` at `$2270`), and as it copies each tile it dispatches on **special block
+IDs** — `$70`, `$80`, `$5F`, `$81` — to per-block handlers (`$22F4`, `$235A`) that set
+up question blocks, coins and breakables. The split is the usual one: the data names
+*blocks*, and a small interpreter turns the on-screen block into tiles plus behaviour.
+
+This is the on-screen end of the pipeline; the column buffer is filled from the level
+data each time the screen advances.
+
+## 6. The level data format (frontier)
+
+The level data itself lives in **bank 2** (paged into `$4000`–`$7FFF` throughout
+gameplay — confirmed on the oracle: the play loop sits in bank 2, dipping into bank 3
+only for sound). It is **block-based**: the stored map is a sequence of 16×16 *block*
+ids, expanded through a block→tile table into the `$C0B0` column buffer that §5 draws,
+with the reserved ids above carrying interactive behaviour.
+
+Fully decoding that encoding — the per-world block tables, the level layout/run-length
+scheme, and the separate object/enemy spawn lists — is the next piece of work, a decode
+on the scale of the Sonic level maps rather than a fixed hardware format. What this part
+pins is the **shape** of it: where the data is (bank 2), that it is block-structured,
+the column-buffer draw path (`$2260`/`$C0B0`), and the special-block ids — enough to
+start that decode from, which is Part V territory along with the object behaviour.
+
+# Part V — Game mechanics
 
 # Part V — Game mechanics
 
@@ -620,7 +714,18 @@ The full Game Boy toolchain now exists, mirroring the Game Gear set:
 - **`tools/gameboy`** — a DMG machine model (MBC1 + the memory map + the timer and LCD
   scanline interrupts) that drives the `sm83` core as an **emulation oracle**: it boots
   the real ROM and runs its per-frame loop, after which VRAM/OAM can be read back to see
-  exactly what the game drew (the same technique as the Game Gear oracle). Verified by
-  booting Super Mario Land and confirming it populates VRAM and enables VBlank.
+  exactly what the game drew (the same technique as the Game Gear oracle). Its `gb.go`
+  also holds the fixed DMG **graphics decoders** (2bpp tile, `BGP`/`OBP` palettes, tile
+  sheet, background-map and full-screen/​sprite composition).
+- **`Super Mario Land (GB)/extract`** — the per-game module. `cmd/render` boots the ROM
+  on the oracle and writes the PNGs used in Part IV (`rendered/title-tiles.png`,
+  `title-bg.png`, and, with `-play`, `level-1-1.png`):
 
-So Parts II–V can now proceed with both static tracing and a live oracle.
+  ```sh
+  cd "Super Mario Land (GB)/extract"
+  go run ./cmd/render          # title-screen tiles + background
+  go run ./cmd/render -play    # also a captured in-level frame
+  ```
+
+So the analysis proceeds with static tracing, a live oracle, and graphics read straight
+back from a run.

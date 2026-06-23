@@ -61,8 +61,12 @@ To do:
       main loop `$0226→$0296`. Part III done: the engine is a frame-synced state
       machine — `RST $28` over `$FFB3` through a 62-entry table at `$02A6`; oracle-traced
       state flow (boot→title `$0F`→play `$00`); input `$FF80`/`$FF81`; the VBlank render
-      chain; the bank-shadow (`$FFFD`/`$C0A4`) convention. Next (Part IV): graphics/data
-      formats (2bpp tiles, maps, OAM, level data)
+      chain; the bank-shadow (`$FFFD`/`$C0A4`) convention. Part IV done: the DMG graphics
+      formats (2bpp tiles, `$9800`/`$9C00` maps + signed `$8800` addressing, OAM sprites,
+      `BGP`/`OBP` palettes) — decoders in `tools/gameboy/gb.go`, verified by rendering the
+      title screen and level 1-1 straight from the oracle's VRAM (`extract/cmd/render`);
+      the column-build draw path (`$2260`/`$C0B0`) mapped, level data located in bank 2.
+      Next (Part V): the level encoding + object/enemy behaviour
 * Tools
     * Disassembler should be better at segmenting functions; currently jumps within a function are treated as separate sub-routines; try to document parameters of sub-routines (which registers are used?)
 
@@ -149,7 +153,9 @@ AIReverseEngineering/
 │
 ├── Super Mario Land (GB)/
 │   ├── Super Mario Land (World).gb   # raw Game Boy cartridge ROM
-│   └── Super_Mario_Land.md      # cartridge + game writeup (Part I done; rest stubbed)
+│   ├── Super_Mario_Land.md      # cartridge + game writeup (Parts I-IV done; V stubbed)
+│   ├── extract/                 # module supermarioland/extract — cmd/render (oracle -> PNGs)
+│   └── rendered/                # generated PNGs (tile sheet, title screen, level 1-1)
 │
 └── Turrican (Amiga)/
     ├── Turrican.adf             # raw disk image (pinned by MD5 in Image files)
@@ -219,7 +225,7 @@ per-platform subfolder (`c64/`, `amiga/`, …).
 | `amiga/powerpacker` | Decompress PowerPacker (`PP20`) data — one of the most common Amiga crunchers (games, demos, intros). Faithful reimplementation of the standard backward bit-reader decode loop. |
 | `amiga/cmd/ppdecrunch` | Decompress a `PP20` file, or a `PP20` block embedded at a `-off`/`-len` slice of a larger file. |
 | `gamegear/gamegear` | Sega Game Gear VDP graphics: the 4-bitplane tile, 12-bit CRAM palette and name-table decoders, plus a minimal `Machine` (8 KB RAM + Sega cartridge mapper + VDP ports) that drives the `z80` core as an *emulation oracle* — run a real ROM, then read back VRAM/CRAM to compose the exact screen the code drew. Usable by any Game Gear (and, for the tiles, Master System) game. |
-| `gameboy` | Game Boy (DMG) machine model driving the `sm83` core as an *emulation oracle*: the MBC1 mapper, the full memory map (VRAM/WRAM/OAM/HRAM/IO), and the timer and LCD scanline counter with their VBlank/STAT/timer interrupts — enough to run a real ROM through its boot and per-frame loop, then read back VRAM/OAM (`RunFrame`/`RunFrames`, plus a PC histogram and a VRAM write-watch). Usable by any Game Boy game; MBC1 today. |
+| `gameboy` | Game Boy (DMG) machine model driving the `sm83` core as an *emulation oracle*: the MBC1 mapper, the full memory map (VRAM/WRAM/OAM/HRAM/IO), and the timer and LCD scanline counter with their VBlank/STAT/timer interrupts — enough to run a real ROM through its boot and per-frame loop, then read back VRAM/OAM (`RunFrame`/`RunFrames`, plus a PC histogram and a VRAM write-watch). Also the fixed DMG **graphics decoders** (`gb.go`): the 2bpp tile, the `BGP`/`OBP` palette registers, tile-sheet and 32×32 background-map composition (`$8000`/signed-`$8800` addressing), and an OAM/sprite screen compositor (`RenderScreen`). Usable by any Game Boy game; MBC1 today. |
 
 ## Building and running
 

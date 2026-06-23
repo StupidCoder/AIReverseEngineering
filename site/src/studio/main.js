@@ -86,6 +86,8 @@ const GAMES = [
     make: (V, el, hud) => new V(el, hud),
     list: async (v) => await v.init(), // returns the ship list
     show: (v, lvl, i) => v.loadShip(i),
+    // open on the Cobra Mk III — the iconic player ship — rather than the missile
+    defaultAsset: (ships) => ships.findIndex(s => s.name === 'Cobra Mk III'),
   },
 ];
 
@@ -250,6 +252,13 @@ function markActiveAsset(m) {
   if (active) active.scrollIntoView({ block: 'nearest' });
 }
 
+// the leaf shown on a game's first visit: the adapter's defaultAsset (a fn of the level list,
+// returning a level/leaf index — leaves are built in level order), else the first leaf.
+function defaultLeaf(m) {
+  const i = m.game.defaultAsset ? m.game.defaultAsset(m.levels) : 0;
+  return (Number.isInteger(i) && i >= 0 && i < m.leaves.length) ? i : 0;
+}
+
 // run an asset (no busy management — used for the initial selection inside selectGame).
 async function runAsset(m, idx) {
   const leaf = m.leaves[idx];
@@ -320,8 +329,8 @@ async function selectGame(id) {
     activeId = id;
     buildLayerToggles(m);
     buildAssetList(m);
-    if (firstMount) await runAsset(m, 0); // load the first asset on first visit
-    else markActiveAsset(m);              // returning to a cached viewer: keep its asset
+    if (firstMount) await runAsset(m, defaultLeaf(m)); // load the default asset on first visit
+    else markActiveAsset(m);                           // returning to a cached viewer: keep its asset
     await loadGameMusic(game);
     updateHud(m);
     if (infoPanel.classList.contains('open')) renderInfo(); // refresh the details for the new game

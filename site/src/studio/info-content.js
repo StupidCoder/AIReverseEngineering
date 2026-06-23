@@ -203,6 +203,88 @@ scanner bitmaps, the HUD screen image, the packed sprite shapes, then the bulk o
 data tables, and finally the raw character-set data. The stage-2 loader and loading screen are left
 as dead remnants higher in memory, never referenced again.</p>
 `,
+    graphics: `
+<div class="info-eyebrow">Fort Apocalypse · Graphics</div>
+<p>Fort Apocalypse is a character-mapped game: the playfield is built from an 8&times;8 tile set, the
+moving actors are a mix of hardware sprites and animated characters, and the levels are stored as
+compressed grids of screen codes. None of the data is encrypted — the only transformations applied
+to it are a simple run-length scheme, the sprite packing, and a <code>$7F</code> mask on map bytes.</p>
+
+<h2>Compression</h2>
+<p>A single decompressor at <code>$8CDB</code> serves all level data. It reads a byte; if that value
+appears in the active <strong>run-table</strong>, the following byte is a repeat count (with
+<code>0</code> meaning 256) and the value is emitted that many times; otherwise the byte is a single
+literal. Two run-tables pick which values are eligible to repeat — one for terrain, a smaller one
+(<code>$00 $55 $AA $FF</code>) for the scanner bitmap — so there are no escape codes at all. Every
+decompressed byte is masked with <code>AND #$7F</code>, which keeps all map codes below
+<code>$80</code>.</p>
+
+<h2>Character sets</h2>
+<p>Both character sets are built at init from uncompressed data, copied in overlapping 256-byte
+strips. They are swapped mid-frame by the raster handlers, so the HUD and the playfield draw from
+different sets.</p>
+<h3>HUD set ($5000)</h3>
+<p>Selected by <code>$D018 = $14</code> for screen rows 0–6. It holds the score font and the HUD
+furniture. Its high characters are left as <strong>soft characters</strong> into which the radar
+window is rendered at runtime.</p>
+<h3>Playfield set ($5800)</h3>
+<p>Selected by <code>$D018 = $16</code> for rows 7–24. It holds the terrain glyphs — 8&times;8
+multicolor dither patterns, including the mountain-slope, flat-dither and solid-block tiles. The low
+characters <code>$00–$20</code> are reserved as <strong>soft characters animated in place</strong> by
+the playfield interrupt: the energy barriers cycle between a stored pattern and blank on a timer; the
+laser-grid segments each flip on or off independently and are re-rolled periodically; a four-character
+group lights one member per phase to rotate; the explosion character and the fort core are masked
+against the SID noise register (<code>$D41B</code>) every frame for a live flicker; the reactor-gate
+walls pick one of two solid forms per life; and the missile-exhaust rows are noise-flickered each
+frame. The same alphabet glyphs that form the double-width HUD font also serve as object graphics —
+distinct glyph ranges are the prisoners, the self-propelled mines, and the tanks and their missiles.</p>
+
+<h2>Sprites</h2>
+<p>Fourteen sprite shapes are stored in a <strong>packed column format</strong>: 36 bytes per shape,
+arranged as two 18-byte pixel columns (the left column's rows, then the right column's), located by a
+pointer table. Init expands each shape into a 64-byte VIC sprite block, laying out <code>[left][right][pad]</code>
+per row. The sprites are hi-res — no sprite multicolor — and the player and enemy sprites are
+horizontally expanded.</p>
+<p>Both helicopters, player and enemy, draw from <strong>one shared animation table</strong> of 18
+entries indexed by bank/tilt: seven banking poses &times; two rotor frames, with the level-flight pose
+covering three tilt steps. The player toggles its rotor frame every frame; the enemy every fourth
+frame. The two bullet sprites are built at runtime from a nine-byte dot pattern — one block carries
+the pattern twice for angled shots, the other once for straight-down shots.</p>
+
+<h2>The level maps</h2>
+<p>Each level's terrain is decompressed from a per-level source into a buffer at <code>$0503</code> —
+one 256-byte page per map row, 40 rows. The map bytes <strong>are screen character codes directly</strong>,
+with no tile-index indirection. Two placeholder codes are resolved after decompression: one is replaced
+by a random pick from three cave-rock glyphs and another by a different trio, driven by the SID noise,
+which gives the cave rock its mottled texture. The two levels are <em>Vaults of Draconis</em> (the
+surface, with fuel depots and the landing pad) and <em>Crystalline Caves</em> (the Kralthan fortress,
+with its central shaft and a large field of destructible rock).</p>
+<h3>A cylindrical world</h3>
+<p>The 256-byte rows are wider than the visible playfield. Columns 0–214 hold the 215 columns of level
+content, columns 215–254 are padding, and <strong>column 255 is a copy of column 0</strong>. The world
+is a horizontal cylinder: the camera column wraps around, and at the wrap point the right edge of the
+screen displays that stored copy of the leftmost column, so the world's left edge meets its right edge
+without a seam.</p>
+<h3>Scrolling</h3>
+<p>When the camera advances a full character — or every 8 frames regardless, so that map-embedded
+objects keep animating — the engine rewrites the source operands of an unrolled copy loop and
+block-copies <strong>16 rows &times; 40 columns</strong> from the map buffer straight to the screen.
+Sub-character movement between copies is done with hardware fine-scroll. Because moving objects write
+themselves <em>into the map buffer</em>, this periodic re-copy doubles as their on-screen update.</p>
+
+<h2>The scanner</h2>
+<p>The radar is backed by a second compressed stream that decompresses per level into a 1600-byte soft
+bitmap — the whole map as a 320&times;40-pixel image (40 chars &times; 5 rows). The HUD rows are a
+prebuilt screen image whose scanner window is made of soft characters; each frame a 12&times;3-character
+window of the bitmap, following the camera, is copied into those characters' definitions. Blips are
+XOR-plotted through a pixel-pair mask table — the player every frame, the enemy helicopter and the tank
+bases blinking.</p>
+
+<h2>The HUD</h2>
+<p>The status display shows the score (six BCD digits), a bonus that counts down during play and is set
+to 9999 when the fort is destroyed, the fuel gauge (four BCD digits), the "MEN TO RESCUE" count, and a
+message row for flashing texts such as "LOW ON FUEL". The digits are drawn with leading-zero blanking.</p>
+`,
   },
   turrican: {},
   marble: {},

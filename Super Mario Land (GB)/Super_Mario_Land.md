@@ -544,11 +544,12 @@ registers it runs a **fixed chain** of update routines and the sprite upload:
 | `$3F24`, `$3D61`, `$23F8` | further per-frame work (incl. the sound tick) |
 
 It then increments the frame counter `$FFAC`, does **state-dependent** work (for
-example, when `$FFB3 == $3A` it enables the window layer with `SET 5,($FF40)` — the
-fixed status bar), resets the scroll to `0,0`, sets the `$FF85` frame-done flag the body
-waits on, and `RETI`s. The mid-frame `STAT` interrupt (`$0095`) then re-introduces the
-playfield's horizontal scroll partway down the screen (Part II §5), so the status bar
-stays fixed while the level scrolls beneath it.
+example, when `$FFB3 == $3A` it enables the window layer with `SET 5,($FF40)` — used for
+overlays such as the `PAUSE` screen, not the in-level HUD), resets the scroll to `0,0`,
+sets the `$FF85` frame-done flag the body waits on, and `RETI`s. The mid-frame `STAT`
+interrupt (`$0095`) then re-introduces the playfield's horizontal scroll partway down
+the screen (Part II §5), so the status bar — which is just the top rows of the
+background map (Part IV §2) — stays fixed while the level scrolls beneath it.
 
 ## 6. RAM, HRAM and the bank shadows
 
@@ -615,9 +616,14 @@ title screen exactly:
 
 ![SML title screen, composed from the $9800 map](rendered/title-bg.png)
 
-The **window** (the second map, `$9C00`) is SML's **fixed status bar**. It is switched
-on in the VBlank handler (Part III §5) and the `STAT` raster split (Part II §5) floats
-the scrolling playfield beneath it.
+The **status bar / HUD** (`MARIO×02`, score, `WORLD`, `TIME`, `1-1`) is *not* a
+separate layer — it is the **top rows of the background map** itself. Decoding the
+first row of `$9800` reads back `M A R I O × 0 2 … W O R L D … T I M E`. It is held
+fixed while the level scrolls by the **`STAT` raster split** (Part II §5): the VBlank
+handler resets `SCX` to 0 (so the bar draws unscrolled), and the `STAT` interrupt
+re-applies the playfield's `SCX` (from `$FFA4`) on the scanline just below the bar. The
+**window** map (`$9C00`) is something else entirely — it holds SML's `PAUSE` overlay
+and is switched off (`LCDC` bit 5 = 0) during normal play.
 
 ## 3. Palettes
 

@@ -112,8 +112,10 @@ func RenderBGMap(vram []byte, lcdc byte, mapHi bool, pal color.Palette) *image.P
 // RenderScreen composites the authentic 160×144 viewport: the scrolled background
 // plus the 8×8 sprites, as the LCD would show it. It applies the BG and object
 // palette registers per pixel (sprite pixel value 0 is transparent), so it is the
-// "what you see" render. The window layer is not composited (on the DMG titles here
-// it is only the status bar).
+// "what you see" render. The window layer is not composited, and the BG is drawn with
+// a single SCX/SCY, so a game that uses a mid-frame STAT scroll split (as SML does to
+// pin its status bar) is only reproduced faithfully when the split is inactive — e.g.
+// when the playfield scroll is 0.
 func RenderScreen(vram, oam []byte, lcdc, scx, scy, bgp, obp0, obp1 byte) *image.Paletted {
 	img := image.NewPaletted(image.Rect(0, 0, 160, 144), GreyPalette())
 	mapBase := 0x1800

@@ -726,7 +726,7 @@ plate has **1** face, not 16).
 **Face record — 4 bytes:**
 
 ```
-+0  %sss vvvvv bits 7-5 = sign of the normal's x,y,z; low bits = visibility/illum
++0  %sss vvvvv bits 7-5 = sign of the normal's x,y,z; low 5 bits = visibility distance
 +1  |normal_x|
 +2  |normal_y|
 +3  |normal_z|
@@ -787,8 +787,11 @@ table in §1.5):
    2-bit multicolor masks at `$28C5`.
 
 Because lines are plotted with EOR, the previous frame's ship can be erased by
-drawing the same line heap again before the new one is built — the standard
-Elite flicker-free redraw.
+drawing the same line heap again before the new one is built, so no separate
+clear pass is needed. There is no double buffer, however: a large line heap is
+frequently still mid-erase/redraw when the raster passes over it, which produces
+the **characteristic flicker** of the C64 version — part of the game's signature
+look, not a bug.
 
 ### 1.5 Routine and data map (ship rendering)
 

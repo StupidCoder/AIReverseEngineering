@@ -1252,7 +1252,9 @@ edges and faces — with <strong>no explicit counts</strong>: each array's lengt
 because every record is a fixed size. A vertex is six bytes (its three coordinate magnitudes, a byte packing
 the three signs and a visibility distance, and the numbers of up to four faces it belongs to); an edge is four
 bytes (a visibility distance, the two faces on either side, and its two vertex numbers); a face is four bytes
-(the signed normal plus an illumination field). A face number of 15 is a <strong>sentinel</strong> meaning "no
+(the signed normal plus a visibility distance). The model is a <strong>wireframe</strong> with hidden-face
+removal — there is no shading, so nothing in a face record is an illumination value. A face number of 15 is a
+<strong>sentinel</strong> meaning "no
 face on this side" — an edge carrying it is always drawn, never culled, which is how flat models like the alloy
 plate show their outline from any angle.</p>
 
@@ -1262,8 +1264,10 @@ rotate the model and drop or simplify it by distance (level of detail); project 
 with a perspective divide; back-face-test each face with its normal and append every visible edge to a per-ship
 <strong>line heap</strong> as endpoint records; then walk the heap drawing each as a Bresenham line into the
 multicolor space-view bitmap. Because lines are plotted with EOR, the previous frame's ship is erased by drawing
-its old line heap again before the new one is built — the standard flicker-free Elite redraw. Distant ships and
-stars are single dots of one, two or four pixels by distance.</p>
+its old line heap again before the new one is built — no separate clear is needed. There is no double buffer,
+though, so a busy line heap is often still being erased and redrawn as the raster sweeps past it: the result is
+the <strong>characteristic flicker</strong> of the C64 version, part of the game's signature look. Distant ships
+and stars are single dots of one, two or four pixels by distance.</p>
 
 <h2>A universe from a seed</h2>
 <p>Elite's universe — hundreds of star systems, each with a name, an economy, a government and a position — is

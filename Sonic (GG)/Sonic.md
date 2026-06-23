@@ -652,12 +652,16 @@ that the loop lays it down **one column at a time, left to right**, so the logo 
 in. (Render it mid-build and you get `SEG` before the `A` — exactly that left-to-right
 edge.) In lockstep, `$1EC1`→`$2F07` build a small **sprite** display list in RAM at
 `$D000` — three rows of entries, `$FE`=skip / `$FF`=end, offset per row by the
-symmetric table at `$1F14` (`00 FD FB F8 … F0 … F8 FB FD`, i.e. an arc) — which the
-frame interrupt flushes to the sprite-attribute table at `$3F00`/`$3F80` (`$033F`)
-every vblank. That is the moving highlight that sweeps the letters.
+symmetric table at `$1F14` (`00 FD FB F8 … F0 … F8 FB FD`, i.e. a parabolic arc) —
+which the frame interrupt flushes to the sprite-attribute table at `$3F00`/`$3F80`
+(`$033F`) every vblank. **That sprite is Sonic**: he jumps across the screen along
+that arc, left to right, and the logo columns draw in behind him as he passes; he
+then jumps back to the left and comes to rest beside the finished logo. (The
+symmetric `$1F14` table is his jump trajectory.)
 
-So the logo is: an identity background grid revealed column-by-column, plus an
-animated sprite shine. Read back from the oracle's VRAM, the finished frame is:
+So the logo is: an identity background grid revealed column-by-column as Sonic jumps
+across it, then Sonic landing beside the completed logo. Read back from the oracle's
+VRAM, the finished frame is:
 
 ![SEGA logo — the name table the boot code built, column by column](rendered/sega.gg.png)
 
@@ -1336,9 +1340,10 @@ Pressing **Down** calls `$5335`, which is gated: it does nothing if Sonic is alr
 the rolling/ball flag** — and, *only if he is actually moving* (`($D404) ≠ 0`), fires the
 roll sound (`RST $28`, action `$06`). Standing still and pressing Down is therefore a crouch
 (the flag is set but there's no roll). Once bit 0 is set, the per-frame setup selects the
-ball physics constants above (low accel, high friction) and the update takes a rolling
-branch (`$4C92 → $55C7`), so a roll coasts and decays rather than accelerating — you steer
-a little but mostly carry momentum, just like the original.
+ball physics constants above (low accel, low friction) and the update takes a rolling
+branch (`$4C92 → $55C7`), so a roll holds its momentum and coasts rather than accelerating —
+you steer a little but mostly carry speed, rolling farther than a walking stop would slide,
+just like the original.
 
 ### Ground collision — the terrain sampler
 

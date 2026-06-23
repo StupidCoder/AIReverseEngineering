@@ -27,7 +27,7 @@ and adds Game-Boy-specific opcodes (`LDH`, `LD (C),A`, `LD (a16),A`, `STOP`, `SW
 **`cmd/dissm83`** CLI — has been built for this game (mirroring `tools/z80`); the
 hand decodes below were confirmed against it. All addresses are CPU addresses
 (16-bit, `$0000`–`$FFFF`) unless a *file offset* is called out; bytes are 8-bit.
-Parts I–II are complete; Parts III–V are stubbed.
+Parts I–III are complete; Parts IV–V are stubbed.
 
 ---
 
@@ -48,6 +48,12 @@ Parts I–II are complete; Parts III–V are stubbed.
   - [5. The interrupt handlers](#5-the-interrupt-handlers)
   - [6. The main loop (`$0226` → `$0296`)](#6-the-main-loop-0226--0296)
 - [Part III — Engine architecture](#part-iii--engine-architecture)
+  - [1. Two halves of a frame](#1-two-halves-of-a-frame)
+  - [2. The state dispatcher (`RST $28` over `$FFB3`)](#2-the-state-dispatcher-rst-28-over-ffb3)
+  - [3. The observed state flow](#3-the-observed-state-flow)
+  - [4. Input](#4-input)
+  - [5. The VBlank update chain](#5-the-vblank-update-chain)
+  - [6. RAM, HRAM and the bank shadows](#6-ram-hram-and-the-bank-shadows)
 - [Part IV — Graphics and data formats](#part-iv--graphics-and-data-formats)
 - [Part V — Game mechanics](#part-v--game-mechanics)
 - [Appendix A — Toolchain and reproduction](#appendix-a--toolchain-and-reproduction)
@@ -442,9 +448,129 @@ machine the dispatcher drives is the subject of Part III.
 
 # Part III — Engine architecture
 
-*Stubbed.* The main loop, the VBlank handler chain at `$0060` and the timer-driven
-banked sound engine, the WRAM layout, and the cross-bank dispatch (`RST` gateways +
-`LD ($2000),A` bank selects).
+Super Mario Land is a **frame-synchronised state machine**. Every video frame the main
+loop runs the game logic for one top-level *state*, the VBlank interrupt flushes the
+results to the screen, and a single byte decides which logic runs. This part describes
+that architecture — the loop's division of labour, the `RST $28` state dispatcher and
+the states it selects, how input reaches them, and the RAM and banking conventions the
+whole engine rests on. The control flow that the `RST $28` jump table hides from a
+static trace was recovered by running the ROM on the `tools/gameboy` oracle.
+
+## 1. Two halves of a frame
+
+The work of a frame is split between two contexts that the `$FF85` flag interlocks
+(Part II §6):
+
+- the **main-loop body** (`$0226`–`$0293`) runs while the screen is being drawn — it
+  reads input, advances game logic, and runs the current state handler;
+- the **VBlank interrupt** (`$0060`) runs in the ~1 ms vertical-blank window, which is
+  the only time VRAM and OAM may be touched, so *all drawing* — tile and map updates,
+  the scroll registers, and the sprite DMA — is deferred to it.
+
+So the logic may take up to a whole frame, and the rendering is always atomic: the body
+queues changes into RAM, `HALT`s, and the interrupt commits them. This is the standard
+Game Boy shape, and everything below hangs off it.
+
+## 2. The state dispatcher (`RST $28` over `$FFB3`)
+
+The current state is a single byte at **`$FFB3`**. Each frame the body calls `$02A3`:
+
+```
+02A3  F0 B3      LDH A,($FFB3)
+02A5  EF         RST $28
+02A6  < 62-entry word table >
+```
+
+`RST $28` is the jump-table gateway from Part I §5: it takes the index in `A`, reads the
+word at `table + A×2`, and jumps there — a compact **62-way switch with the table built
+into the call site**. The table occupies `$02A6`–`$0321` (62 little-endian addresses);
+the first handler (`$0322`) begins immediately after it. A handful of entries point into
+bank 1 (`$58xx`); the rest are bank-0 routines. The states span the whole game — boot
+completion, the title, the demo, per-level intros, gameplay, bonus rooms, game-over and
+the ending — selected by writing `$FFB3` and letting the next frame dispatch it.
+
+## 3. The observed state flow
+
+Because the dispatch is a computed jump, a static trace stops at it. Running the ROM on
+the oracle and logging `$FFB3` recovers the real progression — here booting to the
+title, then injecting a Start press to enter the game:
+
+| Frame | `$FFB3` | Handler | State |
+|---:|:---:|:---:|---|
+| 0–8 | `$00`→… | — | boot settling |
+| 9 | `$0E` | `$0322` | finish init — turn the LCD on, `EI` (Part II §6) |
+| 14 | `$0F` | `$04C3` | **title screen**, waiting for input |
+| 200 | `$11` | `$055F` | Start pressed — leave the title |
+| 211 | `$02` | `$06C5` | level load / fade-in |
+| 214 | `$00` | `$0610` | **gameplay** |
+
+The title handler `$04C3` reads the newly-pressed buttons from `$FF81` and branches on
+them (`BIT 3,B` is Start → start the game; it also ticks a demo-timer in `$FFB4` so the
+attract demo eventually starts on its own). The gameplay handler `$0610` is the
+in-level per-frame logic; it opens by calling subroutines and then pages in bank 3 for
+banked work — the bank-shadow pattern of §6.
+
+## 4. Input
+
+Once per frame the body calls a bank-1 routine that reads the joypad register `$FF00`
+with the usual two-pass scan (strobe the direction line, read the low nibble; strobe the
+button line, read again) and writes two HRAM bytes:
+
+- **`$FF80`** — the buttons **currently held** (active-high after the read inverts the
+  hardware's active-low lines);
+- **`$FF81`** — the buttons **newly pressed** this frame (held AND-NOT the previous
+  held state).
+
+State handlers test these flags rather than the hardware register, which is why the
+title polls `$FF81` (a Start *edge*, not a level) and why holding a button doesn't
+re-trigger one-shot actions. The bit order matches the joypad nibbles (A, B, Select,
+Start, then the d-pad).
+
+## 5. The VBlank update chain
+
+The VBlank handler (`$0060`) is the render half of the frame. After saving the
+registers it runs a **fixed chain** of update routines and the sprite upload:
+
+| Call | Role |
+|---|---|
+| `$224F`, `$1B7D`, `$1C2A` | commit queued tile / map / scroll updates to VRAM |
+| `$FFB6` (HRAM) | OAM DMA — upload the 40 sprites from the `$C000` shadow |
+| `$3F24`, `$3D61`, `$23F8` | further per-frame work (incl. the sound tick) |
+
+It then increments the frame counter `$FFAC`, does **state-dependent** work (for
+example, when `$FFB3 == $3A` it enables the window layer with `SET 5,($FF40)` — the
+fixed status bar), resets the scroll to `0,0`, sets the `$FF85` frame-done flag the body
+waits on, and `RETI`s. The mid-frame `STAT` interrupt (`$0095`) then re-introduces the
+playfield's horizontal scroll partway down the screen (Part II §5), so the status bar
+stays fixed while the level scrolls beneath it.
+
+## 6. RAM, HRAM and the bank shadows
+
+The engine keeps its hot state in HRAM (one-byte `LDH` access) and its buffers in WRAM.
+The locations this analysis pinned:
+
+| Location | Role |
+|---|---|
+| `$FFB3` | **game state** index (the `RST $28` selector) |
+| `$FFAC` | frame counter (incremented in VBlank) |
+| `$FF85` | VBlank "frame done" handshake flag |
+| `$FF80` / `$FF81` | joypad: buttons held / newly pressed |
+| `$FFA4` | playfield horizontal scroll (used by the `STAT` split) |
+| `$FFB4` | title/demo timer |
+| `$FFFD` | **current ROM bank** shadow (HRAM copy) |
+| `$FFE1` | scratch save of the bank across a cross-bank call |
+| `$C000` | 160-byte **OAM shadow** buffer — the DMA source |
+| `$C0A4` | current ROM bank shadow (WRAM copy) |
+| `$DA1D` | save / continue flag (checked at boot) |
+
+The last point is the engine's most pervasive convention. The `$4000`–`$7FFF` window is
+re-paged constantly to reach code and data scattered across banks 1–3, so the **current
+bank is shadowed** in `$FFFD` (and `$C0A4`). A routine that needs another bank saves the
+shadow, switches (`LD A,N ; LD ($2000),A ; LDH ($FFFD),A`), does its work, and restores —
+exactly the sequence the cold start, the gameplay handler `$0610` and the timer ISR all
+use. The bank-3 sound engine and the per-level data are always reached through it, which
+is why the disassembler's `-bank` option (and tracing one bank at a time) is the right
+model for the parts to come.
 
 # Part IV — Graphics and data formats
 

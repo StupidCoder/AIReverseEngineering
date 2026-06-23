@@ -58,8 +58,11 @@ To do:
       the `tools/gameboy` machine-model oracle (boots SML, populates VRAM). Part II
       done: cold-start at `$0185` (hardware/LCD/sound init, RAM clear, HRAM OAM-DMA
       routine, bank shadows), the VBlank/STAT/timer handlers, and the VBlank-synced
-      main loop `$0226→$0296` with the `RST $28` state dispatcher (LCD-on + `EI` at
-      `$0420`, oracle-pinned). Next (Part III): the state machine and engine
+      main loop `$0226→$0296`. Part III done: the engine is a frame-synced state
+      machine — `RST $28` over `$FFB3` through a 62-entry table at `$02A6`; oracle-traced
+      state flow (boot→title `$0F`→play `$00`); input `$FF80`/`$FF81`; the VBlank render
+      chain; the bank-shadow (`$FFFD`/`$C0A4`) convention. Next (Part IV): graphics/data
+      formats (2bpp tiles, maps, OAM, level data)
 * Tools
     * Disassembler should be better at segmenting functions; currently jumps within a function are treated as separate sub-routines; try to document parameters of sub-routines (which registers are used?)
 

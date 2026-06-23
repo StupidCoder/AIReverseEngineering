@@ -93,7 +93,14 @@ html, body {
   background-clip: text;
   color: transparent;
 }
-#titlecard p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+#titlecard p { margin: 4px auto 0; max-width: 540px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+#titlecard .cta {
+  margin-top: 16px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  letter-spacing: .04em;
+}
 .spinner {
   position: fixed;
   left: 50%; bottom: 40px;

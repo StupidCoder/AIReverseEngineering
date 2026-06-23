@@ -79,6 +79,7 @@ const hud = document.getElementById('hud');
 const panel = document.getElementById('panel');
 const gameList = document.getElementById('gameList');
 const assetList = document.getElementById('assetList');
+const assetLabel = document.getElementById('assetLabel');
 const titlecard = document.getElementById('titlecard');
 const spinner = document.getElementById('spinner');
 
@@ -173,6 +174,7 @@ function addLeaf(m, leaf, parent) {
 }
 
 function buildAssetList(m) {
+  assetLabel.style.display = ''; // reveal the Asset section once a game is chosen
   assetList.innerHTML = '';
   m.leaves = [];
   for (const entry of assetEntries(m)) {
@@ -509,12 +511,17 @@ new KeyboardCamera(() => {
 // ---- boot ----
 buildGameList();
 wireCrt();
+assetLabel.style.display = 'none';    // the Asset + Music sections stay hidden until a game
+updateMusicUI();                      // is picked (the splash is up meanwhile)
 panel.classList.add('open');          // start with the control window open (discoverable)
-// optional deep link: ?game=sonic&asset=3 (asset = leaf index in the list)
+// Keep the title card up until the user picks a game -- unless a ?game= deep link asks for
+// one (?game=sonic&asset=3, asset = leaf index in the list), in which case load it straight.
 const params = new URLSearchParams(location.search);
-const startGame = GAMES.find(g => g.id === params.get('game')) || GAMES[0];
+const startGame = GAMES.find(g => g.id === params.get('game'));
 const startAsset = parseInt(params.get('asset') ?? params.get('level'), 10);
-selectGame(startGame.id).then(() => {
-  const m = mounts.get(startGame.id);
-  if (m && Number.isInteger(startAsset) && startAsset > 0 && startAsset < m.leaves.length) selectAsset(m, startAsset);
-});
+if (startGame) {
+  selectGame(startGame.id).then(() => {
+    const m = mounts.get(startGame.id);
+    if (m && Number.isInteger(startAsset) && startAsset > 0 && startAsset < m.leaves.length) selectAsset(m, startAsset);
+  });
+}

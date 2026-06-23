@@ -302,8 +302,13 @@ function hideTitlecard() {
 }
 
 // ---- menu / panel ----
-document.getElementById('menuBtn').addEventListener('click', () => panel.classList.toggle('open'));
-document.getElementById('panelClose').addEventListener('click', () => panel.classList.remove('open'));
+const menuBtn = document.getElementById('menuBtn');
+function setMenu(open) {
+  panel.classList.toggle('open', open);
+  menuBtn.classList.toggle('hidden', open); // the panel grows out of the button; hide it while open
+}
+menuBtn.addEventListener('click', () => setMenu(true));
+document.getElementById('panelClose').addEventListener('click', () => setMenu(false));
 
 // make the floating window draggable by its title bar
 (function makeDraggable() {
@@ -513,7 +518,7 @@ buildGameList();
 wireCrt();
 assetLabel.style.display = 'none';    // the Asset + Music sections stay hidden until a game
 updateMusicUI();                      // is picked (the splash is up meanwhile)
-panel.classList.add('open');          // start with the control window open (discoverable)
+setMenu(true);                        // start with the control window open (discoverable)
 // Keep the title card up until the user picks a game -- unless a ?game= deep link asks for
 // one (?game=sonic&asset=3, asset = leaf index in the list), in which case load it straight.
 const params = new URLSearchParams(location.search);

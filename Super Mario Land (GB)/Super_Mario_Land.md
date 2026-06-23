@@ -683,8 +683,20 @@ blindly — the first mistake here — splices the bonus coin-rooms into the mid
 level; the main map is `P1[3..]` up to the `$FF` terminator.
 
 The level data lives in **banks 1–3**: each bank holds a `$4000` order-table-pointer
-table, and within it `ffe4` selects a level (the four worlds are split across the banks
-— World 1 is bank 2, `$4000[0/1/2]` = levels 1‑1/1‑2/1‑3 at `$6192`/`$61B7`/`$61DA`).
+table, and `ffe4` selects a level within it. The master loader at **`$0D64`** maps the
+world (the high nibble of the level id in `$FFB4`) to its bank:
+
+| World | Bank | Order tables (`$4000[0/1/2]`) | Tile source (`$0DE4` table) | Status |
+|---|---|---|---|---|
+| 1 | 2 | `$6192` / `$61B7` / `$61DA` | special (`$0D30`) | maps decoded & rendered ✓ |
+| 2 | 1 | `$55BB` / `$55E2` / `$5605` | bank 1 `$4032` | maps decoded ✓ (tiles pending) |
+| 3 | 3 | `$503F` / `$5074` / `$509B` | bank 3 `$4032` | maps decoded ✓ (tiles pending) |
+| 4 | 1 | *(not yet pinned)* | bank 1 `$47F2` | open |
+
+Worlds 2 and 4 share bank 1. Each world also loads a per-world **tile set** — the loader
+copies it from the bank-relative pointer in the `$0DE4`/`$0DEA` tables into VRAM — so a
+correct render of worlds 2–4 needs those tile sets pulled from ROM (the geometry decodes
+regardless of the tiles).
 
 A **column** is 16 tiles tall and built from runs, starting blank (the `$2C` space
 tile):

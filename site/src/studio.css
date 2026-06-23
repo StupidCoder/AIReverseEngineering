@@ -169,11 +169,13 @@ html, body {
 .panel-bar {
   display: flex;
   align-items: center;
-  padding: 9px;
+  justify-content: space-between;
+  padding: 8px 8px 4px 16px;
   cursor: grab;
   user-select: none;
 }
 .panel-bar.dragging { cursor: grabbing; }
+.panel-bar .group-label { margin: 0; }
 .panel-x {
   width: 32px; height: 32px;
   display: grid; place-content: center;
@@ -186,7 +188,7 @@ html, body {
 .panel-x svg { width: 16px; height: 16px; display: block; }
 
 .panel-body {
-  padding: 12px;
+  padding: 4px 12px 12px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;

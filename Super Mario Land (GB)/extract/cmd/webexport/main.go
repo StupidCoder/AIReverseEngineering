@@ -60,13 +60,22 @@ func main() {
 					cells[r*w+x] = int(col[r])
 				}
 			}
+			// Object/enemy placements (decoded from the ROM list at $401A[ffe4]).
+			objs := level.DecodeObjectsByID(data, id)
+			ojson := make([]map[string]any, len(objs))
+			for i, o := range objs {
+				ojson[i] = map[string]any{
+					"col": o.Col, "row": o.Row, "type": o.Type, "hard": o.Hard, "fineX": o.FineX,
+				}
+			}
 			name := fmt.Sprintf("%d-%d", world, lv)
 			file := "level-" + name + ".json"
 			writeJSON(filepath.Join(out, file), map[string]any{
 				"world": world, "level": lv,
 				"width": w, "height": 16,
-				"atlas": fmt.Sprintf("world%d.png", world),
-				"cells": cells,
+				"atlas":   fmt.Sprintf("world%d.png", world),
+				"cells":   cells,
+				"objects": ojson,
 			})
 			metas = append(metas, levelMeta{world, lv, name, file, w, 16})
 		}

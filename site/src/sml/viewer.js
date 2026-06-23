@@ -2,13 +2,21 @@
 // a row-major grid of 8×8 background tile indices (decoded by extract/level from the
 // ROM), drawn from the world's 256-tile atlas. Drag to pan, scroll to zoom. The
 // collision and object layers will hang off this later.
-import { Application, Container } from 'pixi.js';
+import { Application, Container, Graphics } from 'pixi.js';
 import { composeTilemap } from '../tilemap-compose.js';
 
 const DATA = 'public/sml/';
 const TILE = 8;
 const NATIVE_H = 144; // the Game Boy screen height — the default vertical framing
 const ZOOM_STEP = Math.pow(1.15, 0.25);
+
+// Object/enemy marker palette, grouped by the ROM's object-type id ($401A placement
+// list, decoded by extract/level). The exact per-type sprite isn't drawn (each type has
+// bespoke handler graphics); the colour bands keep related types visually distinct.
+const OBJ_COLORS = [
+  0xff4040, 0xff8c1a, 0xffd21a, 0x46e05a, 0x33c6ff, 0x8a6dff, 0xff5ed0, 0xc0c0c0,
+];
+const objColor = (type) => OBJ_COLORS[type % OBJ_COLORS.length];
 
 export class SMLViewer {
   constructor(viewportEl, hudEl) {
@@ -18,12 +26,19 @@ export class SMLViewer {
     this.world = new Container();
     this.zoom = 1; this.minZoom = 0.05; this.maxZoom = 16;
     this.layer = null;
+    this.objLayer = null;
     this.src = null;
     this._texMode = 'nearest';
+    this._showObjects = true;
   }
 
-  // No display layers yet (collision / objects come next).
-  setLayer() {}
+  // Display-layer toggle (studio adapter drives this). Only 'objects' for now.
+  setLayer(id, on) {
+    if (id === 'objects') {
+      this._showObjects = on;
+      if (this.objLayer) this.objLayer.visible = on;
+    }
+  }
 
   async init() {
     await this.app.init({ background: 0x0a0e16, antialias: false, resizeTo: this.el, preserveDrawingBuffer: true });
@@ -51,10 +66,29 @@ export class SMLViewer {
     this.layer = container;
     this.src = src;
     this.world.addChild(this.layer);
+    this._buildObjects(level.objects || []);
     this.levelW = level.width * TILE;
     this.levelH = level.height * TILE;
     this._fitDefault();
-    if (this.hud) this.hud.textContent = `${this.name} · ${level.width}×${level.height} tiles`;
+    const nObj = (level.objects || []).length;
+    if (this.hud) this.hud.textContent = `${this.name} · ${level.width}×${level.height} tiles · ${nObj} objects`;
+  }
+
+  // Draw the object/enemy placements as a marker overlay (tile-cell boxes, coloured by
+  // type; the second-quest "hard" flag gets a brighter outline).
+  _buildObjects(objects) {
+    if (this.objLayer) { this.world.removeChild(this.objLayer); this.objLayer.destroy({ children: true }); }
+    const g = new Graphics();
+    for (const o of objects) {
+      const x = o.col * TILE, y = o.row * TILE;
+      g.rect(x + 0.5, y + 0.5, TILE - 1, TILE - 1);
+      g.fill({ color: objColor(o.type), alpha: 0.55 });
+      g.rect(x + 0.5, y + 0.5, TILE - 1, TILE - 1);
+      g.stroke({ width: o.hard ? 1 : 0.5, color: o.hard ? 0xffffff : 0x101010, alpha: 0.9 });
+    }
+    this.objLayer = g;
+    this.objLayer.visible = this._showObjects;
+    this.world.addChild(this.objLayer);
   }
 
   // --- camera (shared pattern with the Marble/Turrican viewers) -----------

@@ -79,6 +79,7 @@ const GAMES = [
     make: (V, el, hud) => new V(el, hud),
     list: async (v) => await v.init(), // returns the 12 level metas
     show: (v, lvl, i) => v.loadLevel(lvl),
+    layers: [{ id: 'objects', label: 'Objects & enemies', default: true }],
     // world -> level accordion: "2-1" -> { World 2, 2-1 }
     group: (lvl) => ({ section: `World ${lvl.world}`, label: lvl.name }),
   },

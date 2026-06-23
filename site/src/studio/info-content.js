@@ -434,7 +434,7 @@ AmigaDOS-conformant thing on it. There is no directory: the program, graphics an
 private layout addressed by absolute byte offset through <code>trackdisk.device</code>, never through
 files. The disk falls into three regions — the boot block (blocks 0–1), a first-stage loader in plain
 68000 code (blocks 2–21), and from block 22 to the end the <strong>crunched main part</strong>: the
-entire game, compressed, and essentially incompressible at the byte level.</p>
+entire game — program, graphics and levels — stored compressed.</p>
 
 <h2>The boot block</h2>
 <p>The boot block is a complete sector loader. The ROM enters it with the boot device's I/O request
@@ -462,7 +462,8 @@ output of <strong>three compressors applied in series</strong>, so unpacking run
 result to the top of memory and decoding it back down. Two of the three are byte-dispatched: they build a
 256-entry jump table whose default handler copies a literal and whose few escape values trigger
 match/run handlers, and the loop <strong>writes each control byte to the background-colour register</strong>
-as it runs — the flickering border bars you see while a cracked game "decrunches". The result is a
+(<code>$DFF180</code>) as it runs — the flickering colour bars across the screen that a cracked game
+shows while it "decrunches". The result is a
 214,400-byte image at <code>$43880</code>, with the game entered partway into it at <code>$5F500</code>.
 The tail then applies the trainer (overwriting two longwords with branches into the cheat code) and jumps
 into the decrunched game.</p>
@@ -640,9 +641,10 @@ placement entry to a drawn enemy is <strong>type → handler → sprite</strong>
 
 <h2>Starting position</h2>
 <p>Each scene also records its initial camera tile and the player's on-screen offset, so the player spawns
-at camera-plus-offset — the same start the Amiga shows. This is the point the viewer frames each scene on.
-Orbiting the player throughout is Turrican's signature <strong>spinning energy weapon</strong>, a shared
-sprite of 32 rotation frames and a short burst.</p>
+at camera-plus-offset — the scene's intended starting position, which is the point the viewer frames each
+scene on. Turrican's signature weapon is the <strong>spinning energy beam</strong>: holding the fire button
+deploys it, and while it is active the player can sweep it through its 32 rotation angles but cannot move,
+before it releases in a short burst.</p>
 `,
   },
   marble: {},

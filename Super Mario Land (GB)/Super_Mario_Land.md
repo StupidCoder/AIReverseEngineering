@@ -798,8 +798,56 @@ the Studio viewer does the same from a per-world object-icon atlas:
 
 ![Level 1-1 with decoded objects](rendered/level-1-1-objects.png)
 
-*Still stubbed for Part V:* Mario's physics, the full object-script semantics (the other
-`$F1`–`$FF` commands: velocity, gravity, collision response), scoring and progression.
+## 3. The object-script language
+
+Every object type runs a little bytecode program — its **script** — found through the
+table at `$3495` and interpreted by `$26AC`. The script PC is `$FFC4`; the interpreter
+reads one byte, acts on it, and (for most opcodes) advances. A byte's *high nibble*
+decides what it is: `$00`–`$DF` are movement, `$E0`–`$EF` set a duration, and `$F0`–`$FF`
+are explicit commands (each `$F0`–`$FE` takes one argument byte).
+
+The two opening Goombas of 1‑1 (type `$00`) are the whole language in miniature:
+
+```
+$F8 $00   set frame $00
+$F4 $02   set the sub-pixel step
+$01       move (velocity $01) for…
+$E2       …2 more frames
+$F8 $01   set frame $01  (the second walk pose)
+$E3       coast 3 frames
+$FF       restart  ->  a two-frame walk cycle, forever
+```
+
+The full opcode set:
+
+| Opcode | Arg | Meaning |
+|---|---|---|
+| `$00`–`$DF` | — | **Move**: set velocity to this byte (low nibble = X speed, high nibble = Y/step), applied in the object's current facing; runs one frame (then a `$Ex` can extend it). |
+| `$E0`–`$EF` | — | **Coast**: keep the current velocity for `op & $0F` more frames before the next script byte is read (`$FFC8` duration counter). |
+| `$F0` | xx | **Facing/flip** (`$FFC5`): per the bits of xx — bit7 auto-face the player horizontally, bit6 vertically, bits 2-3 toggle flip, bits 4-5 force H/V flip. |
+| `$F1` | tt | **Spawn** a child object of type `tt`. |
+| `$F2` | xx | Set the object's **behaviour flags** (`$FFC7` — e.g. gravity/solidity bits read by `$266D`). |
+| `$F3` | tt | **Become type `tt`**: replace own type, re-init, and reload that type's script (`tt = $FF` despawns the object). |
+| `$F4` | xx | Set the **sub-pixel movement accumulator** (`$FFC9`). |
+| `$F5` | tt | **Random spawn**: 1-in-4 (DIV `$FF04 & 3 == 0`) spawn a child of type `tt`, else continue. |
+| `$F6` | xx | **Wait for the player**: re-run this command (stall) until the player is within/past a horizontal window; `xx` picks the side. |
+| `$F7` | — | Spawn the fixed **projectile object** (type `$27`) in slot 0, then end this frame. |
+| `$F8` | ff | **Set animation frame** (`$FFC6 = ff`) — the metasprite §2 draws. |
+| `$F9` | xx | Queue a **sound effect** (`$DFF8 = xx`). |
+| `$FA` | xx | Queue a **sound effect** (`$DFE0 = xx`). |
+| `$FB` | xx | **Proximity loop**: if the player is closer than `xx` px horizontally, restart the script. |
+| `$FC` | yy | **Reposition**: set Y = `yy`, X = `$70` (screen centre). |
+| `$FD` | xx | Queue a **sound effect** (`$DFE8 = xx`). |
+| `$FE` | — | No-op (continue). |
+| `$FF` | — | **Restart** the script from the top (the animation loop). |
+
+`extract/cmd/objscript -type NN` disassembles any type's script with these mnemonics. With
+the language understood, the moving platforms and lifts read naturally too — type `$0A` (the
+1‑1 end lift) is `set frame $12; face right; move; coast ~60 frames; face left; coast ~60;
+restart` — a slow shuttle back and forth.
+
+*Still stubbed for Part V:* Mario's own physics, the per-opcode movement maths (`$266D`/
+`$2870` velocity→position, gravity), collision/score handling, and progression.
 
 ---
 

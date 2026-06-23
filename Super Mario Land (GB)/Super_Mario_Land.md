@@ -791,7 +791,7 @@ script through the table at **`$3495`** (indexed by type id) and interprets it (
 The script bytecode includes movement, waits, child spawns — and command **`$F8 xx` sets the
 animation frame**. So a type's base frame is simply the first `$F8` in its script, and every
 object type can be mapped without guessing: `level.TypeBaseFrame` reimplements that scan.
-This covers all ~74 object types and matches the frames observed by playing the game
+This covers all 99 object types (§5) and matches the frames observed by playing the game
 (`extract/cmd/objsprites`, which tallies `slot+0`→`slot+6` in the oracle — a cross-check,
 not the source). `cmd/levelmap -id NN` overlays each placement with its real metasprite, and
 the Studio viewer does the same from a per-world object-icon atlas:
@@ -890,6 +890,123 @@ Ten of the twelve levels carry two pipes (to bonus rooms 1 and 2); the auto-scro
 stages 1‑2, 2‑3 and 4‑3 have none. (The sibling table `$6536`, read by the `$80`/`$5F`-tile
 handler `$2318`, is the same idea for the breakable/`?`-block contents — not pipes; an earlier
 note here had `$651C` and `$6536` mislabelled.)
+
+## 5. The object cast
+
+With the script language (§3) decoded, every object's behaviour falls out of its program.
+The table at `$3495` holds **99 types** (`$00`–`$62`); `extract/cmd/objscript -type NN`
+prints any one. The descriptions below are *read off the scripts* — their animation frames,
+movement, and `spawn`/`become` links — cross-referenced with the worlds each type is actually
+placed in (its `$401A` appearances). Exact retail enemy names aren't all certain, so these
+describe behaviour; **Frame** is the base metasprite (§2), **Worlds** lists where the type is
+placed directly (blank = only spawned by another object — a projectile, item, or sub-state).
+
+| Type | Frame | Worlds | Behaviour |
+|---|---|---|---|
+| `$00` | `$00` | 1 2 4 | Goomba-like walker — waddles forward, two-frame gait. |
+| `$01` | `$02` | — | Brief pop/poof, then despawns (a defeated-enemy puff). |
+| `$02` | `$04` | 1-4 | Ambusher — waits for Mario (`$F6`), lunges out and back. |
+| `$03` | `$1F` | 3 | Stationary thrower — periodically lobs a `$47` arcing shot. |
+| `$04` | `$06` | 1-4 | Walker — forward, two-frame (a beetle/second basic enemy). |
+| `$05` | `$08` | 1 | Bomb — pulses, then detonates into explosion `$46`. |
+| `$06` | `$65` | 4 | Small hopper — shuffles back and forth. |
+| `$07` | `$68` | — | Launch state; settles into `$13`. |
+| `$08` | `$48` | 1 | Spitter — fixed, fires `$1B` projectiles (sfx). |
+| `$09` | `$56` | 4 | Flyer/bomber — hovers, drops `$51` (sfx). |
+| `$0A` | `$12` | 1-4 | Moving platform — vertical (up/down). |
+| `$0B` | `$12` | 1-4 | Moving platform — horizontal (left/right). |
+| `$0C` | `$13` | 1 4 | Sliding/sinking platform — sits, then drifts a long way. |
+| `$0D` | `$03` | — | Toss arc — the up-and-over path items take out of a block. |
+| `$0E` | `$28` | 1 3 | Leaper — bounces in an arc (frames `$28`/`$29`). |
+| `$0F` | `$2C` | — | Spawn-in → `$15`. |
+| `$10` | `$42` | 2 | Hopper — jumps around (frames `$42`/`$43`). |
+| `$11` | `$03` | — | Item out of a block (frame `$03`) → arcs via `$0D`. |
+| `$12` | `$09` | — | Item out of a block (frame `$09`) → arcs via `$0D`. |
+| `$13` | `$68` | — | Stationary object/hazard. |
+| `$14` | `$68` | — | Projectile — travels, stops, vanishes. |
+| `$15` | `$2D` | — | Item (sfx, frame `$2D`) → arc `$0D`. |
+| `$16` | `$32` | 2 | Shooter — walks, fires `$17`, cools down as `$18`. |
+| `$17` | `$3E` | — | Projectile — bounces around, then despawns. |
+| `$18` | `$40` | — | Cooldown of `$16` — pauses, then back to `$16`. |
+| `$19` | `$37` | — | Item (sfx) → arc `$0D`. |
+| `$1A` | `$4F` | 2 | Spitter — moves, fires `$1F` (a fire-spitting swimmer). |
+| `$1B` | `$1F` | — | Launched shot → flight form `$1E`. |
+| `$1C` | `$36` | — | Spawn-in → `$19`. |
+| `$1D` | `$2A` | 2 | Drifter/swimmer — bobs along (frames `$2A`/`$2B`). |
+| `$1E` | `$4A` | — | Fireball/missile cruise (the `$1B` flight form). |
+| `$1F` | `$1F` | — | Fast shot → `$58`. |
+| `$20` | `$28` | 2 | Bobbing enemy — rises and falls (frames `$28`/`$29`). |
+| `$21` | `$14` | — | Thrower — tosses two `$22`, then despawns. |
+| `$22` | `$45` | — | Small projectile/creature — drifts (frames `$45`/`$46`). |
+| `$23` | `$45` | — | Falling projectile — sinks, then vanishes. |
+| `$24` | `$2A` | 2 | Hopping shooter — hops, fires `$23` (octopus-like). |
+| `$25` | `$32` | 3 | Charger — waits for Mario, then runs a long distance. |
+| `$26` | `$1F` | — | Null object — despawns immediately. |
+| `$27` | `$14` | — | Blast/spark — flickers, then vanishes (the `$F7` shot). |
+| `$28` | `$16` | — | Hopper launch (leap) → walk state `$29`. |
+| `$29` | `$16` | — | Walker — forward (walk form of `$28`). |
+| `$2A` | `$17` | — | Hopper launch → walk state `$2B`. |
+| `$2B` | `$17` | — | Walker — forward (walk form of `$2A`). |
+| `$2C` | `$19` | — | Leaper launch (up) → `$34`. |
+| `$2D` | `$1A` | — | Launch (frames `$1A`/`$1B`) → `$2E`. |
+| `$2E` | `$1A` | — | Hoverer/swimmer — bobs (frames `$1A`/`$1B`). |
+| `$2F` | `$2C` | 2 | Segment-layer — crawls, lays `$30` segments → `$30`. |
+| `$30` | `$2C` | — | Crawler body — long slither (frames `$2C`/`$2E`), then gone. |
+| `$31` | `$2A` | 3 | Fast skitterer — zips along (a spider-like). |
+| `$32` | `$54` | 3 | Cannon/plant — fires `$33` (frames `$54`/`$55`). |
+| `$33` | `$1F` | — | Fast shot → arc `$47`. |
+| `$34` | `$19` | 2 | Leaper in flight — arcs forward (airborne `$2C`). |
+| `$35` | `$20` | 3 | Drop hazard — waits for Mario, then descends/rises. |
+| `$36` | `$21` | 1-4 | Stationary hazard/decoration. |
+| `$37` | `$21` | — | Slow mover — waits, then creeps horizontally. |
+| `$38` | `$12` | 3 4 | Diagonal bouncer (frames `$12`). |
+| `$39` | `$12` | 3 4 | Diagonal bouncer — mirror of `$38`. |
+| `$3A` | `$22` | 3 4 | Vertical patroller (frame `$22`). |
+| `$3B` | `$22` | 3 | Horizontal patroller (frame `$22`). |
+| `$3C` | `$23` | 3 | Complex hopper/flapper (frames `$23`–`$25`). |
+| `$3D` | `$26` | — | Spawn-in → `$3E`. |
+| `$3E` | `$27` | — | Item (sfx) → arc `$0D`. |
+| `$3F` | `$2A` | 1 4 | Spitter — fixed, fires `$23` (sfx). |
+| `$40` | `$2E` | — | Spawn-in → `$41`. |
+| `$41` | `$2F` | — | Item (sfx) → arc `$0D`. |
+| `$42` | `$30` | 1 | Flyer — flaps (frames `$30`/`$31`), drops `$45`. |
+| `$43` | `$34` | — | Spawn-in → `$44`. |
+| `$44` | `$35` | — | Item (sfx) → arc `$0D`. |
+| `$45` | `$44` | — | Dropped projectile — falls (the thing `$42` drops). |
+| `$46` | `$0F` | — | Explosion — flickers (sfx), then vanishes. |
+| `$47` | `$31` | 3 | Lobbed projectile — arcs through the air. |
+| `$48` | `$4C` | 2 | Diagonal flyer/drifter (frames `$4C`/`$4D`). |
+| `$49` | `$51` | 3 4 | Slow floater — bobs along. |
+| `$4A` | `$1F` | — | Fast shot → `$4B`. |
+| `$4B` | `$52` | 4 | Projectile cruise (frames `$52`/`$53`). |
+| `$4C` | `$21` | — | Stationary hazard (frame `$21`). |
+| `$4D` | `$21` | — | Slow advancer → `$4E`. |
+| `$4E` | `$21` | — | Drifting hazard (frame `$21`). |
+| `$4F` | `$14` | — | Blast (sfx) that spawns a `$27`. |
+| `$50` | `$1F` | — | Fast shot → `$5A`. |
+| `$51` | `$46` | — | Arcing bomb/shot (dropped by `$09`). |
+| `$52` | `$31` | 4 | Shooter — creeps, then fires `$50` (sfx). |
+| `$53` | `$33` | 4 | Bouncer/charger — approaches and bounds along (boss bullet). |
+| `$54` | `$45` | 4 | Parabola flyer (frame `$45`) — a missile/shot. |
+| `$55` | `$5F` | 4 | Flyer — hovers and drifts (frames `$5F`/`$60`). |
+| `$56` | `$28` | 4 | Leaper — arcs (variant of `$0E`). |
+| `$57` | `$2C` | — | Spawn-in → `$56`. |
+| `$58` | `$45` | — | Projectile cruise (frames `$45`/`$46`). |
+| `$59` | `$61` | 4 | Spinner — cycles frames `$61`/`$62` while moving. |
+| `$5A` | `$52` | — | Diagonal projectile (frames `$52`/`$53`). |
+| `$5B` | `$1F` | — | Launch → `$60` (boss-fight object). |
+| `$5C` | `$45` | — | Multi-shot — fires `$5F` and `$5E`, then `$5D` (boss fan). |
+| `$5D` | `$45` | — | Boss projectile (angled cruise). |
+| `$5E` | `$45` | — | Boss projectile (straight). |
+| `$5F` | `$45` | — | Boss projectile (angled). |
+| `$60` | `$63` | 4 | Boss spawner — repeatedly emits `$5C`. |
+| `$61` | `$66` | 4 | Boss launcher (Tatanga-like) — animates, spawns `$53`. |
+| `$62` | `$14` | — | Blast/explosion (the `$F7`-style projectile). |
+
+The world-4 cluster `$50`–`$62` is the **Tatanga boss fight**: `$61` animates and spits `$53`
+bullets, while `$60` fans `$5C` → `$5E`/`$5F`/`$5D` spreads. Note how heavily the engine reuses
+small parts — the `become`/`spawn` chains build big enemies from a launch state, a walk state
+and a projectile, and the eight item types all share the one `$0D` toss arc.
 
 *Still stubbed for Part V:* Mario's own physics, the per-opcode movement maths (`$266D`/
 `$2870` velocity→position, gravity), collision/score handling, and progression.

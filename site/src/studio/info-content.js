@@ -1330,11 +1330,14 @@ contiguous.</p>
 
 <h2>Legal status and bounty</h2>
 <p>One byte holds your standing with the law, shown as <strong>Clean</strong>, <strong>Offender</strong> or
-<strong>Fugitive</strong>. Every ship carries an offence value that is OR-ed into the byte when you destroy it,
-so offences ratchet upward; lawful ships carry the largest value, so shooting a police ship turns a clean pilot
-into a Fugitive in a single act. Each hyperspace jump halves the byte, so minor offences cool off over a few
-quiet jumps. It both follows your behaviour and drives the game: a dirty record spawns more police, and past a
-threshold ships engage you on sight.</p>
+<strong>Fugitive</strong>. The byte is not a tidy counter: every ship carries an offence value, and destroying
+a ship <strong>bitwise-ORs</strong> that value into the byte rather than adding it. Merging bits means the byte
+can only gain set bits on a kill, so your standing ratchets upward and never partly cools from a single act;
+lawful ships carry the largest value, so shooting a police ship sets enough high bits to turn a clean pilot into
+a Fugitive at once. The same byte is then read as a plain number for the Clean / Offender / Fugitive thresholds.
+It comes back down on travel: each hyperspace jump shifts the byte one bit to the right — a literal halving — so
+minor offences fade over a few quiet jumps while a serious one lingers. It both follows your behaviour and
+drives the game: a dirty record spawns more police, and past a threshold ships engage you on sight.</p>
 
 <h2>Combat rating, and winning</h2>
 <p>Separately, every kill pays a bounty into a cumulative score that drives a nine-step <strong>combat
@@ -1346,7 +1349,8 @@ commander. Elite is deliberately open-ended; "Elite" is the nominal goal, but re
 label.</p>
 
 <h2>Docking</h2>
-<p>Docking is the one piece of flight the game does not do for you. A legal dock requires four things at once:
+<p>Flight is entirely manual — but docking is the maneuver that turns that into a test of nerve, and the only
+one you can buy a machine to fly for you. A legal dock requires four things at once:
 approaching the station's <strong>correct face</strong>, pointing <strong>nearly straight in</strong>,
 <strong>laterally lined up</strong> with the slot, and <strong>rolled</strong> to fit the rectangular opening —
 all while slow enough that the contact stays under the fatal threshold. Because the station continuously

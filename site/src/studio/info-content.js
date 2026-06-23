@@ -940,7 +940,219 @@ releases in a short burst. Its sprite is one of the shared resident sprites — 
 plus burst — rather than a per-world enemy graphic, so it is available in every world.</p>
 `,
   },
-  marble: {},
+  marble: {
+    loader: `
+<div class="info-eyebrow">Marble Madness · Image &amp; Loader</div>
+<p>Marble Madness ships on a single Amiga floppy that boots through entirely <strong>stock AmigaDOS</strong> —
+where a C64 tape hides a custom fastloader, here the disk is an ordinary bootable filesystem. The protection
+is elsewhere: the main program is encrypted, and a from-scratch track loader reads it off the platter by
+physical position.</p>
+
+<h2>The disk and filesystem</h2>
+<p>An ADF is a flat dump of the floppy's 1760 blocks of 512 bytes. The disk is a normal AmigaDOS
+<strong>OFS volume</strong> named <code>MarbleMadness!</code>, with a standard boot block, a root block and
+three directories holding 50 files. Almost every file is an Amiga loadable <strong>hunk object</strong> — a
+relocatable code/data segment AmigaDOS brings in with <code>LoadSeg</code> — so the game is not one binary
+but a launcher, a main program, and a large set of per-course overlays loaded on demand. Two files are
+exceptions: the main program and a helper named <code>xxx</code> are stored <strong>encrypted</strong>,
+near-random at the byte level, and decrypted at load.</p>
+
+<h2>Booting to Workbench</h2>
+<p>The boot block is the unmodified AmigaDOS boot code: it finds the resident <code>dos.library</code> and
+hands off to it. DOS runs a two-line startup script — <code>LoadWb</code> then <code>endcli</code> — that
+brings up Workbench (the desktop is a service of the Kickstart ROM; the disk only bundles
+<code>icon.library</code> and its icon files so it can show its own window on a bare machine). The player
+launches the game by double-clicking the marble icon, which <code>LoadSeg</code>s and runs the launcher.</p>
+
+<h2>The launcher and the encrypted program</h2>
+<p>The launcher is a small compiled program that, finding it was started from Workbench rather than a shell,
+displays the splash screen and brings the game in. Because the main program is encrypted, that load does not
+go through plain <code>LoadSeg</code> — it goes through a small decryptor named <code>zzz</code>, a custom
+<strong>decrypting <code>LoadSeg</code> replacement</strong>. It reads the encrypted file, undoes a keystream
+XOR, relocates the hunks, and hands the segments back. The cipher is keyed in part to machine state, so the
+decryption is bound to a particular Kickstart and a booted process, not just the disk (see Game Engine).</p>
+
+<h2>A from-scratch track loader</h2>
+<p>The other encrypted file, <code>xxx</code>, is decrypted first and run as code: it is a custom floppy
+<strong>track loader</strong>. It reads neither through AmigaDOS nor through <code>trackdisk.device</code>'s
+normal commands — it drives the floppy hardware directly: the CIA drive-control and status ports to seek and
+check readiness, and Paula's disk DMA to pull a whole raw MFM track in one burst, then MFM-decode and
+validate each sector in the CPU. It reads the main program by <strong>physical track and sector position,
+not by name</strong> — the filename never appears in the launcher at all. The program still exists as a real
+DOS file (so the disk stays a valid bootable volume and its blocks are laid down contiguously), but it is read
+by location for speed and as a copy-protection hook: a from-scratch reader can demand non-standard formatting
+and bypass file-level tampering.</p>
+`,
+    engine: `
+<div class="info-eyebrow">Marble Madness · Game Engine</div>
+<p>Reaching the game's own code means getting through the encryption and the copy protection wrapped around it.
+Once decrypted, the program is a stripped Amiga hunk object — almost entirely code — that drives the hardware
+directly and runs as two cooperating tasks.</p>
+
+<h2>The multi-stage load</h2>
+<p>The launcher loads the game in stages over a shared control block: it decrypts the track loader
+<code>xxx</code> with the decryptor <code>zzz</code> (with an empty key), runs <code>xxx</code> to read the
+175&nbsp;KB main program off the disk by physical position, then mutates the key and runs <code>zzz</code>
+again to decrypt the program. The track loader is the fast raw reader; the decryptor is the cipher; they
+cooperate through the shared block, and the key changes between the two decrypt passes.</p>
+
+<h2>The cipher</h2>
+<p>The on-disk format is a standard AmigaDOS hunk with <strong>selective encryption</strong>: the hunk-header
+magic, the block-type markers and the symbol names are left in plaintext, so the file's structure stays
+legible, while the hunk sizes, relocation tables and code/data bodies are XORed with a keystream — one
+keystream longword per stored longword. There is no compression; the bodies are full size and the high entropy
+is the cipher. The keystream is an additive <strong>lagged-Fibonacci generator</strong> over a 55-entry table
+built from a fixed seed by a multiply-hash.</p>
+
+<h2>The copy protection</h2>
+<p>The teeth are in the key setup. Before the keystream runs, the table is perturbed by folding in two pieces of
+<strong>live machine state</strong>: bytes from the host's CPU exception and TRAP vector table in low memory,
+and the running task's exception- and trap-handler pointers. Because those entries feed the generator, the
+keystream past its first stretch depends on the vector table and the task — which is why the file's structure
+decodes regardless (its keystream is drawn before the perturbed entries propagate) while the bodies scramble.
+On Kickstart 1.x every exception vector points at the same ROM handler, so the relevant byte is just the ROM
+page, tying the protection to the 1.x ROM layout; the handler pointers only exist once AmigaDOS has constructed
+the launcher's process, so the full key is not present until the game is actually booting on the right vintage
+of machine. This is why such titles are Kickstart-version-locked: the decryption key is, in effect, the ROM
+page.</p>
+
+<h2>Inside the program</h2>
+<p>Decrypted, the main program is a stripped hunk load file — not merged into a few segments but <strong>347
+hunks</strong> (about 115 object modules), each keeping its own code/data/BSS triple, with no symbol or debug
+blocks. It is mostly code: the bitmaps and samples live in separate per-course files, so the program carries no
+pixel or sample data — only the engine that drives them, and it drives them at the metal, writing the full
+blitter register block and <code>DMACON</code> directly and reading the trackball ports. The small data payload
+is the UI text (the course banners, "GAME OVER", the player labels), the per-course level filenames it loads at
+run time, and a few lookup tables.</p>
+
+<h2>Two cooperating tasks</h2>
+<p>The running game is two contexts that talk over exec messages: a <strong>main thread</strong> (the Intuition
+front-end and the game-state machine) and a separate vblank-synced <strong>"Framer" task</strong> that owns the
+display refresh. There is no single linear loop — the gameplay update and the display refresh run in different
+contexts. The Framer task wakes once per vertical blank, animates the cycling colours, and rebuilds the
+copper/display list when a fresh world frame is ready; the main thread runs the state machine (set up the
+course, then play), which each frame integrates every object and draws it.</p>
+`,
+    graphics: `
+<div class="info-eyebrow">Marble Madness · Graphics</div>
+<p>Marble Madness's graphics are <strong>blitted, not sprited</strong>: the program draws everything itself from
+per-course banks of tiles and obstacle cells, scrolling a single tall course vertically. The boot screen uses
+standard Amiga formats; the per-course art uses one shared RLE codec.</p>
+
+<h2>The splash screen</h2>
+<p>The title screen is a standard IFF ILBM bitmap — 320&times;200, four bitplanes (16 colours), its pixels
+<strong>ByteRun1 (PackBits)</strong> compressed, with a palette and four colour-cycling ranges so parts of the
+logo animate. A small boot-screen overlay loads the image and puts it up while the game streams in.</p>
+
+<h2>Tiles</h2>
+<p>Each course's floor, walls and railings — everything the marble rolls on — are a <strong>tile map</strong> in
+its own file, a single PackBits stream. Unpacked, it holds a 16-colour palette, four bitplanes of tile graphics,
+and a tilemap. Tiles are 8&times;8 pixels in four bitplanes; the tilemap is a row-major stream of tile-index
+words, a constant <strong>36 tiles (288 px) wide</strong> — Marble Madness scrolls only vertically, so the width
+is fixed and the height varies per course, from Practice's 75 rows up to Ultimate's 198. Placing each tile by
+index reproduces the whole course. Four palette slots are not fixed colours but are driven at runtime by
+colour-cyclers — two ramps for the hazard/lava pulse and the ice shimmer — so a static palette can't show them.
+(The tilemap is only the visual surface; the physics rolls the marble on a separate height field.)</p>
+
+<h2>Obstacle cells</h2>
+<p>Each course also carries a bank of <strong>obstacle sprites</strong> — the goal flag, moving barriers,
+drawbridges and the like — also one PackBits stream, holding a count and a table of cell descriptors over
+contiguous planar pixel data. Each cell is one complete animation frame, in one of two layouts chosen by a type
+byte: "stored" free sprites (the flag, the marble, the creatures) keep their bitplanes row-interleaved and are
+drawn with a per-object colour ramp, while "composited" scenery is sequential plane blocks OR-composited into the
+playfield. The moving creatures and the marble itself live in separate banks that share this container.</p>
+
+<h2>The course layout</h2>
+<p>A third per-course file holds everything else a course needs — not just object positions but all of its
+gameplay data. It is a plain hunk module loaded at course init, opening with a header of relocated pointers the
+engine fans out to the actor-system globals: the static slope field, a placement/feature table, the coarse-zone
+partition, the animation scripts, the creature spawn lists and the actor list. (Despite the suffix on some
+filenames, these are not music — the audio is in separate sound banks.)</p>
+`,
+    gameplay: `
+<div class="info-eyebrow">Marble Madness · Gameplay</div>
+<p>The marble is a real <strong>3-D simulation</strong> projected to the isometric view — rolled by a relative
+trackball over a height-mapped course, with a state machine governing rolling, falling, landing and the dizzy
+spin.</p>
+
+<h2>The trackball and the marble</h2>
+<p>Input is the trackball's quadrature counters, per player — a <strong>relative</strong> device, so spinning
+faster pushes harder — accumulated into a roll-force. The marble is not a 2-D sprite but a <strong>point
+mass</strong> with velocity and position in three dimensions; each frame the engine integrates position by
+velocity and then iso-projects to the screen, so the isometric look is a projection of a real 3-D model. Exactly
+three things write the marble's velocity: the scaled trackball force; friction and an octagonal speed cap
+(clamped per surface — that selector is the ice/grating friction); and the surface force from the terrain.</p>
+
+<h2>The course as a height map</h2>
+<p>The terrain is two independent systems. The course itself is a <strong>static slope field</strong>: a list of
+region records, each a flat isometric-tile rectangle carrying a base height, a direction and a one-dimensional
+profile, rasterised at load into a <strong>corner-height mesh</strong> — a grid of cells each holding the four
+corner heights of one tile. All the regions compose into one continuous 2.5-D height map, and the triangular
+slope faces you see are emergent: a quad with non-coplanar corners is two triangles. Each frame the engine
+samples the four mesh cells around the marble, picks which of the tile's two triangles it is over, computes the
+surface gradient, and accelerates the marble down it — except on the <strong>Aerial</strong> course, which adds
+instead of subtracts, giving its inverted low gravity. The walls fall out of the same mesh: a height step between
+neighbouring cells becomes a side the velocity is clamped against. One height map drives both the roll and the
+walls, with no per-cell terrain codes.</p>
+
+<h2>Scripted regions</h2>
+<p>A few moving or interactive surfaces — seesaws, the rail-guarded holes, the start and finish triggers, the
+ball-catcher — are a separate system: a per-course list of regions whose reference point is emitted by a small
+<strong>bytecode animation script</strong> (keyframes, a move opcode for a sliding slope or seesaw, sound
+triggers). Each frame the engine matches a region to the marble's tile and dispatches on its terrain code: slope
+codes push the marble toward the reference point, trigger codes raise wall flags that snap and bounce it.</p>
+
+<h2>The marble's state machine</h2>
+<p>All of this runs under a <strong>twelve-state machine</strong> on the marble. Three states are
+player-controllable — they run input and physics — while the rest are animation or transition states that only
+redraw the marble: rolling, landing after a drop, an edge reaction, falling and settling onto a surface, an
+object-bump on contact with an enemy, the course-intro run, the spawn, and the hole/region capture. A notable one
+is <strong>dizzy</strong>: a survivable hard hit (by another marble) or fall is <em>not</em> death — it sets a
+stun flag, and the rolling state hands off to a swirl-spin that plays out and returns to rolling. Death is
+running off the edge onto no terrain at all, or the hazards and the marble-munchers.</p>
+
+<h2>Actors</h2>
+<p>The moving things — the goal flag, the enemies, the munchers — are <strong>actors</strong> fed by the
+course-layout data. Each frame the engine walks an array of actor records, each holding a sprite-cell pointer,
+an animation-script pointer (a cell list advanced when a frame timer expires, with randomised durations) and a
+position. There are <strong>no hardware sprites</strong> — everything is blitted, including the two-blit
+wraparound across the course's vertical scroll seam.</p>
+`,
+    music: `
+<div class="info-eyebrow">Marble Madness · Music</div>
+<p>Each course has its own theme — in fact two per course, fourteen tunes in all — and the notable thing is how
+they play. Unlike the bare-metal C64 and Turrican drivers that bang Paula's registers directly, Marble Madness
+plays its music through the operating system's <strong><code>audio.device</code></strong>: it sequences the song
+and, per voice, hands the OS a sample pointer, a period and a volume, letting <code>audio.device</code> perform
+the actual Paula DMA. So the player is much simpler than a TFMX-class engine — no macro VM, no software mixing,
+just "play this sample at this pitch and volume".</p>
+
+<h2>Where the music lives</h2>
+<p>The six per-course sound banks are ordinary AmigaDOS hunk modules of <strong>pure data</strong> — there is no
+player code in the file; the player lives in the main program. Their data blocks carry the chip-memory flag (the
+only memory Paula can DMA from) and hold a song header, instrument and envelope tables, and 8-bit signed PCM
+sample waveforms. The song names its instruments by relocated pointer rather than by index.</p>
+
+<h2>The sound engine</h2>
+<p>The player runs as its own exec <strong>task</strong>, and the rest of the engine talks to it only by message
+— a clean producer/consumer split. It is <strong>dual-clocked</strong>: an audio-reply clock advances each voice's
+note list (when <code>audio.device</code> finishes a voice's sample it replies, and the player writes that
+voice's next note), and a 60&nbsp;Hz timer clock ticks the per-voice pitch and volume envelopes on sustained
+notes. The engine is a general sampled-sound driver — music is just a set of voices it triggers — addressed by
+sound number through a per-bank directory; a course's music is one of those entries, whose event lists are the
+long, looping score.</p>
+
+<h2>The song format</h2>
+<p>The music itself is a <strong>Soundtracker-style arrangement</strong>: an order table per channel of
+<code>(repeat, pattern)</code> entries — play a pattern so many times, then advance, with a zero repeat looping
+back to the start — over patterns that are byte-streams of note commands (a note as octave-and-semitone, a rest,
+a note-length class, an end marker). Each note is voiced from the bank's <strong>single shared waveform</strong>:
+the semitone indexes the standard Amiga/ProTracker period table for the fine pitch, and the octave selects the
+length of the looped waveform slice — the classic one-sample-many-octaves trick. A per-note volume envelope (a
+list of rate/target segments ramped one step per frame) gives each note its pluck shape rather than a flat tone.
+A per-frame music tick advances the song at about 50&nbsp;Hz, emitting notes through the same voice path.</p>
+`,
+  },
   stuntcar: {},
   elite: {
     loader: `

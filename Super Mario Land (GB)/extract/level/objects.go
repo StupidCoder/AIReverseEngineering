@@ -102,7 +102,7 @@ const (
 // script for the first $F8 (set-frame) command. ok is false if the type has no valid script.
 func TypeBaseFrame(rom []byte, typ byte) (frame byte, ok bool) {
 	p := int(rom[scriptTable+int(typ)*2]) | int(rom[scriptTable+int(typ)*2+1])<<8
-	if p < 0x3500 || p >= 0x3B00 { // outside the script block => not a real object type
+	if p < 0x3500 || p >= 0x3D00 { // outside the script block => not a real object type
 		return 0, false
 	}
 	for i := 0; i < 96 && p+1 < len(rom); i++ {

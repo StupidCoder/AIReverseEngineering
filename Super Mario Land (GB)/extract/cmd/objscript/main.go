@@ -17,10 +17,10 @@ const scriptTable = 0x3495
 // nextStart returns the smallest script-start address strictly greater than `p` (the next
 // type's script), so a per-type dump stops at the boundary instead of bleeding onward.
 func nextStart(rom []byte, p int) int {
-	best := 0x3B00
+	best := 0x3D00
 	for t := 0; t < 0x80; t++ {
 		s := word(rom, scriptTable+t*2)
-		if s > p && s < best && s >= 0x3500 && s < 0x3B00 {
+		if s > p && s < best && s >= 0x3500 && s < 0x3D00 {
 			best = s
 		}
 	}
@@ -55,7 +55,7 @@ func main() {
 	}
 	for t := 0; t < 0x80; t++ {
 		p := word(data, scriptTable+t*2)
-		if p >= 0x3500 && p < 0x3B00 {
+		if p >= 0x3500 && p < 0x3D00 {
 			dump(data, byte(t))
 		}
 	}

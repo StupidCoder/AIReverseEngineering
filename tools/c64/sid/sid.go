@@ -271,11 +271,17 @@ func (s *SID) output() float64 {
 			direct += samp
 		}
 	}
-	// state-variable filter
+	// state-variable filter. The 6581 filter is weak: even at max resonance the peak is
+	// modest, so map resonance to a gentle damping range (Q ~1..3) rather than self-oscillation.
 	w := s.cutoffW()
-	q := 1.0 - float64(s.res>>4)/15.0*0.95 // resonance -> damping
+	q := 1.0 - float64(s.res>>4)/15.0*0.65 // resonance -> damping (res 15 -> q 0.35)
 	hp := filtIn - s.lp - q*s.bp
 	s.bp += w * hp
+	if s.bp > 2 {
+		s.bp = 2
+	} else if s.bp < -2 {
+		s.bp = -2
+	}
 	s.lp += w * s.bp
 	var filtered float64
 	if s.mode&0x10 != 0 {

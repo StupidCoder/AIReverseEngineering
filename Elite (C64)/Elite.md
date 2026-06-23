@@ -23,7 +23,7 @@ order:
   rating, docking, the game-over conditions, the Thargoid threat, the scripted
   missions, and how a system's economy and government shape play;
 * **Part VI** — sound and music: the table-driven sound-effects player, and the
-  nibble-bytecode music sequencer that plays the long docking medley;
+  nibble-bytecode music sequencer that plays the Blue Danube docking waltz;
 * **Appendices** — toolchain and reproduction.
 
 Methods: purely static analysis of the image bytes — no external tools or
@@ -105,7 +105,7 @@ addresses.
   - [1. Two engines, one IRQ tail](#1-two-engines-one-irq-tail)
   - [2. Sound effects — the table-driven player (`$B256`)](#2-sound-effects--the-table-driven-player-b256)
   - [3. The music sequencer (`$BDDC`)](#3-the-music-sequencer-bddc)
-  - [4. The music — one long docking medley](#4-the-music--one-long-docking-medley)
+  - [4. The music — the Blue Danube docking waltz](#4-the-music--the-blue-danube-docking-waltz)
   - [5. Routine and data map (sound)](#5-routine-and-data-map-sound)
 - [Appendix A — Toolchain and reproduction](#appendix-a--toolchain-and-reproduction)
 
@@ -1695,7 +1695,7 @@ descriptions, completing the picture a trader reads before deciding where to jum
 Elite carries **two completely independent sound systems**, both ticked once per
 frame from the tail of the raster IRQ (Part III §4): a small **table-driven
 sound-effects player** for the in-flight blips and explosions, and a separate
-**music sequencer** that plays one long piece — the docking medley. They are gated
+**music sequencer** that plays one long piece — the Blue Danube docking waltz. They are gated
 by their own flags, so effects can play with the music off and vice versa.
 
 ## 1. Two engines, one IRQ tail
@@ -1807,45 +1807,51 @@ voice 3 on a 6-frame cycle (`$BFEA`: `INC $C8 / CMP #$06`) — so the two upper 
 beat against a slightly sharp copy of themselves at two different rates, the phased,
 chorused texture the music is known for. Voice 1 plays clean, carrying the bass line.
 
-## 4. The music — one long docking medley
+## 4. The music — the Blue Danube docking waltz
 
-Walking the `$C034` stream to its first loop opcode (a Go/Python reimplementation of the
-dispatcher above) shows the engine plays **one continuous piece**: `$C034`–`$CA6A`,
-about **2.6 KB**, **916 notes** across the three voices, ending in a single op-9 loop
-back to the start. It is not a short jingle but a **medley** — the tempo (op 12) and the
-waveforms (op 13) change repeatedly, carving the stream into roughly ten movements:
+Walking the `$C034` stream to its loop opcode (a Go reimplementation of the dispatcher,
+rendered through the shared SID emulator `tools/c64/sid` and confirmed by ear) shows the
+engine plays **one piece**: `$C034`–`$CA6A`, about **2.6 KB**, **916 notes** across the
+three voices, ~141 s long, ending in a single op-9 loop back to the start. The piece is
+**Johann Strauss II's *The Blue Danube* waltz** — the classic nod to *2001: A Space
+Odyssey*, which Elite plays during **automatic docking**. The tempo (op 12) and waveform
+(op 13) changes through the stream are the waltz's own sections, not separate songs; it
+is one continuous arrangement, not a medley.
 
-```
-offset  control change
-   22   tempo 8,  waveforms 21 21 41  (saw/saw/pulse)        ← movement 1
-  183   tempo 9 → 10
-  242   waveforms 21 11 21  (saw/tri/saw)
-  360   tempo 12, then 11
-  377   waveforms 11 11 11  (all triangle)
-  750   tempo 12 → 10, waveforms 21 21 21
-  943   tempo 13 → 9
- 1110   waveforms 11 11 11
- 1118   tempo 18                                              ← a fast movement
- 1382   tempo 9,  waveforms 21 21 21 / 21 11 21
- 1887   tempo 19
- 2150   tempo 9
- 2612   tempo 48 → 9, then LOOP
-```
-
-(`$21` is sawtooth + gate, `$11` triangle, `$41` pulse — the SID control byte.) The
-distinct tempos (note lengths from 8 up to 48 frames) and timbre switches are what make
-it read as several tunes strung together — the perception of "multiple tracks" is this
-one medley's movements.
+The voice roles fall out of the ADSR (op 7) and routing (op 14): **voices 1 and 2 are
+sawtooth with a low sustain** (e.g. `SR=$19` → sustain level 1/15) — the plucked
+"oom-pah-pah" bass and accompaniment — while **voice 3 is a pulse with a high sustain**
+(`SR=$A9` → 10/15), routed alone through the resonant low-pass filter (`$D417=$F4`: only
+voice 3 filtered): the sustained melody. Voices 2 and 3 also carry the `+$20` detune of
+§3, so the accompaniment and melody both shimmer.
 
 **When it plays.** The music-on flag `$1D03` is set in exactly one place —
 `start_music` (`$9AF6`), reached from the per-frame **game-event handler** at `$1FCF`
 when the docking condition trips — and cleared in one place, **`dock_complete`
 (`$9B1E`)**, which silences the SID (`$9B35`: zero `$D400`–`$D418`) and hands off to the
-station screens (`$1D7E`, Part III §2). So the medley is the **docking music**: it
-starts as the docking sequence begins and stops the instant you are docked, leaving the
-station menus silent. The title/commander screen is silent too — its builder explicitly
-stops the music (`$8CEB`: `JSR $9B1E`). In flight there is no music, only the effects
-engine of §2; the long medley belongs entirely to the approach to the station.
+station screens (`$1D7E`, Part III §2). So the waltz is the **docking music**: it plays
+through the approach (it is the docking-computer sequence that triggers it) and stops the
+instant you dock, leaving the station menus silent. The title/commander screen is silent
+too under this engine — its builder explicitly stops the music (`$8CEB`: `JSR $9B1E`).
+
+**The title theme is elsewhere.** The game also has a separate **intro / title tune**
+(distinct from the waltz, heard from the title screen until the player first launches),
+but it is **not** in this engine: the decrypted image contains exactly one music engine
+(`$BDDC`) with one stream (`$C034`, the waltz) and one entry point — an exhaustive search
+of the 64 KB image finds no second song-data block, no second SID-writing routine, and no
+code that re-points the player or copies a different stream over `$C034`. The title music
+is therefore **load-time music**, played by loader-stage code that is overwritten before
+the game proper runs (so it is absent from the post-load engine image analysed here).
+Recovering it means decoding the tape's loader/loading-screen code as it executes during
+the load, not the resident engine — left as an open thread.
+
+### Rendering it
+
+The format is fully reimplemented in `extract/cmd/musicrender`: it runs the `$BDDC`
+opcode list over the `$C034` data and drives a from-scratch MOS 6581 emulator
+(`tools/c64/sid` — three oscillators, the reSID-style ADSR, and the multimode filter),
+ticking at the PAL frame rate and modelling the `+$20` two-oscillator detune and the
+`$C6==2` gate-release, to render the waltz straight from the ROM image to audio.
 
 ## 5. Routine and data map (sound)
 
@@ -1867,13 +1873,11 @@ engine of §2; the long medley belongs entirely to the approach to the station.
 | `$9AF6` / `$9B1E` | `start_music` / `dock_complete` (stop + silence) |
 | `$BDD7`/`$BDD8`–`$BDDA`/`$BDDB` | music state: section counter / three voice control bytes / default note length |
 | `$C016`/`$C025` | opcode jump tables (16 entries, overlapping by one byte) |
-| `$C034`–`$CA6A` | the docking-medley command stream (~2.6 KB, 916 notes, single loop) |
+| `$C034`–`$CA6A` | the Blue Danube waltz command stream (~2.6 KB, 916 notes, single loop) |
 
-The music format is fully understood — a from-scratch interpreter of the `$BDDC`
-bytecode reproduces the note/timbre/tempo stream from the `$C034` data exactly — so
-rendering the medley to audio is a matter of running the opcode list above against a
-SID model (PAL `$D400` clock, the `+$20` two-oscillator detune on voices 2–3, and the
-ADSR release timed to `$C6`).
+The music format is fully understood — the `extract/cmd/musicrender` interpreter
+reproduces the note/timbre/tempo stream from the `$C034` data exactly and renders the
+waltz through the SID model (§4) — identifying it conclusively as *The Blue Danube*.
 
 ---
 

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/png"
 	"os"
 	"strconv"
@@ -71,20 +72,49 @@ func main() {
 	lcdc := m.Read(0xFF40)
 	pal := gameboy.DMGPalette(m.Read(0xFF47))
 
-	img := image.NewPaletted(image.Rect(0, 0, len(cols)*8, 16*8), pal)
+	pimg := image.NewPaletted(image.Rect(0, 0, len(cols)*8, 16*8), pal)
 	for x, col := range cols {
 		for row := 0; row < 16; row++ {
 			off := tileOffset(lcdc, col[row])
 			t := gameboy.DecodeTile(vram[off:])
 			for py := 0; py < 8; py++ {
 				for px := 0; px < 8; px++ {
-					img.SetColorIndex(x*8+px, row*8+py, t[py][px])
+					pimg.SetColorIndex(x*8+px, row*8+py, t[py][px])
 				}
 			}
 		}
 	}
-	save(*out, img, pal)
+
+	// Overlay the object/enemy placements (decoded from the ROM, not the oracle) as
+	// red boxes at their map-tile positions, to verify the placement decoder visually.
+	img := image.NewRGBA(pimg.Bounds())
+	draw.Draw(img, img.Bounds(), pimg, image.Point{}, draw.Src)
+	if *id != "" {
+		idv, _ := strconv.ParseUint(*id, 16, 8)
+		objs := level.DecodeObjectsByID(data, byte(idv))
+		fmt.Printf("decoded %d objects\n", len(objs))
+		for _, o := range objs {
+			c := color.RGBA{0xff, 0x30, 0x30, 0xff}
+			if o.Hard {
+				c = color.RGBA{0xff, 0xc0, 0x20, 0xff} // amber = second-quest flag
+			}
+			drawBox(img, o.Col*8, o.Row*8, 8, 8, c)
+		}
+	}
+	save(*out, img)
 	fmt.Println("wrote", *out)
+}
+
+// drawBox outlines a w*h box at (x,y) in colour c.
+func drawBox(img *image.RGBA, x, y, w, h int, c color.RGBA) {
+	for i := 0; i < w; i++ {
+		img.Set(x+i, y, c)
+		img.Set(x+i, y+h-1, c)
+	}
+	for i := 0; i < h; i++ {
+		img.Set(x, y+i, c)
+		img.Set(x+w-1, y+i, c)
+	}
 }
 
 // tileOffset mirrors the BG tile addressing (LCDC bit 4: $8000 unsigned vs signed $8800).
@@ -95,7 +125,7 @@ func tileOffset(lcdc, idx byte) int {
 	return 0x1000 + int(int8(idx))*16
 }
 
-func save(path string, img image.Image, pal color.Palette) {
+func save(path string, img image.Image) {
 	f, err := os.Create(path)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "levelmap:", err)

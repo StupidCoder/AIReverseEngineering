@@ -44,11 +44,22 @@ FFB6 oam_dma            HRAM OAM-DMA routine (DMA $C000 shadow -> OAM); copied f
 
 # --- object / enemy system (Part V, in progress) ---
 0837 object_update      loop over the 10 active object slots ($D100-$D19F), run each handler
+2453 objlist_init       point $D010/$D011 at this level's placement list ($401A[ffe4] in
+#                       the world bank), skipping entries already behind the camera ($C0AB);
+#                       then clear all 10 object slots to $FF
+2488 obj_spawn_step     per-frame: CALL $2492 spawn, $263F, $255F
+2492 obj_spawn_walk     walk the placement list at $D010: while entry.col <= $C0AB, place the
+#                       object (3-byte entries: col, packed YX, type) and advance the pointer
+24CD obj_create_from_d003  create an object whose type id is in $D003 (script-spawned child)
+24E6 obj_place          set $FFC2=Y=((pos&1F)<<3)+10, $FFC3=X=$D0+((pos&C0)>>4)-fineadj,
+#                       type=(byte2&7F) (bit7 = hard/2nd-quest, gated by $FF9A); -> $336C init
 2520 object_gc          scan slots; free off-screen objects
 2CB2 object_create      build an object's slot fields from its type via the $336C table
-336C object_type_table  per-object-type init data (3 bytes/type)
+336C object_type_table  per-object-type init data (3 bytes/type: +0 tile/attr, +1, +2)
 2CDC slot_to_work       copy a $D100 slot -> HRAM working copy at $FFC0 (13 bytes)
-2CEE work_to_slot       copy the HRAM working copy $FFC0 -> a $D100 slot
+2CEE work_to_slot       copy the HRAM working copy $FFC0 -> a $D100 slot (type write at $2CFB)
+27B7 obj_script_spawn   object-behaviour script (cmd codes $F1-$FF) -> spawn child via $2CB2
+2A13 obj_transform      $317D[type*4+n] tables: what an object turns into (child/score/popup)
 
 # --- key RAM (for reference, not code) ---
 # $C000        OAM shadow buffer (DMA source)
@@ -64,5 +75,8 @@ FFB6 oam_dma            HRAM OAM-DMA routine (DMA $C000 shadow -> OAM); copied f
 # bank 3: $4000 ... (ffe4 6-8 = world 3: $503F/$5074/$509B)
 # bank 3: $651C[ffe4] -> ?-block/coin placement table (6-byte entries, $FF-separated by screen)
 # bank 3: $6536[ffe4] -> breakable-block placement table
+# world bank: $401A[ffe4] -> per-level object/enemy PLACEMENT list (3-byte entries
+#   [col, packed YX, type], sorted by col, $FF-col terminated). col is in 16px units
+#   ($C0AB), so map tile-x = col*2; map row = pos&$1F; type bit7 = 2nd-quest flag.
 # bank 3: $7FF0 sound engine jump table; $7FF3 sound init
 # per-world tile sources: $0DE4 table (-> $8A00 obj tiles), $0DEA table (-> $9310 BG tiles)

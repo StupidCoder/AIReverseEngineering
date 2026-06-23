@@ -767,7 +767,14 @@ straight at the `$401A` table; the data itself is then decoded from the cartridg
 The exact **sprite graphics per type** are a further step: each type has a bespoke handler
 (reached through the slot's handler pointer) that draws its own animated metasprite, so
 there is no flat type→tile table — the object tile art is bulk-loaded per world to VRAM
-`$8A00` from the `$0DE4` source table (World 1 via `$0D30`/`$05D0`).
+`$8A00` from the `$0DE4` source table (World 1 via `$0D30`/`$05D0`). `extract/cmd/spritesheet`
+renders each world's OBJ tile block (`$8000`–`$8FFF`, palette OBP0); World 1's holds Mario's
+poses, the enemy frames and the HUD glyphs:
+
+![World 1 object/enemy sprite tiles](rendered/world1-sprites.png)
+
+Mapping each `type` id to the specific frames its handler draws (so the viewer can show the
+real enemy instead of a coloured marker) is the open task here.
 
 *Still stubbed:* Mario's physics, the per-type sprite/metasprite decode, scoring and
 progression.

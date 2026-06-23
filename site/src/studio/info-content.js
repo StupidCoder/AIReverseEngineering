@@ -1372,14 +1372,31 @@ where to fly fall out of a few bytes per system.</p>
 `,
     music: `
 <div class="info-eyebrow">Elite · Music</div>
-<p>Elite's audio is a <strong>three-voice SID</strong> score and sound effects, driven from the raster
-interrupt rather than a separate sound thread.</p>
+<p>Elite has one piece of music — and it is <strong>Johann Strauss II's <em>The Blue Danube</em></strong>,
+the classic nod to <em>2001: A Space Odyssey</em>, played while the docking computer flies you into the
+station. The track here is that waltz, rendered from the game's own engine. In flight there is no music,
+only sound effects; the title and station screens are silent.</p>
 
-<h2>The SID player</h2>
-<p>When the last screen split of a frame completes, the raster-interrupt handler falls through to a three-voice
-SID player that advances the music and sound effects from a set of tables and writes the SID's registers — so
-the audio is updated a fixed once per frame, underneath the foreground loop that runs the flight model. Docking
-clears the SID registers to silence the music before the station menus appear.</p>
+<h2>Two sound engines</h2>
+<p>Both run once per frame from the raster interrupt. A <strong>sound-effects</strong> engine drives three
+SID voices from a small set of tables — each effect is a short pitch sweep (the laser, the hyperspace whine,
+explosions). Separately, a <strong>music sequencer</strong> plays the waltz; the two are gated by their own
+flags, so effects can sound with the music off and vice versa. The music starts as the docking sequence
+begins and is silenced the instant you dock.</p>
+
+<h2>The music sequencer</h2>
+<p>The waltz is a compact <strong>nibble-packed bytecode</strong>: a play pointer walks a command stream
+whose opcodes (two per byte) set SID registers or step time — note-on per voice, chords, ADSR, pulse width,
+waveform, filter and tempo — looping at the end. Voices 1 and 2 are sawtooth, plucked for the
+"oom-pah-pah" bass and accompaniment; voice 3 is a sustained pulse through the resonant low-pass filter — the
+melody. Voices 2 and 3 each play against a copy of themselves a fraction sharper, the gentle detuned shimmer
+that gives the piece its character.</p>
+
+<h2>From bytecode to audio</h2>
+<p>The audio you hear is reconstructed end to end: the command stream is interpreted exactly as the engine
+does, and its SID-register writes are fed to a <strong>reimplemented SID chip</strong> — three oscillators,
+the envelope generator and the multimode filter — clocked at the C64's rate and bandlimited the way the real
+chip's output is. No recording of the original is used; it is played from the bytes.</p>
 `,
   },
 };

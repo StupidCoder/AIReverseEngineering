@@ -88,6 +88,8 @@ const GAMES = [
     show: (v, lvl, i) => v.loadShip(i),
     // open on the Cobra Mk III — the iconic player ship — rather than the missile
     defaultAsset: (ships) => ships.findIndex(s => s.name === 'Cobra Mk III'),
+    // the docking music (The Blue Danube), rendered from the $BDDC engine through our SID emulator
+    music: async () => [{ name: 'Docking — The Blue Danube', url: 'public/elite/music/docking.mp3' }],
   },
 ];
 

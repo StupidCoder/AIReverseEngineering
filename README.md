@@ -53,9 +53,10 @@ To do:
     * Part I done: a clean 64 KB MBC1 cartridge (4×16 KB banks), header + both
       checksums + Nintendo logo all verified, memory map and CPU vectors decoded.
       Key finding: the Game Boy CPU is the **Sharp LR35902**, not a Z80, so the
-      shared `tools/z80` does not apply. Next: build a `tools/sm83` decoder + CPU
-      core (and a `tools/gameboy` machine-model oracle) before Part II (boot) can
-      proceed
+      shared `tools/z80` does not apply. The `tools/sm83` disassembler + `cmd/dissm83`
+      are now built and verified against the real vectors. Next (Part II): trace the
+      boot path (`$0100→$0150→$0185`) and the engine; a recursive `codetracesm83` and
+      a `tools/gameboy` machine-model oracle would help (mirroring the Game Gear setup)
 * Tools
     * Disassembler should be better at segmenting functions; currently jumps within a function are treated as separate sub-routines; try to document parameters of sub-routines (which registers are used?)
 
@@ -85,9 +86,11 @@ AIReverseEngineering/
 │   ├── mos6502/                #   6502 disassembler + executable CPU core (any 6502 platform)
 │   ├── m68k/                   #   Motorola 68000 disassembler + CPU core (any 68k platform)
 │   ├── z80/                    #   Zilog Z80 disassembler + executable CPU core (any Z80 platform)
+│   ├── sm83/                   #   Sharp LR35902 (Game Boy "GBZ80") disassembler — Z80 relative, not a Z80
 │   ├── cmd/dis6502/            #   linear disassembler for a .prg file (6502)
 │   ├── cmd/dis68k/             #   linear disassembler for a raw 68000 blob
 │   ├── cmd/disz80/             #   linear disassembler for a raw Z80 slice
+│   ├── cmd/dissm83/            #   linear disassembler for a Game Boy ROM (flat or MBC1-bank mode)
 │   ├── cmd/codetrace6502/      #   recursive-descent disassembler (6502)
 │   ├── cmd/codetrace68k/       #   recursive-descent disassembler (68000)
 │   ├── cmd/codetracez80/       #   recursive-descent disassembler (Z80)
@@ -184,11 +187,13 @@ per-platform subfolder (`c64/`, `amiga/`, …).
 | `mos6502` | One opcode table driving both a `Disassemble` function and an executable `CPU` core (all documented opcodes, binary + BCD) — usable by any 6502 platform. |
 | `m68k` | Motorola 68000 toolkit mirroring `mos6502`: a `Decode`/`Disassemble` disassembler (full documented instruction set, all addressing modes) **and** an instruction-level `CPU` execution core over the same `Bus`/`Step()` interface. The core currently runs a minimal-but-correct opcode subset (MOVE/ALU/shift/branch/jump/DBcc/MOVEM/LINK with proper X/N/Z/V/C flags) and halts on anything not yet implemented, so gaps are explicit. Usable by any 68k platform (Amiga, ST, Genesis, …). |
 | `z80` | Zilog Z80 toolkit mirroring `mos6502`/`m68k`: a `Decode`/`Disassemble` disassembler over the CPU's x/y/z/p/q opcode bit-fields (all `CB`/`ED`/`DD`/`FD` prefix pages, including `DDCB` and the undocumented `IXH`/`IXL`/`SLL`) **and** a practically complete instruction-level `CPU` execution core (block moves, IM-1 interrupts, documented flags) over the same `Bus`/`Step()` interface. Usable by any Z80 platform (Game Gear, Master System, ZX, MSX, …). |
+| `sm83` | Sharp **LR35902** (Game Boy CPU; "GBZ80"/SM83) `Decode`/`Disassemble` disassembler. A Z80 relative but **not** a Z80, so it is its own package: no `IX`/`IY` or `DD`/`FD`/`ED` prefixes (only `CB`), no `IN`/`OUT` (the Game-Boy-only `LDH ($FF00+n)`/`(C)` high-page ops instead), the `LD (HL±)` auto-inc/dec loads, `LD ($nnnn),SP`, `ADD SP,e`, `LD HL,SP+e`, `RETI`, `STOP`, CB-page `SWAP`, and eleven illegal opcodes. Same `Flow`/`Inst` interface as `z80` so a codetrace driver can reuse it. Verified against Super Mario Land's real vectors. |
 | `cmd/dis6502` | Linear disassembler for a `.prg` file (2-byte load address + data), optionally over an address range. |
 | `cmd/dis68k` | Linear disassembler for a raw 68000 code blob loaded at a given base address (`-skip` steps past an AmigaDOS hunk header). |
 | `cmd/codetrace6502` | Recursive-descent 6502 disassembler: from given entry points (and seeded jump tables) it follows every branch/jump/call, marks reachable code vs data, lists routines and unresolved indirect jumps — so tables and graphics aren't mis-decoded as instructions. |
 | `cmd/codetrace68k` | The 68000 counterpart of `codetrace6502`, built on `m68k`: same recursive trace over a raw blob loaded at `-base` (`-skip` past a hunk header), reporting routines and unresolved register/indexed jumps. |
 | `cmd/disz80` | Linear disassembler for a raw Z80 code slice mapped at a given address (`-off`/`-len`/`-base`). |
+| `cmd/dissm83` | Linear disassembler for a Game Boy ROM, built on `sm83`: a flat file slice (`-off`/`-len`/`-base`) or an MBC1 bank view (`-bank N -start A -end A`, with bank 0 fixed at `$0000`–`$3FFF` and bank *N* in `$4000`–`$7FFF`). |
 | `cmd/codetracez80` | The Z80 counterpart of `codetrace6502`, built on `z80`: recursive trace from given entry points over a banked ROM (`-load` selects the resident bank), with an `-annotate` file for naming routines. |
 | `c64/tap` | Parse a TAP v0/v1 image (C64/C16) into a pulse stream; `Segmentize` splits it at pauses. |
 | `c64/cbmtape` | Decode the standard Commodore KERNAL (ROM loader) tape encoding: blocks, headers, and paired header+data files with checksum verification. |

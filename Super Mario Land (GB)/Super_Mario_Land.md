@@ -23,9 +23,9 @@ shared `tools/z80` decoder does *not* apply here — the Game Boy CPU is the Sha
 LR35902, which shares the Z80's register names and much of its opcode map but drops
 the `IX`/`IY` index registers, the alternate register set and the `IN`/`OUT` ports,
 and adds Game-Boy-specific opcodes (`LDH`, `LD (C),A`, `LD (a16),A`, `STOP`, `SWAP`,
-`ADD SP,e`, `LD HL,SP+e`). Decoding the engine in Parts II+ needs a new `tools`
-decoder/CPU core for the LR35902 (provisionally `tools/sm83`); the opcode decodes in
-this part were done by hand and are flagged as such. All addresses are CPU addresses
+`ADD SP,e`, `LD HL,SP+e`). A new LR35902 disassembler — **`tools/sm83`** with the
+**`cmd/dissm83`** CLI — has been built for this game (mirroring `tools/z80`); the
+hand decodes below were confirmed against it. All addresses are CPU addresses
 (16-bit, `$0000`–`$FFFF`) unless a *file offset* is called out; bytes are 8-bit.
 Part I is complete; Parts II–V are stubbed.
 
@@ -125,8 +125,8 @@ lower window. The game uses this constantly; for example the timer interrupt
 `$4000`–`$7FFF`, runs a routine there, then restores the previous bank.
 
 For reverse engineering this means a disassembler must be told *which bank* occupies
-`$4000`–`$7FFF`; following a call *across* a bank switch is a higher-level concern for
-Part II onward (and needs the LR35902 decoder noted in the intro).
+`$4000`–`$7FFF` — exactly what `cmd/dissm83`'s bank mode does (`-bank N`); following a
+call *across* a bank switch is a higher-level concern for Part II onward.
 
 ## 3. The memory map
 
@@ -203,8 +203,8 @@ The bottom of bank 0 is fixed hardware-defined entry points. Two groups:
   (Serial) and `$60` (Joypad) — the CPU pushes `PC` and jumps here when the
   corresponding enabled interrupt fires.
 
-The bytes at those addresses (decoded by hand; the LR35902 decoder is still to be
-built):
+The bytes at those addresses (decoded with `cmd/dissm83`, the new LR35902
+disassembler):
 
 | Address | Bytes | Decoded | Role |
 |---|---|---|---|
@@ -255,16 +255,18 @@ ASCII copyright or level-name text in the image, because the Game Boy has no tex
 ROM: all on-screen text is drawn from the same 2bpp tile set as the graphics, so
 "strings" are tile-index sequences in the map data, not bytes you can read directly.
 Pinning exactly which routines and assets sit where in banks 1–3 is the work of
-Parts II–IV, once the LR35902 disassembler exists.
+Parts II–IV, using the new `cmd/dissm83` disassembler.
 
 ---
 
 # Part II — Boot and initialization
 
-*Stubbed.* The cold-start path `$0100 → $0150 → $0185`: `DI`, clear `IF`/`IE`, bring
-up the LCD and audio registers, clear VRAM/WRAM, load the initial tiles and palette,
-enable VBlank+timer interrupts, and fall into the main loop. Needs the `tools/sm83`
-LR35902 decoder/CPU core (see the intro).
+*Stubbed.* The cold-start path `$0100 → $0150 → $0185`: `DI`, set `IF`/`IE`, bring up
+the LCD and audio registers, clear VRAM/WRAM, load the initial tiles and palette,
+enable interrupts, and fall into the main loop. The `tools/sm83` disassembler
+(`cmd/dissm83`) now exists, so this can be traced directly; a recursive-descent
+`codetracesm83` (and a `tools/gameboy` emulation oracle) would speed up the deeper
+cross-bank work.
 
 # Part III — Engine architecture
 
@@ -295,8 +297,22 @@ md5 "Super Mario Land (GB)/Super Mario Land (World).gb"   # md5sum on Linux
 
 Everything in Part I was derived by static inspection of the 64 KB image (header
 fields, checksum recomputation, the Nintendo-logo comparison, per-bank entropy and a
-by-hand decode of the vectors). The disassembly tooling used elsewhere in this
-repository does **not** apply: the Game Boy's Sharp LR35902 is not a Z80, so Parts II
-onward require a new LR35902 decoder and CPU core in the shared `tools` module
-(provisionally `tools/sm83`, with a `tools/gameboy` machine model as the emulation
-oracle, mirroring `tools/z80` + `tools/gamegear`).
+decode of the vectors). Because the Game Boy's Sharp LR35902 is not a Z80, the
+existing `tools/z80` could not be reused; a dedicated **`tools/sm83`** disassembler
+was built for it, with the **`cmd/dissm83`** CLI:
+
+```sh
+# flat: a file slice mapped at a CPU address
+go run stupidcoder.com/tools/cmd/dissm83 -off 0x185 -len 0x14 -base 0x185 \
+    "Super Mario Land (GB)/Super Mario Land (World).gb"
+
+# MBC1 bank view: bank 0 fixed at $0000-$3FFF, bank N in $4000-$7FFF
+go run stupidcoder.com/tools/cmd/dissm83 -bank 3 -start 0x7FF0 -end 0x8000 \
+    "Super Mario Land (GB)/Super Mario Land (World).gb"
+```
+
+The `sm83` package (`Decode`/`Disassemble`, with the same `Flow`/`Inst` interface as
+`tools/z80`) is unit-tested against the main and CB opcode pages, the Game-Boy-only
+ops, the illegal opcodes, and Super Mario Land's own vectors. Still to build for the
+deeper parts: a recursive-descent `codetracesm83` and a `tools/gameboy` machine model
+to run the ROM as an emulation oracle (mirroring `tools/gamegear`).

@@ -11,7 +11,11 @@
 // faithful enough to reproduce a tune's pitch, rhythm, envelopes and timbre.
 package sid
 
-import "math"
+import (
+	"math"
+	"os"
+	"strconv"
+)
 
 // PAL is the PAL C64 system clock in Hz (the SID is clocked from it).
 const PAL = 985248.0
@@ -64,13 +68,35 @@ type SID struct {
 	// the waveforms' high harmonics don't alias down (which would inflate the bright voices).
 	aaA                float64
 	aa1, aa2, aa3, aa4 float64
+	resScale           float64    // resonance->damping scale (tunable)
+	wlpA               float64    // per-voice waveform-rounding low-pass coefficient (the 6581 DAC)
+	vlp                [3]float64 // per-voice waveform low-pass state
+}
+
+// envF reads a float from an env var (for tuning sweeps); 0 if unset/invalid.
+func envF(k string) float64 {
+	v, _ := strconv.ParseFloat(os.Getenv(k), 64)
+	return v
 }
 
 // New makes a SID clocked at clock Hz, producing samples at sampleRate Hz.
 func New(clock, sampleRate float64) *SID {
 	s := &SID{clock: clock, srate: sampleRate, cycPerS: clock / sampleRate}
 	// anti-alias low-pass at ~19 kHz (just under the output Nyquist), as a one-pole coefficient
-	s.aaA = 1.0 - math.Exp(-2.0*3.14159265358979*19000.0/clock)
+	aaHz := 19000.0
+	if v := envF("SID_AA"); v > 0 {
+		aaHz = v
+	}
+	s.resScale = 0.72
+	if v := envF("SID_RES"); v > 0 {
+		s.resScale = v
+	}
+	wlpHz := 5500.0 // the 6581's waveform DAC rounds the edges; model as a per-voice low-pass
+	if v := envF("SID_WLP"); v > 0 {
+		wlpHz = v
+	}
+	s.wlpA = 1.0 - math.Exp(-2.0*3.14159265358979*wlpHz/clock)
+	s.aaA = 1.0 - math.Exp(-2.0*3.14159265358979*aaHz/clock)
 	for i := range s.v {
 		s.v[i].noise = 0x7FFFF8
 		s.v[i].expPer = 1
@@ -281,7 +307,9 @@ func (s *SID) output() float64 {
 		if i == 2 && s.mode&0x80 != 0 && route&4 == 0 {
 			continue
 		}
-		samp := (float64(s.wave(i)) - 2048.0) / 2048.0 * (float64(s.v[i].env) / 255.0)
+		raw := (float64(s.wave(i)) - 2048.0) / 2048.0
+		s.vlp[i] += s.wlpA * (raw - s.vlp[i]) // DAC edge-rounding (per-voice low-pass)
+		samp := s.vlp[i] * (float64(s.v[i].env) / 255.0)
 		if route&(1<<i) != 0 {
 			filtIn += samp
 		} else {
@@ -291,7 +319,7 @@ func (s *SID) output() float64 {
 	// state-variable filter. The 6581 filter is weak: even at max resonance the peak is
 	// modest, so map resonance to a gentle damping range (Q ~1..3) rather than self-oscillation.
 	w := s.cutoffW()
-	q := 1.0 - float64(s.res>>4)/15.0*0.82 // resonance -> damping (res 15 -> q ~0.18, Q ~5)
+	q := 1.0 - float64(s.res>>4)/15.0*s.resScale
 	hp := filtIn - s.lp - q*s.bp
 	s.bp += w * hp
 	if s.bp > 2 {

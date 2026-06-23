@@ -49,6 +49,13 @@ To do:
       a `$9800`-byte loader read from disk offset `$2C00`. Next (Part II):
       disassemble that loader and map the disk. Goal: extract and replicate the
       vector race tracks (Part IV) and the rigid-body car physics (Part V)
+* Super Mario Land (GB)
+    * Part I done: a clean 64 KB MBC1 cartridge (4×16 KB banks), header + both
+      checksums + Nintendo logo all verified, memory map and CPU vectors decoded.
+      Key finding: the Game Boy CPU is the **Sharp LR35902**, not a Z80, so the
+      shared `tools/z80` does not apply. Next: build a `tools/sm83` decoder + CPU
+      core (and a `tools/gameboy` machine-model oracle) before Part II (boot) can
+      proceed
 * Tools
     * Disassembler should be better at segmenting functions; currently jumps within a function are treated as separate sub-routines; try to document parameters of sub-routines (which registers are used?)
 
@@ -129,6 +136,10 @@ AIReverseEngineering/
 │   ├── Stunt Car Racer.adf      # raw disk image (custom format; not committed; see Image files)
 │   └── Stunt_Car_Racer.md       # writeup (Part I recon; tracks + physics the goal)
 │
+├── Super Mario Land (GB)/
+│   ├── Super Mario Land (World).gb   # raw Game Boy cartridge ROM
+│   └── Super_Mario_Land.md      # cartridge + game writeup (Part I done; rest stubbed)
+│
 └── Turrican (Amiga)/
     ├── Turrican.adf             # raw disk image (pinned by MD5 in Image files)
     ├── Turrican.md              # writeup (Parts I-IV; V stubbed) — loader, engine, disk-streamed levels
@@ -157,6 +168,7 @@ below pin the precise copy, so the work stays reproducible.
 | `Marble Madness (Amiga)/Marble_Madness.adf` | 901,120 | `735dc697d64b3eeaa000778eb0b1153a` |
 | `Sonic (GG)/Sonic The Hedgehog (Japan, USA).gg` | 262,144 | `8a95b36139206a5ba13a38bb626aee25` |
 | `Stunt Car Racer (Amiga)/Stunt Car Racer.adf` | 901,120 | `b6d3751e6aa636f203f3c6a8de81ebfc` |
+| `Super Mario Land (GB)/Super Mario Land (World).gb` | 65,536 | `b48161623f12f86fec88320166a21fce` |
 | `Turrican (Amiga)/Turrican.adf` | 901,120 | `6677ce6cea38dc66be40e9211576a149` |
 
 Verify a copy before reusing it, e.g. `md5 "Elite (C64)/Elite.tap"`

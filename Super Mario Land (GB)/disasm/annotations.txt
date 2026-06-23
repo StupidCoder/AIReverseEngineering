@@ -60,6 +60,13 @@ FFB6 oam_dma            HRAM OAM-DMA routine (DMA $C000 shadow -> OAM); copied f
 2CEE work_to_slot       copy the HRAM working copy $FFC0 -> a $D100 slot (type write at $2CFB)
 27B7 obj_script_spawn   object-behaviour script (cmd codes $F1-$FF) -> spawn child via $2CB2
 2A13 obj_transform      $317D[type*4+n] tables: what an object turns into (child/score/popup)
+255F obj_draw_all       loop the 10 slots; for each on-screen object draw its metasprite
+25B7 obj_draw_meta      draw one object's metasprite: frame = slot+6 -> $2FD9[frame] stream
+#                       (control bytes move the 8x16 cursor + set OAM attr; bit7 bytes stamp
+#                       an 8x16 tile); $30AB = the facing/alt table when $FFC5&1
+2FD9 obj_meta_table     object metasprite pointer table (frame id -> stream); bank-0 fixed
+0DE4 obj_tile_src       per-world object-tile source table -> VRAM $8A00 (worlds 2-4); idx
+#                       (world-2)*2. World 1 loads via $0D30/$05D0. $0DEA = BG-tile source.
 
 # --- key RAM (for reference, not code) ---
 # $C000        OAM shadow buffer (DMA source)

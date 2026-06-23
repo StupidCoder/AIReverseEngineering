@@ -764,20 +764,39 @@ the `extract/cmd/spawntrace` oracle harness — it watches the object slots `$D1
 for an `$FF`→type write and dumps a ring buffer of recent banked-ROM reads, which pointed
 straight at the `$401A` table; the data itself is then decoded from the cartridge.
 
-The exact **sprite graphics per type** are a further step: each type has a bespoke handler
-(reached through the slot's handler pointer) that draws its own animated metasprite, so
-there is no flat type→tile table — the object tile art is bulk-loaded per world to VRAM
-`$8A00` from the `$0DE4` source table (World 1 via `$0D30`/`$05D0`). `extract/cmd/spritesheet`
-renders each world's OBJ tile block (`$8000`–`$8FFF`, palette OBP0); World 1's holds Mario's
-poses, the enemy frames and the HUD glyphs:
+## 2. Object sprites and the metasprite format
 
-![World 1 object/enemy sprite tiles](rendered/world1-sprites.png)
+Each object draws its graphics through a shared **metasprite** engine. The object sprite
+routine `$25B7` takes the slot's frame field (`slot+6`, seen as `$FFC6`) as an index into
+the pointer table at `$2FD9` (bank-0 fixed). The pointed-at stream is *turtle graphics*:
 
-Mapping each `type` id to the specific frames its handler draws (so the viewer can show the
-real enemy instead of a coloured marker) is the open task here.
+```
+byte, bit7 = 0 : control — low nibble moves the 8x16 cursor (bit3 up / bit2 down /
+                 bit1 left / bit0 right, 8 px each); the byte also carries the OAM attribute
+byte, bit7 = 1 : stamp an 8x16 OBJ sprite of this tile id at the cursor (SML runs sprites
+                 in 8x16 mode, so each is a vertical tile pair: tile&$FE, tile|1)
+$FF            : end of the metasprite
+```
 
-*Still stubbed:* Mario's physics, the per-type sprite/metasprite decode, scoring and
-progression.
+The object tile art itself is bulk-loaded per world to VRAM `$8A00` from the `$0DE4` source
+table (World 1 via `$0D30`/`$05D0`), so the same frame id renders the world's own creatures.
+`level.DecodeMetasprite` reimplements the stream; `extract/cmd/spritesheet` dumps the raw OBJ
+tile block and `extract/cmd/metasprites` composites the frame table — both show recognizable
+enemies, Mario poses and HUD glyphs:
+
+![World 1 object metasprite frames](rendered/world1-metasprites.png)
+
+There is no flat *type→frame* table (each type's handler animates its own frames), so the
+mapping is recovered empirically: `extract/cmd/objsprites` plays every level in the oracle
+and tallies, per type (`slot+0`), the frame it uses (`slot+6`) — yielding `level.TypeFrame`
+for the enemies that appear early in levels. `cmd/levelmap -id NN` overlays each placement
+with its real metasprite (markers for the still-unmapped types), and the Studio viewer does
+the same from a per-world object-icon atlas:
+
+![Level 1-1 with decoded objects](rendered/level-1-1-objects.png)
+
+*Still stubbed for Part V:* Mario's physics, the deeper-level object types (whose frames the
+auto-play never reaches), scoring and progression.
 
 ---
 

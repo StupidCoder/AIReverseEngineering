@@ -64,9 +64,12 @@ To do:
       chain; the bank-shadow (`$FFFD`/`$C0A4`) convention. Part IV done: the DMG graphics
       formats (2bpp tiles, `$9800`/`$9C00` maps + signed `$8800` addressing, OAM sprites,
       `BGP`/`OBP` palettes) — decoders in `tools/gameboy/gb.go`, verified by rendering the
-      title screen and level 1-1 straight from the oracle's VRAM (`extract/cmd/render`);
-      the column-build draw path (`$2260`/`$C0B0`) mapped, level data located in bank 2.
-      Next (Part V): the level encoding + object/enemy behaviour
+      title screen and level 1-1 straight from the oracle's VRAM (`extract/cmd/render`).
+      **Level map format SOLVED** (`extract/level` reimplements the `$218F` decoder):
+      `$4000[ffe4]`→page table→20-column RLE pages; World 1 maps (1-1/1-2/1-3) decoded
+      from ROM and verified column-exact vs the oracle (`extract/cmd/levelmap`). Next:
+      worlds 2-4 (their banks + per-world tilesets from ROM), then object/enemy spawn
+      lists (bank-3 tables) and Part V mechanics
 * Tools
     * Disassembler should be better at segmenting functions; currently jumps within a function are treated as separate sub-routines; try to document parameters of sub-routines (which registers are used?)
 
@@ -154,8 +157,8 @@ AIReverseEngineering/
 ├── Super Mario Land (GB)/
 │   ├── Super Mario Land (World).gb   # raw Game Boy cartridge ROM
 │   ├── Super_Mario_Land.md      # cartridge + game writeup (Parts I-IV done; V stubbed)
-│   ├── extract/                 # module supermarioland/extract — cmd/render (oracle -> PNGs)
-│   └── rendered/                # generated PNGs (tile sheet, title screen, level 1-1)
+│   ├── extract/                 # module supermarioland/extract — level decoder; cmd/render, cmd/levelmap
+│   └── rendered/                # generated PNGs (tile sheet, title screen, level maps)
 │
 └── Turrican (Amiga)/
     ├── Turrican.adf             # raw disk image (pinned by MD5 in Image files)

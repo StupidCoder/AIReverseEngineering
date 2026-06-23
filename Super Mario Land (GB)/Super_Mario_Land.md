@@ -660,22 +660,48 @@ up question blocks, coins and breakables. The split is the usual one: the data n
 This is the on-screen end of the pipeline; the column buffer is filled from the level
 data each time the screen advances.
 
-## 6. The level data format (frontier)
+## 6. The level data format
 
-The level data itself lives in **bank 2** (paged into `$4000`–`$7FFF` throughout
-gameplay — confirmed on the oracle: the play loop sits in bank 2, dipping into bank 3
-only for sound). It is **block-based**: the stored map is a sequence of 16×16 *block*
-ids, expanded through a block→tile table into the `$C0B0` column buffer that §5 draws,
-with the reserved ids above carrying interactive behaviour.
+The level decoder is the routine at **`$218F`**. Reimplementing it (`extract/level`)
+decodes a level's whole map directly from the cartridge — the format, all pointers
+bank-relative into the `$4000`–`$7FFF` window:
 
-Fully decoding that encoding — the per-world block tables, the level layout/run-length
-scheme, and the separate object/enemy spawn lists — is the next piece of work, a decode
-on the scale of the Sonic level maps rather than a fixed hardware format. What this part
-pins is the **shape** of it: where the data is (bank 2), that it is block-structured,
-the column-buffer draw path (`$2260`/`$C0B0`), and the special-block ids — enough to
-start that decode from, which is Part V territory along with the object behaviour.
+```
+$4000[ffe4]          -> P1   a per-level table of page pointers
+P1[page]             -> P2   a "page" = 20 columns of RLE, read in order
+P1 ends at an entry whose low byte is $FF.
+```
 
-# Part V — Game mechanics
+The level data lives in **banks 1–3**: each bank holds a `$4000` table, and within it
+`ffe4` selects a level (the four worlds are split across the banks — World 1 is
+bank 2, `$4000[0/1/2]` = levels 1‑1/1‑2/1‑3 at `$6192`/`$61B7`/`$61DA`). A level is a
+sequence of 20-column *pages*; each page's columns are stored contiguously, but pages
+themselves are scattered and reused (a flat-ground page is pointed to many times).
+
+A **column** is 16 tiles tall and built from runs, starting blank (the `$2C` space
+tile):
+
+```
+run byte  rrrr cccc : start at row r (high nibble); the next `cccc` bytes (count, 0 = 16)
+                       are tiles placed in consecutive rows downward, EXCEPT
+$FD <tile>          : fill the rest of this run with one tile
+$FE                 : end of the column
+```
+
+The tiles are 8×8 background indices; ids like `$70`/`$80` are normal tiles that the
+engine *also* tracks as interactive blocks (its coin/`?`-block bookkeeping lives in
+separate bank-3 tables at `$651C`/`$6536`, indexed by the same `ffe4`/page — the object
+layer, not the map). Decoding World 1‑1 this way yields 360 columns that match the
+game's own output column-for-column; rendered with the world's tiles it is the level
+end to end:
+
+![Level 1-1, decoded from the ROM](rendered/level-1-1-map.png)
+
+`extract/cmd/levelmap` decodes any level (`-bank N -p1 ADDR`) and renders it (the tile
+graphics are taken from a short oracle run only to draw the picture; the map is decoded
+from ROM bytes). Still to do for the other three worlds: pin each world's bank and pull
+its tile set out of ROM so its map renders in its own graphics, plus the object/enemy
+spawn lists — Part V.
 
 # Part V — Game mechanics
 

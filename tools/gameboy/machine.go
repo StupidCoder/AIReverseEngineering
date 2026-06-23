@@ -85,6 +85,13 @@ type Machine struct {
 
 	WatchLo, WatchHi uint16         // VRAM write watch over [lo,hi): which PC wrote it
 	WatchPCs         map[uint16]int // histogram of writes per storing PC
+
+	// OnWrite, when set, is called on every memory write with the CPU PC (post-fetch),
+	// the address and the value — a general probe for "which code wrote this?".
+	OnWrite func(pc, addr uint16, v byte)
+	// OnROMRead, when set, is called on every read from the $4000-$7FFF bank window
+	// with the PC, the bank, and the address — to locate banked data being consumed.
+	OnROMRead func(pc uint16, bank int, addr uint16)
 }
 
 // NewMachine builds a machine from a cartridge image and resets it to the DMG
@@ -121,6 +128,9 @@ func (m *Machine) Read(a uint16) byte {
 	case a < 0x4000:
 		return m.rom[int(a)]
 	case a < 0x8000:
+		if m.OnROMRead != nil {
+			m.OnROMRead(m.CPU.PC, m.romBank, a)
+		}
 		off := m.romBank*0x4000 + int(a-0x4000)
 		if off < len(m.rom) {
 			return m.rom[off]
@@ -151,6 +161,9 @@ func (m *Machine) Read(a uint16) byte {
 }
 
 func (m *Machine) Write(a uint16, v byte) {
+	if m.OnWrite != nil {
+		m.OnWrite(m.CPU.PC, a, v)
+	}
 	switch {
 	case a < 0x8000:
 		m.mbcWrite(a, v)

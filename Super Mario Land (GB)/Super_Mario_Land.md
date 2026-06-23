@@ -667,16 +667,24 @@ decodes a level's whole map directly from the cartridge — the format, all poin
 bank-relative into the `$4000`–`$7FFF` window:
 
 ```
-$4000[ffe4]          -> P1   a per-level table of page pointers
-P1[page]             -> P2   a "page" = 20 columns of RLE, read in order
+$4000[ffe4]          -> P1   a level's screen-ORDER table
+P1[screen]           -> the RLE column data of one 20-column screen
 P1 ends at an entry whose low byte is $FF.
 ```
 
-The level data lives in **banks 1–3**: each bank holds a `$4000` table, and within it
-`ffe4` selects a level (the four worlds are split across the banks — World 1 is
-bank 2, `$4000[0/1/2]` = levels 1‑1/1‑2/1‑3 at `$6192`/`$61B7`/`$61DA`). A level is a
-sequence of 20-column *pages*; each page's columns are stored contiguously, but pages
-themselves are scattered and reused (a flat-ground page is pointed to many times).
+A level is a horizontal run of **20-column screens**, and `P1` is the **order table**:
+it lists a screen-data pointer per position, and the *same screen is reused at several
+positions* (a flat-ground screen is pointed to many times) — that is how the level
+repeats geometry compactly. The screen index `ffe5` walks `P1`; crucially it does **not
+start at 0**. SML reserves the low indices: screen 0 is a start lead-in, and **screens
+1 and 2 are the pipe-accessed bonus rooms**, so the *main* horizontal map begins at
+**index 3** (the level start code sets `$FFE5 = 3` at `$0DD4`). Decoding `P1[0..]`
+blindly — the first mistake here — splices the bonus coin-rooms into the middle of the
+level; the main map is `P1[3..]` up to the `$FF` terminator.
+
+The level data lives in **banks 1–3**: each bank holds a `$4000` order-table-pointer
+table, and within it `ffe4` selects a level (the four worlds are split across the banks
+— World 1 is bank 2, `$4000[0/1/2]` = levels 1‑1/1‑2/1‑3 at `$6192`/`$61B7`/`$61DA`).
 
 A **column** is 16 tiles tall and built from runs, starting blank (the `$2C` space
 tile):
@@ -691,17 +699,17 @@ $FE                 : end of the column
 The tiles are 8×8 background indices; ids like `$70`/`$80` are normal tiles that the
 engine *also* tracks as interactive blocks (its coin/`?`-block bookkeeping lives in
 separate bank-3 tables at `$651C`/`$6536`, indexed by the same `ffe4`/page — the object
-layer, not the map). Decoding World 1‑1 this way yields 360 columns that match the
-game's own output column-for-column; rendered with the world's tiles it is the level
-end to end:
+layer, not the map). Decoding World 1‑1's main path (`P1[3..]`) yields **300 columns**
+(15 screens) that match the game's own decoded columns; rendered with the world's tiles
+it is the level start-to-flag:
 
-![Level 1-1, decoded from the ROM](rendered/level-1-1-map.png)
+![Level 1-1 main path, decoded from the ROM](rendered/level-1-1-map.png)
 
-`extract/cmd/levelmap` decodes any level (`-bank N -p1 ADDR`) and renders it (the tile
-graphics are taken from a short oracle run only to draw the picture; the map is decoded
-from ROM bytes). Still to do for the other three worlds: pin each world's bank and pull
-its tile set out of ROM so its map renders in its own graphics, plus the object/enemy
-spawn lists — Part V.
+`extract/cmd/levelmap` decodes any level (`-bank N -p1 ADDR -start N`) and renders it
+(the tile graphics are taken from a short oracle run only to draw the picture; the map
+is decoded from ROM bytes). Still to do: the **bonus rooms** (screens 1 and 2) and, for
+the other three worlds, pinning each world's bank and pulling its tile set out of ROM so
+its map renders in its own graphics, plus the object/enemy spawn lists — Part V.
 
 # Part V — Game mechanics
 

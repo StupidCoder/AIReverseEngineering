@@ -81,29 +81,38 @@ func DecodeColumn(rom []byte, bank int, ptr uint16) (col [16]byte, next uint16) 
 // DecodeLevel decodes a level selected by ffe4 (the index into the $4000 page-table
 // pointer table in the given bank), reimplementing the ROM's $218F path:
 // $4000[ffe4] -> P1, then DecodeLevelAt.
-func DecodeLevel(rom []byte, bank int, ffe4 byte) [][16]byte {
+func DecodeLevel(rom []byte, bank int, ffe4 byte, start int) [][16]byte {
 	p1 := bankWord(rom, bank, 0x4000+uint16(ffe4)*2)
-	return DecodeLevelAt(rom, bank, p1)
+	return DecodeLevelAt(rom, bank, p1, start)
 }
 
-// DecodeLevelAt decodes every column of a level given the page-pointer table p1
-// (a list of 16-bit page-data pointers, terminated by an entry whose low byte is
-// $FF). Each page is 20 columns of RLE read sequentially; bank is paged into
-// $4000-$7FFF. Returns columns[x][row], 16 rows tall.
-func DecodeLevelAt(rom []byte, bank int, p1 uint16) [][16]byte {
-	const maxPages = 256
+// Screen decodes one 20-column screen: p1 is the screen-order table and idx the
+// screen index; p1[idx] points at the screen's RLE column data.
+func Screen(rom []byte, bank int, p1 uint16, idx int) [][16]byte {
+	ptr := bankWord(rom, bank, p1+uint16(idx)*2)
+	cols := make([][16]byte, 0, 20)
+	for c := 0; c < 20; c++ {
+		col, next := DecodeColumn(rom, bank, ptr)
+		cols = append(cols, col)
+		ptr = next
+	}
+	return cols
+}
+
+// DecodeLevelAt decodes a level's main horizontal map from the screen-order table p1.
+// p1 is a list of 16-bit screen-data pointers (repeats allowed — the order table),
+// terminated by an entry whose low byte is $FF. start is the first screen index of the
+// main path: SML reserves low screen indices for the start lead-in (0) and the
+// pipe-accessed bonus rooms (1, 2), so the main map begins at index 3. Each screen is
+// 20 columns; bank is paged into $4000-$7FFF. Returns columns[x][row], 16 rows tall.
+func DecodeLevelAt(rom []byte, bank int, p1 uint16, start int) [][16]byte {
+	const maxScreens = 256
 	var cols [][16]byte
-	for pg := 0; pg < maxPages; pg++ {
-		entryAddr := p1 + uint16(pg)*2
-		if bankByte(rom, bank, entryAddr) == 0xFF { // table terminator
+	for idx := start; idx < maxScreens; idx++ {
+		if bankByte(rom, bank, p1+uint16(idx)*2) == 0xFF { // order-table terminator
 			break
 		}
-		ptr := bankWord(rom, bank, entryAddr)
-		for c := 0; c < 20; c++ { // each page is 20 columns
-			col, next := DecodeColumn(rom, bank, ptr)
-			cols = append(cols, col)
-			ptr = next
-		}
+		cols = append(cols, Screen(rom, bank, p1, idx)...)
 	}
 	return cols
 }

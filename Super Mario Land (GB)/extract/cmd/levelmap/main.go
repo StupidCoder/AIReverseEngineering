@@ -22,7 +22,8 @@ import (
 func main() {
 	rom := flag.String("rom", "../Super Mario Land (World).gb", "ROM path")
 	bank := flag.Int("bank", 2, "ROM bank holding the level data")
-	p1s := flag.String("p1", "6190", "page-pointer table address (hex)")
+	p1s := flag.String("p1", "6192", "screen-order table address (hex)")
+	start := flag.Int("start", 3, "first main-path screen index (0=lead-in, 1/2=bonus rooms)")
 	out := flag.String("o", "../rendered/level-1-1-map.png", "output PNG")
 	flag.Parse()
 	p1v, _ := strconv.ParseUint(*p1s, 16, 16)
@@ -34,7 +35,7 @@ func main() {
 	}
 
 	// Decode the map from the ROM.
-	cols := level.DecodeLevelAt(data, *bank, uint16(p1v))
+	cols := level.DecodeLevelAt(data, *bank, uint16(p1v), *start)
 	fmt.Printf("decoded %d columns (%d tiles wide x 16 tall)\n", len(cols), len(cols))
 
 	// Tile graphics + palette: run the oracle to the level so VRAM holds this world's

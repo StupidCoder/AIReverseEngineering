@@ -435,7 +435,8 @@ html, body {
   top: 18px;
   right: 18px;
   bottom: 18px;
-  left: 340px;                                /* clear the 304px control window + margins */
+  width: 796px;                               /* hug the 720px text column + padding/scrollbar */
+  max-width: calc(100vw - 36px);
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line-strong);
@@ -526,8 +527,8 @@ html, body {
 .info-body::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .12); border-radius: 8px; }
 
 /* narrow viewports: the details window goes full-width and sits above the control window */
-@media (max-width: 820px) {
-  .info-panel { left: 18px; z-index: 21; }
+@media (max-width: 860px) {
+  .info-panel { width: auto; left: 18px; z-index: 21; }
 }
 
 /* ---- caption / HUD ---- */

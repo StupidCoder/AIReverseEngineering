@@ -1021,7 +1021,7 @@ page.</p>
 hunks</strong> (about 115 object modules), each keeping its own code/data/BSS triple, with no symbol or debug
 blocks. It is mostly code: the bitmaps and samples live in separate per-course files, so the program carries no
 pixel or sample data — only the engine that drives them, and it drives them at the metal, writing the full
-blitter register block and <code>DMACON</code> directly and reading the trackball ports. The small data payload
+blitter register block and <code>DMACON</code> directly and reading the mouse ports. The small data payload
 is the UI text (the course banners, "GAME OVER", the player labels), the per-course level filenames it loads at
 run time, and a few lookup tables.</p>
 
@@ -1070,16 +1070,16 @@ partition, the animation scripts, the creature spawn lists and the actor list.</
 `,
     gameplay: `
 <div class="info-eyebrow">Marble Madness · Gameplay</div>
-<p>The marble is a real <strong>3-D simulation</strong> projected to the isometric view — rolled by a relative
-trackball over a height-mapped course, with a state machine governing rolling, falling, landing and the dizzy
-spin.</p>
+<p>The marble is a real <strong>3-D simulation</strong> projected to the isometric view — rolled by the
+<strong>mouse</strong> over a height-mapped course, with a state machine governing rolling, falling, landing and
+the dizzy spin.</p>
 
-<h2>The trackball and the marble</h2>
-<p>Input is the trackball's quadrature counters, per player — a <strong>relative</strong> device, so spinning
+<h2>The mouse and the marble</h2>
+<p>Input is the mouse's quadrature counters, per player — a <strong>relative</strong> device, so moving
 faster pushes harder — accumulated into a roll-force. The marble is not a 2-D sprite but a <strong>point
 mass</strong> with velocity and position in three dimensions; each frame the engine integrates position by
 velocity and then iso-projects to the screen, so the isometric look is a projection of a real 3-D model. Exactly
-three things write the marble's velocity: the scaled trackball force; friction and an octagonal speed cap
+three things write the marble's velocity: the scaled mouse force; friction and an octagonal speed cap
 (clamped per surface — that selector is the ice/grating friction); and the surface force from the terrain.</p>
 
 <h2>The course as a height map</h2>
@@ -1089,8 +1089,8 @@ profile, rasterised at load into a <strong>corner-height mesh</strong> — a gri
 corner heights of one tile. All the regions compose into one continuous 2.5-D height map, and the triangular
 slope faces you see are emergent: a quad with non-coplanar corners is two triangles. Each frame the engine
 samples the four mesh cells around the marble, picks which of the tile's two triangles it is over, computes the
-surface gradient, and accelerates the marble down it — except on the <strong>Aerial</strong> course, which adds
-instead of subtracts, giving its inverted low gravity. The walls fall out of the same mesh: a height step between
+surface gradient, and accelerates the marble down it — except on the <strong>Silly</strong> course, which adds
+instead of subtracts, so the marble rolls <strong>up</strong> the slopes instead of down. The walls fall out of the same mesh: a height step between
 neighbouring cells becomes a side the velocity is clamped against. One height map drives both the roll and the
 walls, with no per-cell terrain codes.</p>
 
@@ -1108,14 +1108,17 @@ redraw the marble: rolling, landing after a drop, an edge reaction, falling and 
 object-bump on contact with an enemy, the course-intro run, the spawn, and the hole/region capture. A notable one
 is <strong>dizzy</strong>: a survivable hard hit (by another marble) or fall is <em>not</em> death — it sets a
 stun flag, and the rolling state hands off to a swirl-spin that plays out and returns to rolling. Death is
-running off the edge onto no terrain at all, or the hazards and the marble-munchers.</p>
+running off the edge onto no terrain at all, <strong>falling from too great a height</strong>, or the hazards
+and the marble-munchers.</p>
 
 <h2>Actors</h2>
 <p>The moving things — the goal flag, the enemies, the munchers — are <strong>actors</strong> fed by the
 course-layout data. Each frame the engine walks an array of actor records, each holding a sprite-cell pointer,
 an animation-script pointer (a cell list advanced when a frame timer expires, with randomised durations) and a
-position. There are <strong>no hardware sprites</strong> — everything is blitted, including the two-blit
-wraparound across the course's vertical scroll seam.</p>
+position. There are <strong>no hardware sprites</strong> — everything is blitted. The display is a fixed
+512-pixel-tall bitmap used as a <strong>circular scroll buffer</strong>: as the course scrolls vertically the
+visible window wraps around that buffer, so an object straddling the wrap point is drawn with two blits, one for
+each side of the seam. (The course itself does not wrap — only the scroll buffer does.)</p>
 `,
     music: `
 <div class="info-eyebrow">Marble Madness · Music</div>

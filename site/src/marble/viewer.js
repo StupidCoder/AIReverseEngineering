@@ -13,6 +13,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const DATA = 'public/marble/';
 const NATIVE_W = 288;                    // the playfield is 288 px (36 tiles) wide
+const NATIVE_H = 200;                    // the Amiga's visible playfield height (lines)
 const ZOOM_STEP = Math.pow(1.15, 0.25);
 const HEIGHT_SCALE = 0.15;               // slope-mesh vertical exaggeration (per tile unit)
 
@@ -308,10 +309,14 @@ export class MarbleViewer {
   // --- PixiJS tilemap camera (shared pattern; only active in tilemap mode) -
   _fitDefault() {
     const W = this.app.screen.width, H = this.app.screen.height;
-    this.minZoom = Math.min(W / this.levelW, H / this.levelH) * 0.95;
-    this.maxZoom = (W / NATIVE_W) * 3;
-    this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, (W / this.levelW) * 0.98));
-    this._panTo(this.levelW / 2, 0);
+    // Default zoom frames the same vertical extent the Amiga shows on screen
+    // (NATIVE_H lines), independent of the viewport's aspect — rather than fitting
+    // the whole course width. Mirrors the Turrican viewer's native-resolution framing.
+    const z = H / NATIVE_H;
+    this.minZoom = Math.min(Math.min(W / this.levelW, H / this.levelH) * 0.95, z);
+    this.maxZoom = Math.max((W / NATIVE_W) * 3, z);
+    this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, z));
+    this._panTo(this.levelW / 2, 0); // start framed at the top of the course
     this._apply();
   }
   _panTo(wx, wy) {

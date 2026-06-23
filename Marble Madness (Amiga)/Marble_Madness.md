@@ -713,7 +713,7 @@ separate files (`.ilb`/`.vlb` sprite banks, `Snd`, `Track` — Part I §3), so t
 program carries **no pixel or sample data** — only the engine that drives them.
 And it drives them at the metal: the code writes the full **blitter** register
 block (`$DFF040`–`$DFF066`) and `DMACON` (`$DFF096`) directly and reads
-`JOYxDAT` for the trackball/joystick, so rendering is hand-rolled blitting, not a
+`JOYxDAT` for the mouse/joystick, so rendering is hand-rolled blitting, not a
 library call.
 
 The ~24 KB of `DATA` is smaller than it looks: roughly **16 KB is zero** —
@@ -1398,14 +1398,14 @@ mesh) and a few **scripted `$CCA` regions** (seesaws, holes, triggers).
 
 ## 4. Physics and controls
 
-### Controls — the trackball
+### Controls — the mouse
 
-Input is the **mouse/trackball quadrature counters** `JOY0DAT`/`JOY1DAT`
+Input is the **mouse quadrature counters** `JOY0DAT`/`JOY1DAT`
 (`$DFF00A`/`$DFF00C`), per player, plus the CIA fire buttons (`$BFE001`).
 `trackball_decode $019390` turns the Amiga quadrature (XOR of adjacent counter bits →
 direction, `±$20`/step) into an X/Y delta; `control_update $0192EC` accumulates and
 scales it into the roll-force accumulators `$195EE`/`$195EA`. It is a relative device —
-spin faster, push harder — exactly the arcade trackball.
+move faster, push harder — the mouse standing in for the arcade's trackball.
 
 ### The marble is a 3-D point mass
 
@@ -1415,7 +1415,7 @@ The marble (object `$236`) is not a 2-D sprite: it is a point mass with velocity
 **iso-projects** to the screen (`$E944`) — the iso look is a projection of a real 3-D
 simulation. Exactly three things write the velocity:
 
-- **input** — `marble_input $12F8C` adds the scaled trackball force (`$0130DA/$0130E0`);
+- **input** — `marble_input $12F8C` adds the scaled mouse force (`$0130DA/$0130E0`);
 - **friction / speed cap** — `$14D28` computes the octagonal speed `|vY|+3⁄8·|vX|`,
   drives the roll anim/sound, and clamps each component to a per-surface max (`$40000`
   vs `$50000`, selected by `obj+$1A` via `$14E7E` — that selector *is* the ice/grating
@@ -1459,7 +1459,8 @@ The **downhill force** is the gradient of that mesh, taken each frame from `obje
    surface **gradient** `$6D8`/`$6DA` and the interpolated height `Z`.
 2. **`apply_slope_force $14A88`** amplifies a steep gradient ×4 and accelerates the marble
    down it: `vX -= gradientX<<11` (`$14AEA`), `vY -= gradientY<<11` (`$14AF6`). The
-   **Aerial** course (`$5D6==4`) *adds* instead — its inverted / low gravity.
+   **Silly** course (`$5D6==4` — course index 4 is Silly, not Aerial) *adds* instead,
+   so the marble accelerates *up* the slopes rather than down.
 
 The **walls** fall out of the same mesh: `surface_sides $EF90` turns a height step
 between neighbour cells into a per-side flag `$6A4-$6A7`, and `edge_collision $EB64`
@@ -1539,10 +1540,12 @@ so the state also sets the friction/speed cap.
 ### Falling off — death
 
 On **no** terrain (type resolves to `$FF`, `terrain_lookup $012D44`) the off-edge state
-(`$5E4`) fires and the marble falls; hazards and the marble-munchers are other death
-paths. A *survivable* hard hit (by another marble) or fall is **not** death — it sets the
-stun flag `+$DD`, and state 0 drops the marble into the **dizzy** spin (state 8 above),
-which plays out and returns to rolling.
+(`$5E4`) fires and the marble falls; **falling from too great a height** (the landing
+handler `$14884` reads the fall height — above a threshold it kills rather than bounces),
+the hazards, and the marble-munchers are the other death paths. A *survivable* hard hit
+(by another marble) or a *short* fall is **not** death — it sets the stun flag `+$DD`,
+and state 0 drops the marble into the **dizzy** spin (state 8 above), which plays out and
+returns to rolling.
 
 ### Still open
 
@@ -1841,7 +1844,7 @@ captured audio are involved — the only values transcribed from the game code a
 *algorithm* constants (the period table, the note-length table `$1FA26`, the frame
 delta `$1FA68`, the PAL Paula clock). All fourteen tunes across the six courses are
 rendered this way and embedded in the interactive
-[course viewer](https://stupidcoder.github.io/AIReverseEngineering/marble.html).
+[course viewer](https://stupidcoder.github.io/AIReverseEngineering/) (pick Marble Madness from the menu).
 
 ```sh
 # render a course theme straight from the disk image

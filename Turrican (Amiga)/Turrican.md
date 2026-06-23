@@ -985,7 +985,7 @@ wave-lines across the sky, ground enemies on the terrain:
 
 The spawner was *located* with help from the FS-UAE oracle, but every byte of the
 placement data is extracted from the ADF. This same data drives the companion
-[site](https://stupidcoder.github.io/AIReverseEngineering/turrican.html)'s object
+[site](https://stupidcoder.github.io/AIReverseEngineering/)'s object
 layer, which also frames each scene on the **player spawn**: `select_scene`
 (`$160E`) reads the descriptor's initial camera tile (`+$08/+$0A`, ×32 → the
 viewport's world-pixel origin) and the player's on-screen offset (`+$0C/+$0E`,

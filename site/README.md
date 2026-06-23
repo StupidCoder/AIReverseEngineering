@@ -2,9 +2,9 @@
 
 Interactive companion website for the reverse-engineering write-ups (see [PLAN.md](PLAN.md)).
 
-It is a **no-build static site**: plain ES modules with an [import map](sonic.html) that pulls
-PixiJS (v8) from a CDN, so there is nothing to install or compile. The 3D pages use three.js
-the same way (Elite ships now; Marble terrain later).
+It is a **no-build static site**: plain ES modules with an [import map](index.html) that pulls
+PixiJS (v8) from a CDN, so there is nothing to install or compile. 3D viewers use three.js
+the same way (Elite ships, Stunt Car Racer tracks).
 
 ## Run locally
 
@@ -18,13 +18,12 @@ python3 -m http.server 8000
 
 ## Layout
 
-- `index.html` — landing page.
-- `sonic.html` — the Sonic level viewer.
-- `elite.html` — the Elite 3D ship viewer (three.js).
-- `fort.html` — the Fort Apocalypse map viewer (PixiJS).
-- `turrican.html` — the Turrican map viewer (PixiJS).
-- `marble.html` — the Marble Madness course viewer (PixiJS).
-- `src/` — `style.css` and the viewer modules (`src/sonic/`, `src/elite/`, `src/fort/`, `src/turrican/`, `src/marble/`).
+- `index.html` — the **Studio**: a single full-screen front-end for all games. A floating menu
+  picks the game and asset; the selected viewer renders full-bleed, with display-layer toggles,
+  a music player, an optional CRT filter, and a technical-details panel. This is the whole site.
+- `src/studio/` — the Studio shell (`main.js`, `info-content.js`, `crt.js`, `camera.js`).
+- `src/<game>/viewer.js` — the per-game viewer modules the Studio loads on demand
+  (`src/sonic/`, `src/elite/`, `src/fort/`, `src/turrican/`, `src/marble/`, `src/stuntcar/`).
 - `public/marble/` — per-course `<course>.png` + `meta.json`. Regenerate from the disk with:
 
   ```sh

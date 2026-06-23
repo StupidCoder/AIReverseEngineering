@@ -340,6 +340,7 @@ export class ShipViewer {
     let lastRender = 0;
     const tick = (now) => {
       requestAnimationFrame(tick);
+      if (this.active === false) return; // paused while another viewer is shown
       if (this.lowFps && now - lastRender < 1000 / OLD_FPS) return; // ~12 fps throttle
       // time-based idle spin: scale the per-update angle by the real elapsed time
       // so the rotation runs at the same speed regardless of the (throttled) fps.

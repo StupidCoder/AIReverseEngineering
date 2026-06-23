@@ -140,7 +140,7 @@ export class MarbleViewer {
     });
     new ResizeObserver(() => this._resizeThree()).observe(this.el);
     const tick = () => {
-      if (this.mode === 'slopes' && this.three) {
+      if (this.active !== false && this.mode === 'slopes' && this.three) {
         this.three.controls.update();
         this.three.renderer.render(this.three.scene, this.three.camera);
       }

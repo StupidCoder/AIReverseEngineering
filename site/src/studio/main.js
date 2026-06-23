@@ -236,6 +236,15 @@ function setBusy(on) {
   spinner.classList.toggle('on', on);
 }
 
+// Pause a hidden viewer's render loop (and resume the shown one) so cached viewers don't
+// keep rendering in the background. Pixi via the ticker; three.js loops gate on viewer.active.
+function setMountActive(m, active) {
+  if (!m) return;
+  const v = m.viewer;
+  v.active = active;
+  if (v.app && typeof v.app.stop === 'function') v.app[active ? 'start' : 'stop']();
+}
+
 // ---- selection ----
 async function selectGame(id) {
   if (busy || id === activeId) return;
@@ -243,8 +252,12 @@ async function selectGame(id) {
   markActiveGame(id);
   setBusy(true);
   try {
-    // hide the currently mounted viewer
-    if (activeId && mounts.has(activeId)) mounts.get(activeId).el.style.display = 'none';
+    // hide and pause the currently mounted viewer
+    if (activeId && mounts.has(activeId)) {
+      const old = mounts.get(activeId);
+      old.el.style.display = 'none';
+      setMountActive(old, false);
+    }
 
     let m = mounts.get(id);
     const firstMount = !m;
@@ -260,6 +273,7 @@ async function selectGame(id) {
       mounts.set(id, m);
     }
     m.el.style.display = 'block';
+    setMountActive(m, true);
     activeId = id;
     buildAssetList(m);
     if (firstMount) await runAsset(m, 0); // load the first asset on first visit

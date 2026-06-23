@@ -53,11 +53,13 @@ To do:
     * Part I done: a clean 64 KB MBC1 cartridge (4×16 KB banks), header + both
       checksums + Nintendo logo all verified, memory map and CPU vectors decoded.
       Key finding: the Game Boy CPU is the **Sharp LR35902**, not a Z80, so the
-      shared `tools/z80` does not apply. Full Game Boy toolchain now built and
-      verified: `tools/sm83` (disassembler + CPU core), `cmd/dissm83`,
-      `cmd/codetracesm83`, and the `tools/gameboy` machine-model oracle (boots SML,
-      populates VRAM). Next (Part II): trace the boot path (`$0100→$0150→$0185`) and
-      the engine, using both static tracing and the live oracle
+      shared `tools/z80` does not apply. Full Game Boy toolchain built and verified:
+      `tools/sm83` (disassembler + CPU core), `cmd/dissm83`, `cmd/codetracesm83`, and
+      the `tools/gameboy` machine-model oracle (boots SML, populates VRAM). Part II
+      done: cold-start at `$0185` (hardware/LCD/sound init, RAM clear, HRAM OAM-DMA
+      routine, bank shadows), the VBlank/STAT/timer handlers, and the VBlank-synced
+      main loop `$0226→$0296` with the `RST $28` state dispatcher (LCD-on + `EI` at
+      `$0420`, oracle-pinned). Next (Part III): the state machine and engine
 * Tools
     * Disassembler should be better at segmenting functions; currently jumps within a function are treated as separate sub-routines; try to document parameters of sub-routines (which registers are used?)
 

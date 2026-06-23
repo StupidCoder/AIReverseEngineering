@@ -27,7 +27,7 @@ and adds Game-Boy-specific opcodes (`LDH`, `LD (C),A`, `LD (a16),A`, `STOP`, `SW
 **`cmd/dissm83`** CLI — has been built for this game (mirroring `tools/z80`); the
 hand decodes below were confirmed against it. All addresses are CPU addresses
 (16-bit, `$0000`–`$FFFF`) unless a *file offset* is called out; bytes are 8-bit.
-Part I is complete; Parts II–V are stubbed.
+Parts I–II are complete; Parts III–V are stubbed.
 
 ---
 
@@ -41,6 +41,12 @@ Part I is complete; Parts II–V are stubbed.
   - [5. The CPU vectors](#5-the-cpu-vectors)
   - [6. What's in each bank](#6-whats-in-each-bank)
 - [Part II — Boot and initialization](#part-ii--boot-and-initialization)
+  - [1. Entry and cold start (`$0100` → `$0150` → `$0185`)](#1-entry-and-cold-start-0100--0150--0185)
+  - [2. Bringing up the hardware](#2-bringing-up-the-hardware)
+  - [3. Clearing memory and the HRAM DMA routine](#3-clearing-memory-and-the-hram-dma-routine)
+  - [4. The sound engine and the bank shadows](#4-the-sound-engine-and-the-bank-shadows)
+  - [5. The interrupt handlers](#5-the-interrupt-handlers)
+  - [6. The main loop (`$0226` → `$0296`)](#6-the-main-loop-0226--0296)
 - [Part III — Engine architecture](#part-iii--engine-architecture)
 - [Part IV — Graphics and data formats](#part-iv--graphics-and-data-formats)
 - [Part V — Game mechanics](#part-v--game-mechanics)
@@ -261,11 +267,178 @@ Parts II–IV, using the new `cmd/dissm83` disassembler.
 
 # Part II — Boot and initialization
 
-*Stubbed.* The cold-start path `$0100 → $0150 → $0185`: `DI`, set `IF`/`IE`, bring up
-the LCD and audio registers, clear VRAM/WRAM, load the initial tiles and palette,
-enable interrupts, and fall into the main loop. The full toolchain is now in place —
-`cmd/dissm83`, `cmd/codetracesm83`, and the `tools/gameboy` emulation oracle (see the
-appendix) — so this can be traced statically and confirmed against a live run.
+When the Game Boy's internal boot ROM finishes scrolling the Nintendo logo it jumps
+to the cartridge entry at `$0100`. From there Super Mario Land runs a single linear
+cold-start routine, sets up the hardware and clears memory, then drops into a tight
+**frame loop** synchronised to the LCD's vertical blank. This part follows that path
+end to end. It was traced statically with `cmd/dissm83`/`cmd/codetracesm83` and the
+control-flow facts that the `RST`-table dispatch hides from a static trace (where the
+LCD is switched on, where interrupts are enabled) were pinned by running the ROM on
+the `tools/gameboy` oracle.
+
+## 1. Entry and cold start (`$0100` → `$0150` → `$0185`)
+
+The header entry is the usual two-step shim — `$0100: NOP ; JP $0150`, and `$0150: JP
+$0185` — that hops over the header bytes into the real routine. Cold start opens by
+disabling interrupts and seeding the interrupt registers:
+
+```
+0185  3E 03      LD A,$03
+0187  F3         DI
+0188  E0 0F      LDH ($FF0F),A    ; IF  = $03
+018A  E0 FF      LDH ($FFFF),A    ; IE  = $03  -> VBlank (bit0) + LCD STAT (bit1)
+```
+
+`IE = $03` is the interrupt set the game runs with: **VBlank and STAT only**. The
+timer interrupt (bit 2), whose handler sits at `$0050`, is *not* enabled at boot.
+
+## 2. Bringing up the hardware
+
+Next the LCD, the palettes and the sound chip are configured. The LCD is handled with
+the standard "turn it off safely" dance — you may only disable the LCD during vertical
+blank, so the code switches it on, waits for the raster to reach a VBlank line, and
+only then switches it off so VRAM can be cleared and loaded:
+
+```
+018C  3E 40 / E0 41          STAT ($FF41) = $40   ; LYC=LY interrupt source
+0190  AF / E0 42 / E0 43     SCY=0, SCX=0
+0197  3E 80 / E0 40          LCDC = $80           ; LCD on, everything else off
+019B  F0 44 / FE 94 / 20 FA  wait until LY ($FF44) == $94 (in VBlank)
+01A1  3E 03 / E0 40          LCDC = $03           ; LCD OFF (bit7=0), BG+OBJ enabled
+01A5  3E E4 / E0 47 / E0 48  BGP = OBP0 = $E4     ; the classic 11-10-01-00 ramp
+01AB  3E 54 / E0 49          OBP1 = $54
+01AF  …                      NR52=$80, NR51=$FF, NR50=$77  ; sound on, full volume, both sides
+01BA  31 FF CF               LD SP,$CFFF          ; the stack lives at the top of WRAM
+```
+
+## 3. Clearing memory and the HRAM DMA routine
+
+Four short fill loops then zero the working memory — WRAM, VRAM, OAM and HRAM — each a
+`LD (HL-),A` countdown:
+
+| From → to | Region |
+|---|---|
+| `$DFFF` ↓ `$C000` | work RAM (and the unmapped cart-RAM window above it) |
+| `$9FFF` ↓ `$8000` | VRAM (tiles + maps) |
+| `$FEFF` ↓ `$FE00` | OAM (and the unusable bytes above it) |
+| `$FFFE` ↓ `$FF80` | HRAM |
+
+Immediately after, a 12-byte routine is copied from `$3F7D` into HRAM at `$FFB6`:
+
+```
+01ED  0E B6 / 06 0C / 21 7D 3F      LD C,$B6 ; LD B,$0C ; LD HL,$3F7D
+01F4  2A / E2 / 0C / 05 / 20 FA     loop: LD A,(HL+) ; LDH (C),A ; INC C ; DEC B ; JR NZ
+```
+
+The copied routine is the **OAM DMA trigger**, and it lives in HRAM for a hardware
+reason: during an OAM DMA the CPU can only reach HRAM, so the routine that kicks the
+DMA and waits for it must itself execute from there.
+
+```
+FFB6  3E C0 / E0 46     LD A,$C0 ; LDH ($FF46),A   ; DMA OAM from $C000-$C09F
+FFBA  3E 28 / 3D / 20 FD / C9   LD A,$28 ; (loop) DEC A ; JR NZ ; RET   ; ~160-cycle wait
+```
+
+The VBlank handler `CALL`s `$FFB6` every frame ([§5](#5-the-interrupt-handlers)), so
+the sprite table is uploaded from a `$C000` shadow buffer once per frame.
+
+## 4. The sound engine and the bank shadows
+
+With memory clear, the cold start initialises the audio driver, which lives in bank 3:
+
+```
+020D  3E 03 / EA 00 20    LD A,$03 ; LD ($2000),A     ; page bank 3 into $4000-$7FFF
+0212  EA A4 C0            LD ($C0A4),A                ; remember the current bank
+021C  CD F3 7F            CALL $7FF3                  ; -> the bank-3 sound init (JP $6B26)
+021F  3E 02 / EA 00 20    LD A,$02 ; LD ($2000),A     ; page bank 2
+0224  E0 FD               LDH ($FFFD),A               ; shadow the current bank in HRAM
+```
+
+Two details worth noting for the rest of the analysis. First, the active ROM bank is
+**shadowed** in `$FFFD` (HRAM) and `$C0A4` (WRAM): because the `$4000`–`$7FFF` window
+is constantly re-paged to reach code and data in different banks, routines save the
+current bank, switch, do their work, and restore it from the shadow — the same pattern
+the timer ISR uses ([§5](#5-the-interrupt-handlers)). Second, the cold start makes a
+few cross-bank calls this way (a save-data check around `$DA1D`, then `CALL $47F2` in
+bank 3) before falling through into the main loop at `$0226`.
+
+## 5. The interrupt handlers
+
+The CPU's fixed interrupt vectors hold short jumps to the handler bodies (which are
+placed in the later, unused vector slots — see Part I §5). With `IE = $03` only two
+fire in normal play:
+
+**VBlank (`$0040` → `$0060`).** The per-frame heartbeat. It saves all registers, runs
+a fixed chain of update routines, uploads the sprites, bumps the frame counter, resets
+the scroll, and raises the flag the main loop waits on:
+
+```
+0060  PUSH AF/BC/DE/HL
+0064  CALL $224F ; CALL $1B7D ; CALL $1C2A   ; graphics / scroll / table updates
+006D  CALL $FFB6                              ; OAM DMA (from HRAM)
+0070  CALL $3F24 ; CALL $3D61 ; CALL $23F8    ; more per-frame work
+0079  21 AC FF / 34                           ; INC ($FFAC)  — the frame counter
+…     (state-dependent work on $FFB3)
+0088  AF / E0 43 / E0 42                      ; SCX=0, SCY=0
+008D  3C / E0 85                              ; LD A,1 ; LDH ($FF85),A  — "frame done" flag
+0090  POP HL/DE/BC/AF ; RETI
+```
+
+**LCD STAT (`$0048` → `$0095`).** A mid-frame raster split. It spins until the LCD
+enters H-blank (`STAT & 3`), then reloads `SCX` from `$FFA4`:
+
+```
+0095  PUSH AF/HL
+0097  F0 41 / E6 03 / 20 FA   wait for H-blank
+009D  …                       reload SCX = $FFA4 (and related state)
+```
+
+That is how the **fixed status bar** coexists with the scrolling playfield: the screen
+is drawn with one horizontal scroll, and the STAT interrupt switches the scroll part
+way down the frame. (The `STAT = $40` written at boot armed the LYC=LY source.)
+
+**Timer (`$0050`).** Present but not enabled at boot. As shown in Part I, it pages in
+bank 3, calls the sound engine at `$7FF0`, and restores the bank — a second, finer
+clock for the audio. In normal play the music is also serviced from the VBlank chain.
+
+## 6. The main loop (`$0226` → `$0296`)
+
+The cold start falls into a loop whose body (`$0226`–`$0292`) does the per-frame
+bank/​save housekeeping and reads input, then dispatches the current **game state** and
+parks the CPU until the next frame:
+
+```
+0293  CD A3 02     CALL $02A3        ; run the current state
+0296  76           HALT              ; sleep until an interrupt
+0297  F0 85        LDH A,($FF85)     ; the VBlank "frame done" flag
+0299  A7 / 28 FA   AND A ; JR Z,$0296 ; not a real frame end? keep sleeping
+029C  AF / E0 85   clear $FF85
+029F  18 85        JR $0226          ; next frame
+```
+
+`$02A3` is the **state dispatcher**: it reads the state index from `$FFB3` and does
+`RST $28`, the jump-table gateway from Part I — the inline word table right after the
+`RST` (`$02A6`) selects one top-level handler per state (title, demo, gameplay, …).
+
+The dispatcher is also where the last piece of initialisation happens, which a static
+trace can't see because it can't follow the `RST $28` table. Running the ROM on the
+oracle pins it: on the first frames the state handler reaches `$0420`, which finishes
+the boot by clearing pending interrupts, **switching the LCD on**, and **enabling
+interrupts**:
+
+```
+0425  AF / E0 0F        IF = 0           ; drop anything pending
+0428  3E C3 / E0 40     LCDC = $C3       ; LCD on; BG+OBJ on; BG tiles $8000, map $9800
+042C  FB                EI               ; interrupts live from here
+042D  3E 0F / E0 B3     $FFB3 = $0F      ; advance the game state
+```
+
+From this point the machine is in steady state: each loop iteration is exactly one
+displayed frame — game logic runs in the body and the state handler, **all rendering
+and the sprite DMA happen inside the VBlank interrupt**, and the `HALT`/`$FF85`
+handshake keeps the two in lock-step. After one emulated second the oracle is sitting
+in this loop with `IE = $03`, `LCDC = $C3` and 2 KB of tile data in VRAM. The state
+machine the dispatcher drives is the subject of Part III.
 
 # Part III — Engine architecture
 

@@ -406,6 +406,17 @@ is the surface again, harder, and landing back on the base deck ends the mission
 rescued men and bonuses into a <strong>rank from 0 to 15</strong>, shown as one of four bird names —
 Sparrow, Condor, Hawk, Eagle — and a class number from 4 up to 1, with Eagle Class 1 at the very top.</p>
 `,
+    music: `
+<div class="info-eyebrow">Fort Apocalypse · Music</div>
+<p>Fort Apocalypse has no separate in-game score. Its one piece of music is the
+<strong>loading-screen tune</strong> — the three-voice SID piece that plays under the U.S. Gold
+loading screen while the game streams in from tape. That tune is more than music: it is a small
+bytecode program whose commands also patch the machine as it plays, including writing the jump that
+actually starts the game. It is described in full under <strong>Image &amp; Loader</strong>.</p>
+<p>Once play begins, the SID is given over entirely to <strong>sound effects</strong>. The two raster
+handlers drive the audio each frame — the copter's engine, gunfire, explosions, and the warning tones —
+rather than a continuous melody, so the gameplay itself runs without a backing track.</p>
+`,
   },
   turrican: {},
   marble: {},

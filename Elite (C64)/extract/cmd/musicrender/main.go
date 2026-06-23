@@ -44,13 +44,19 @@ type player struct {
 	c7tog, c8tog  bool
 	chip          *sid.SID
 	done          bool
-	solo          int // -1 = all voices; 0/1/2 = only gate that voice (for diagnostics)
+	solo          int  // -1 = all voices; 0/1/2 = only gate that voice (for diagnostics)
+	regdump       bool // print every "reg value" SID write (to diff against VICE)
 }
 
 func (p *player) fetch() uint8 { p.ptr++; return p.mem[p.ptr] }
 
 // write a SID register (offset from $D400).
-func (p *player) w(reg int, v uint8) { p.chip.Write(uint8(reg), v) }
+func (p *player) w(reg int, v uint8) {
+	if p.regdump {
+		fmt.Printf("%d %d\n", reg, v)
+	}
+	p.chip.Write(uint8(reg), v)
+}
 
 // noteOn writes the freq for a voice and retriggers its gate with the current waveform.
 // gates are reg $04/$0B/$12 for voices 1/2/3 (offsets 4, 11, 18).
@@ -92,11 +98,13 @@ func (p *player) runCommands() {
 			p.gate(1)
 			p.gate(2)
 		case 6: // INC $BDD7 (section counter) -- no audio effect
-		case 7: // set ADSR for all three voices: AD1 AD2 AD3 SR1 SR2 SR3
+		case 7: // set ADSR: the handler writes all three attack/decays, then all sustain/releases
 			ad := [3]uint8{p.fetch(), p.fetch(), p.fetch()}
 			sr := [3]uint8{p.fetch(), p.fetch(), p.fetch()}
 			for vi := 0; vi < 3; vi++ {
 				p.w(vi*7+5, ad[vi])
+			}
+			for vi := 0; vi < 3; vi++ {
 				p.w(vi*7+6, sr[vi])
 			}
 		case 8, 0: // step time: hold for the default length
@@ -251,6 +259,9 @@ func main() {
 	for _, a := range os.Args {
 		if a == "-debug" {
 			debug = true
+		}
+		if a == "-regdump" {
+			p.regdump = true
 		}
 	}
 	samplesPerFrame := srate / frameHz

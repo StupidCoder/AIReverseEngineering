@@ -642,9 +642,13 @@ placement entry to a drawn enemy is <strong>type → handler → sprite</strong>
 <h2>Starting position</h2>
 <p>Each scene also records its initial camera tile and the player's on-screen offset, so the player spawns
 at camera-plus-offset — the scene's intended starting position, which is the point the viewer frames each
-scene on. Turrican's signature weapon is the <strong>spinning energy beam</strong>: holding the fire button
-deploys it, and while it is active the player can sweep it through its 32 rotation angles but cannot move,
-before it releases in a short burst.</p>
+scene on.</p>
+
+<h2>Weapons</h2>
+<p>Turrican's signature weapon is the <strong>spinning energy beam</strong>: holding the fire button deploys
+it, and while it is active the player can sweep it through its 32 rotation angles but cannot move, before it
+releases in a short burst. Its sprite is one of the shared resident sprites — the same 32-frame rotation
+plus burst — rather than a per-world enemy graphic, so it is available in every world.</p>
 `,
   },
   marble: {},

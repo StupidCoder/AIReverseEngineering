@@ -134,6 +134,7 @@ const SYSTEMS = [
   { full: 'Amiga', short: 'Amiga' },
   { full: 'Commodore 64', short: 'C64' },
   { full: 'Sega Game Gear', short: 'Game Gear' },
+  { full: 'Nintendo Game Boy', short: 'Game Boy' },
 ];
 const CHEVRON = '<svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>';
 

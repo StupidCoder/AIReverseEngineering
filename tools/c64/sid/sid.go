@@ -11,6 +11,8 @@
 // faithful enough to reproduce a tune's pitch, rhythm, envelopes and timbre.
 package sid
 
+import "math"
+
 // PAL is the PAL C64 system clock in Hz (the SID is clocked from it).
 const PAL = 985248.0
 const NTSC = 1022727.0
@@ -58,11 +60,17 @@ type SID struct {
 	sAcc    float64
 	// filter state (state-variable)
 	lp, bp float64
+	// anti-alias decimation: a 4-pole low-pass run at the clock rate before sampling, so
+	// the waveforms' high harmonics don't alias down (which would inflate the bright voices).
+	aaA                float64
+	aa1, aa2, aa3, aa4 float64
 }
 
 // New makes a SID clocked at clock Hz, producing samples at sampleRate Hz.
 func New(clock, sampleRate float64) *SID {
 	s := &SID{clock: clock, srate: sampleRate, cycPerS: clock / sampleRate}
+	// anti-alias low-pass at ~19 kHz (just under the output Nyquist), as a one-pole coefficient
+	s.aaA = 1.0 - math.Exp(-2.0*3.14159265358979*19000.0/clock)
 	for i := range s.v {
 		s.v[i].noise = 0x7FFFF8
 		s.v[i].expPer = 1
@@ -312,14 +320,21 @@ func (s *SID) Env(v int) uint8 { return s.v[v].env }
 // Gate reports whether voice v's gate bit is set — for diagnostics.
 func (s *SID) Gate(v int) bool { return s.v[v].ctrl&1 != 0 }
 
-// Sample advances the chip by one output-sample period and returns the sample.
+// Sample advances the chip by one output-sample period and returns the sample. The SID is
+// clocked every system cycle and its output run through the anti-alias low-pass; the sample
+// is the filtered value at the decimation instant, so the bright waveforms don't alias.
 func (s *SID) Sample() int16 {
 	s.sAcc += s.cycPerS
 	for s.sAcc >= 1.0 {
 		s.clockCycle()
+		o := s.output()
+		s.aa1 += s.aaA * (o - s.aa1)
+		s.aa2 += s.aaA * (s.aa1 - s.aa2)
+		s.aa3 += s.aaA * (s.aa2 - s.aa3)
+		s.aa4 += s.aaA * (s.aa3 - s.aa4)
 		s.sAcc -= 1.0
 	}
-	out := s.output()
+	out := s.aa4
 	if out > 1.0 {
 		out = 1.0
 	} else if out < -1.0 {

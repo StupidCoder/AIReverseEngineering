@@ -86,6 +86,25 @@ func DecodeLevel(rom []byte, bank int, ffe4 byte, start int) [][16]byte {
 	return DecodeLevelAt(rom, bank, p1, start)
 }
 
+// worldBank maps a world (1-4) to its level-data ROM bank, from the master loader at
+// $0D64 (worlds 2 and 4 share bank 1).
+var worldBank = [5]int{0, 2, 1, 3, 1}
+
+// DecodeLevelByID decodes a level by its in-game id: the high nibble is the world
+// (1-4) and the low nibble the level within it (1-3), so 0x11 = 1-1 and 0x43 = 4-3.
+// This mirrors the ROM's chain exactly: the level-id table at $0470 turns the id into
+// a global index ffe4 = (world-1)*3 + (level-1), $0D64 selects the bank by world, and
+// $4000[ffe4] in that bank is the level's screen-order table. The main map starts at
+// screen index 3 (screen 0 is the lead-in, 1 and 2 the pipe bonus rooms).
+func DecodeLevelByID(rom []byte, id byte) (cols [][16]byte, bank int, p1 uint16) {
+	world := int(id >> 4)
+	level := int(id & 0x0F)
+	ffe4 := byte((world-1)*3 + (level - 1))
+	bank = worldBank[world]
+	p1 = bankWord(rom, bank, 0x4000+uint16(ffe4)*2)
+	return DecodeLevelAt(rom, bank, p1, 3), bank, p1
+}
+
 // Screen decodes one 20-column screen: p1 is the screen-order table and idx the
 // screen index; p1[idx] points at the screen's RLE column data.
 func Screen(rom []byte, bank int, p1 uint16, idx int) [][16]byte {

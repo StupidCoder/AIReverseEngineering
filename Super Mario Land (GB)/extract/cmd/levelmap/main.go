@@ -21,12 +21,12 @@ import (
 
 func main() {
 	rom := flag.String("rom", "../Super Mario Land (World).gb", "ROM path")
-	bank := flag.Int("bank", 2, "ROM bank holding the level data")
-	p1s := flag.String("p1", "6192", "screen-order table address (hex)")
+	id := flag.String("id", "", "level id, e.g. 11 for 1-1 or 43 for 4-3 (selects bank+table automatically)")
+	bank := flag.Int("bank", 2, "ROM bank holding the level data (when -id is not used)")
+	p1s := flag.String("p1", "6192", "screen-order table address (hex; when -id is not used)")
 	start := flag.Int("start", 3, "first main-path screen index (0=lead-in, 1/2=bonus rooms)")
 	out := flag.String("o", "../rendered/level-1-1-map.png", "output PNG")
 	flag.Parse()
-	p1v, _ := strconv.ParseUint(*p1s, 16, 16)
 
 	data, err := os.ReadFile(*rom)
 	if err != nil {
@@ -34,12 +34,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Decode the map from the ROM.
-	cols := level.DecodeLevelAt(data, *bank, uint16(p1v), *start)
+	// Decode the map from the ROM, either by level id (master lookup) or bank+table.
+	var cols [][16]byte
+	if *id != "" {
+		idv, _ := strconv.ParseUint(*id, 16, 8)
+		var p1 uint16
+		cols, *bank, p1 = level.DecodeLevelByID(data, byte(idv))
+		fmt.Printf("level $%s: bank %d, order table $%04X\n", *id, *bank, p1)
+	} else {
+		p1v, _ := strconv.ParseUint(*p1s, 16, 16)
+		cols = level.DecodeLevelAt(data, *bank, uint16(p1v), *start)
+	}
 	fmt.Printf("decoded %d columns (%d tiles wide x 16 tall)\n", len(cols), len(cols))
 
-	// Tile graphics + palette: run the oracle to the level so VRAM holds this world's
-	// tiles (used only to draw the picture).
+	// Tile graphics + palette: run the oracle to a level and read back VRAM (used only
+	// to draw the picture; the map itself is decoded from the ROM above). When a level
+	// id is given, force $FFB4 so the loader pages this level's world bank and copies
+	// that world's tile set — the only thing taken from the oracle here is the tiles.
 	m := gameboy.NewMachine(data)
 	m.RunFrames(80)
 	for f := 0; f < 6; f++ {
@@ -47,7 +58,15 @@ func main() {
 		m.RunFrame()
 	}
 	m.Buttons = 0
-	m.RunFrames(60)
+	if *id != "" {
+		idv, _ := strconv.ParseUint(*id, 16, 8)
+		for f := 0; f < 40; f++ {
+			m.Write(0xFFB4, byte(idv))
+			m.RunFrame()
+		}
+	} else {
+		m.RunFrames(60)
+	}
 	vram := m.VRAM()
 	lcdc := m.Read(0xFF40)
 	pal := gameboy.DMGPalette(m.Read(0xFF47))

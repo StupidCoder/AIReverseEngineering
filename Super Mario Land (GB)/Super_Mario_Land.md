@@ -682,21 +682,25 @@ start at 0**. SML reserves the low indices: screen 0 is a start lead-in, and **s
 blindly — the first mistake here — splices the bonus coin-rooms into the middle of the
 level; the main map is `P1[3..]` up to the `$FF` terminator.
 
-The level data lives in **banks 1–3**: each bank holds a `$4000` order-table-pointer
-table, and `ffe4` selects a level within it. The master loader at **`$0D64`** maps the
-world (the high nibble of the level id in `$FFB4`) to its bank:
+Which bank and which `ffe4` is **not guessed — it is traced through the ROM's own
+lookup**. A level has an id with the world in the high nibble and the level in the low
+(`$11` = 1‑1 … `$43` = 4‑3). The table at **`$0470`** turns that id into a flat index
+`ffe4` = `(world−1)*3 + (level−1)` (0–11), the master loader **`$0D64`** maps the world
+to its data bank, and `$4000[ffe4]` in that bank is the screen-order table:
 
-| World | Bank | Order tables (`$4000[0/1/2]`) | Tile source (`$0DE4` table) | Status |
-|---|---|---|---|---|
-| 1 | 2 | `$6192` / `$61B7` / `$61DA` | special (`$0D30`) | maps decoded & rendered ✓ |
-| 2 | 1 | `$55BB` / `$55E2` / `$5605` | bank 1 `$4032` | maps decoded ✓ (tiles pending) |
-| 3 | 3 | `$503F` / `$5074` / `$509B` | bank 3 `$4032` | maps decoded ✓ (tiles pending) |
-| 4 | 1 | *(not yet pinned)* | bank 1 `$47F2` | open |
+| World | Bank | Order tables (`$4000[ffe4]`) |
+|---|---|---|
+| 1 | 2 | `$6192` / `$61B7` / `$61DA` |
+| 2 | 1 | `$55BB` / `$55E2` / `$5605` |
+| 3 | 3 | `$503F` / `$5074` / `$509B` |
+| 4 | 1 | `$5630` / `$5665` / `$5694` |
 
-Worlds 2 and 4 share bank 1. Each world also loads a per-world **tile set** — the loader
-copies it from the bank-relative pointer in the `$0DE4`/`$0DEA` tables into VRAM — so a
-correct render of worlds 2–4 needs those tile sets pulled from ROM (the geometry decodes
-regardless of the tiles).
+Worlds 2 and 4 share bank 1 (at `ffe4` 3–5 and 9–11). Each world also loads its own
+**tile set** — `$0D64` copies it from per-world pointers (`$0DE4`→`$8A00`, `$0DEA`→
+`$9310`; World 1 is special at `$0D30`/`$05D0`→`$9000`). `DecodeLevelByID` does the whole
+chain from a level id; all twelve maps decode from the ROM and render in their own world's
+graphics (the tiles come from a short oracle run nudged to that world by forcing `$FFB4`,
+used only to draw the picture).
 
 A **column** is 16 tiles tall and built from runs, starting blank (the `$2C` space
 tile):
@@ -717,11 +721,10 @@ it is the level start-to-flag:
 
 ![Level 1-1 main path, decoded from the ROM](rendered/level-1-1-map.png)
 
-`extract/cmd/levelmap` decodes any level (`-bank N -p1 ADDR -start N`) and renders it
-(the tile graphics are taken from a short oracle run only to draw the picture; the map
-is decoded from ROM bytes). Still to do: the **bonus rooms** (screens 1 and 2) and, for
-the other three worlds, pinning each world's bank and pulling its tile set out of ROM so
-its map renders in its own graphics, plus the object/enemy spawn lists — Part V.
+`extract/cmd/levelmap -id 11` (… `43`) decodes any of the twelve levels via the master
+lookup and renders it. All four worlds' maps are committed under `rendered/`. Still to
+do: the **bonus rooms** (screens 1 and 2 of each level) and the object/enemy spawn lists
+(the bank-3 tables at `$651C`/`$6536`) — Part V.
 
 # Part V — Game mechanics
 

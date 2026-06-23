@@ -253,7 +253,10 @@ func (s *SID) clockCycle() {
 // cutoff curve is nonlinear; this is a smooth approximation over ~30Hz..12kHz.
 func (s *SID) cutoffW() float64 {
 	fc := float64(uint16(s.fcHi)<<3 | uint16(s.fcLo)) // 0..2047
-	hz := 30.0 + (12000.0-30.0)*(fc/2047.0)*(fc/2047.0)
+	// 6581 cutoff curve: rises quickly off the floor, so a mostly-linear map (gently
+	// shaped) rather than a steep quadratic — the latter buries mid-range cutoffs too low.
+	n := fc / 2047.0
+	hz := 100.0 + (12000.0-100.0)*(0.35*n*n+0.65*n)
 	w := 2.0 * 3.14159265358979 * hz / s.clock
 	if w > 1.0 {
 		w = 1.0
@@ -280,7 +283,7 @@ func (s *SID) output() float64 {
 	// state-variable filter. The 6581 filter is weak: even at max resonance the peak is
 	// modest, so map resonance to a gentle damping range (Q ~1..3) rather than self-oscillation.
 	w := s.cutoffW()
-	q := 1.0 - float64(s.res>>4)/15.0*0.65 // resonance -> damping (res 15 -> q 0.35)
+	q := 1.0 - float64(s.res>>4)/15.0*0.82 // resonance -> damping (res 15 -> q ~0.18, Q ~5)
 	hp := filtIn - s.lp - q*s.bp
 	s.bp += w * hp
 	if s.bp > 2 {

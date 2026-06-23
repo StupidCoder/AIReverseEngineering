@@ -16,6 +16,7 @@ package main
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,7 +26,7 @@ import (
 
 const (
 	srate    = 44100.0
-	cycFrame = 19656.0      // PAL VIC frame = 312 lines * 63 cycles
+	cycFrame = 19656.0 // PAL VIC frame = 312 lines * 63 cycles
 	frameHz  = sid.PAL / cycFrame
 )
 
@@ -43,6 +44,7 @@ type player struct {
 	c7tog, c8tog  bool
 	chip          *sid.SID
 	done          bool
+	solo          int // -1 = all voices; 0/1/2 = only gate that voice (for diagnostics)
 }
 
 func (p *player) fetch() uint8 { p.ptr++; return p.mem[p.ptr] }
@@ -53,9 +55,12 @@ func (p *player) w(reg int, v uint8) { p.chip.Write(uint8(reg), v) }
 // noteOn writes the freq for a voice and retriggers its gate with the current waveform.
 // gates are reg $04/$0B/$12 for voices 1/2/3 (offsets 4, 11, 18).
 func (p *player) gate(vi int) {
+	if p.solo >= 0 && vi != p.solo {
+		return
+	}
 	reg := []int{4, 11, 18}[vi]
-	p.w(reg, 0)            // STY $D40x (Y=0): drop gate -> retrigger edge
-	p.w(reg, p.ctrl[vi])   // waveform + gate on
+	p.w(reg, 0)          // STY $D40x (Y=0): drop gate -> retrigger edge
+	p.w(reg, p.ctrl[vi]) // waveform + gate on
 }
 
 // runCommands processes opcodes until a time-step op sets c6 (or the loop op ends it).
@@ -229,10 +234,17 @@ func main() {
 		fmt.Println("read:", err)
 		os.Exit(1)
 	}
+	solo := -1
+	for i := 1; i < len(os.Args)-1; i++ {
+		if os.Args[i] == "-solo" {
+			fmt.Sscanf(os.Args[i+1], "%d", &solo)
+		}
+	}
 	p := &player{
 		mem:  mem,
 		ptr:  start, // reader pre-increments, so the first byte read is start+1
 		dur:  8,
+		solo: solo,
 		chip: sid.New(sid.PAL, srate),
 	}
 	debug := false
@@ -274,6 +286,29 @@ func main() {
 	}
 	secs := float64(len(pcm)) / srate
 	fmt.Printf("rendered %d frames -> %d samples (%.1fs), loop=%v\n", frames, len(pcm), secs, p.done)
+
+	// report raw RMS/peak (pre-normalise) for balance diagnostics
+	var sumsq float64
+	var rawPeak float64
+	for _, s := range pcm {
+		f := float64(s)
+		sumsq += f * f
+		if f < 0 {
+			f = -f
+		}
+		if f > rawPeak {
+			rawPeak = f
+		}
+	}
+	rms := 0.0
+	if len(pcm) > 0 {
+		rms = (sumsq / float64(len(pcm)))
+		rms = math.Sqrt(rms)
+	}
+	fmt.Printf("raw RMS=%.1f peak=%.0f (solo=%d)\n", rms, rawPeak, solo)
+	if solo >= 0 {
+		return // diagnostic run: don't write audio
+	}
 
 	// peak-normalise to a comfortable level (the raw mix sits low because of envelopes/rests)
 	var peak int16

@@ -27,7 +27,7 @@ and adds Game-Boy-specific opcodes (`LDH`, `LD (C),A`, `LD (a16),A`, `STOP`, `SW
 **`cmd/dissm83`** CLI — has been built for this game (mirroring `tools/z80`); the
 hand decodes below were confirmed against it. All addresses are CPU addresses
 (16-bit, `$0000`–`$FFFF`) unless a *file offset* is called out; bytes are 8-bit.
-Parts I–IV are complete; Part V is stubbed.
+Parts I–IV are complete; Part V is in progress (object/enemy placement done).
 
 ---
 
@@ -713,23 +713,64 @@ $FE                 : end of the column
 ```
 
 The tiles are 8×8 background indices; ids like `$70`/`$80` are normal tiles that the
-engine *also* tracks as interactive blocks (its coin/`?`-block bookkeeping lives in
-separate bank-3 tables at `$651C`/`$6536`, indexed by the same `ffe4`/page — the object
-layer, not the map). Decoding World 1‑1's main path (`P1[3..]`) yields **300 columns**
-(15 screens) that match the game's own decoded columns; rendered with the world's tiles
-it is the level start-to-flag:
+engine *also* tracks as interactive **blocks** — `?`-blocks, coins and breakable bricks.
+That bookkeeping lives in separate bank-3 tables at `$651C`/`$6536` (indexed by `ffe4`),
+read by the column decoder when it lays down a `$70`/`$80`/`$5F` tile (`$22A0`/`$2318`).
+These are *blocks*, not moving enemies — the enemy/object placement list is a different
+table entirely (Part V §1). Decoding World 1‑1's main path (`P1[3..]`) yields **300
+columns** (15 screens) that match the game's own decoded columns; rendered with the
+world's tiles it is the level start-to-flag:
 
 ![Level 1-1 main path, decoded from the ROM](rendered/level-1-1-map.png)
 
 `extract/cmd/levelmap -id 11` (… `43`) decodes any of the twelve levels via the master
 lookup and renders it. All four worlds' maps are committed under `rendered/`. Still to
-do: the **bonus rooms** (screens 1 and 2 of each level) and the object/enemy spawn lists
-(the bank-3 tables at `$651C`/`$6536`) — Part V.
+do: the **bonus rooms** (screens 1 and 2 of each level) — Part V.
 
 # Part V — Game mechanics
 
-*Stubbed.* Mario's physics, the objects and enemies, the twelve levels across four
-worlds, scoring and progression.
+## 1. Object and enemy placement
+
+Moving objects — enemies, fireballs, moving platforms, the level-end fixtures — are
+*not* in the column RLE (that holds only background tiles and the static block markers
+above). They come from a separate per-level **placement list**, walked by the spawner at
+`$2492` (set up by `$2453`). The chain, traced from the code rather than guessed:
+
+```
+$401A[ffe4]   (in the world's data bank) -> L, the level's placement list
+each entry is 3 bytes, sorted ascending by trigger column:
+  byte0  col   : the scroll column ($C0AB) at which the object spawns. $C0AB advances
+                 once per 16 px of scroll (it counts SCX bit-3 1->0 in the column
+                 decoder), so the object's map column (8 px tiles) is col*2.
+  byte1  pos   : bits 0-4 -> map row ((pos&$1F); the +$10/-OAM-offset cancel out);
+                 bits 6-7 -> a fine sub-column X nudge.
+  byte2  type  : bits 0-6 -> object type id (indexes the $336C init table); bit 7 is a
+                 "second quest" flag — those objects are gated by $FF9A.
+L is terminated by an entry whose col byte is $FF.
+```
+
+At level load `$2453` points `$D010/$D011` at `L`, skipping any entries already behind the
+camera; each frame `$2492` spawns every entry whose trigger column has scrolled in, off the
+right edge (screen X `$D0`), and advances the pointer. The pointer table sits at `$401A`
+in each world's own data bank (W1→2, W2→1, W3→3, W4→1 — the same banking as the map), so a
+global `ffe4` of 0–11 selects the list. All twelve lists decode cleanly (37–81 objects;
+World 4's levels are the longest). The Goombas that open 1‑1 are the first two entries
+(`type $00` at columns `$0C`/`$0F`); the level-end fixtures are the last (`type $0A`/`$0B`).
+
+`level.DecodeObjects`/`DecodeObjectsByID` reimplements this; `extract/cmd/levelmap -id NN`
+overlays the placements on the rendered map (red boxes; amber = second-quest), and they
+ride into the Studio viewer as the **Objects & enemies** layer. The list was located with
+the `extract/cmd/spawntrace` oracle harness — it watches the object slots `$D100`–`$D19F`
+for an `$FF`→type write and dumps a ring buffer of recent banked-ROM reads, which pointed
+straight at the `$401A` table; the data itself is then decoded from the cartridge.
+
+The exact **sprite graphics per type** are a further step: each type has a bespoke handler
+(reached through the slot's handler pointer) that draws its own animated metasprite, so
+there is no flat type→tile table — the object tile art is bulk-loaded per world to VRAM
+`$8A00` from the `$0DE4` source table (World 1 via `$0D30`/`$05D0`).
+
+*Still stubbed:* Mario's physics, the per-type sprite/metasprite decode, scoring and
+progression.
 
 ---
 

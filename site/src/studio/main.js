@@ -20,7 +20,10 @@ const GAMES = [
     make: (V, el, hud) => new V(el, hud),
     list: async (v) => (await v.init()).acts,
     show: (v, lvl, i) => v.loadAct(lvl),
-    layers: [{ id: 'objects', label: 'Objects', default: true }],
+    layers: [
+      { id: 'objects', label: 'Objects', default: true },
+      { id: 'collision', label: 'Collision layer', default: false },
+    ],
     music: async () => ['Green Hills:greenhills', 'Bridge:bridge', 'Jungle:jungle',
       'Labyrinth:labyrinth', 'Scrap Brain:scrapbrain', 'Sky Base:skybase', 'Special Stage:special']
       .map(s => { const [name, f] = s.split(':'); return { name, url: `public/sonic/music/${f}.mp3` }; }),
@@ -39,6 +42,10 @@ const GAMES = [
     make: (V, el, hud) => new V(el, hud),
     list: async (v) => (await v.init()).levels,
     show: (v, lvl, i) => v.loadLevel(lvl),
+    layers: [
+      { id: 'objects', label: 'Objects & enemies', default: true },
+      { id: 'collision', label: 'Collision layer', default: false },
+    ],
     music: async () => (await fetch('public/turrican/music/manifest.json').then(r => r.json()))
       .map(m => ({ name: turricanTrackName(m), url: `public/turrican/music/${m.file}` })),
   },

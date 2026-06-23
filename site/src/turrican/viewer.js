@@ -204,6 +204,12 @@ export class TurricanViewer {
     this.collisionLayer.visible = on;
   }
 
+  // Unified layer toggle (matches the Fort/Sonic viewers, used by the Studio display options).
+  setLayer(name, on) {
+    if (name === 'objects') this.setObjects(on);
+    if (name === 'collision') this.setCollision(on);
+  }
+
   // --- camera (shared pattern with the Fort/Sonic viewers) ----------------
   // Frame the Amiga on-screen viewport (world-pixel rect `view`) centred on the
   // spawn, at 1:1-ish zoom; zoom-out still reaches the whole level.

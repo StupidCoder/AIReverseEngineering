@@ -238,23 +238,25 @@ html, body {
 .item.active .sub { color: var(--accent); }
 .item.active .name { color: #fff; }
 
-/* ---- system accordion (game list: systems -> games) ---- */
-.sys-group { display: flex; flex-direction: column; }
-.sys-header {
+/* ---- accordions: systems in the game list; courses in the Marble asset list ---- */
+.sys-group, .asset-group { display: flex; flex-direction: column; }
+.sys-header, .asset-header {
   flex-direction: row;   /* override .item's column layout */
   align-items: center;
   font-weight: 600;
 }
-.sys-header .name { flex: 1; }
-.sys-header .chevron {
+.sys-header .name, .asset-header .name { flex: 1; }
+.sys-header .chevron, .asset-header .chevron {
   width: 15px; height: 15px;
   flex: 0 0 auto;
   color: var(--faint);
   transition: transform .18s ease, color .18s ease;
 }
-.sys-group.open > .sys-header { color: #fff; }
-.sys-group.open > .sys-header .chevron { transform: rotate(90deg); color: var(--accent); }
-.sys-games {
+.sys-group.open > .sys-header,
+.asset-group.open > .asset-header { color: #fff; }
+.sys-group.open > .sys-header .chevron,
+.asset-group.open > .asset-header .chevron { transform: rotate(90deg); color: var(--accent); }
+.sys-games, .asset-children {
   display: none;
   flex-direction: column;
   gap: 3px;
@@ -262,7 +264,8 @@ html, body {
   padding-left: 8px;
   border-left: 1px solid var(--line);
 }
-.sys-group.open > .sys-games { display: flex; }
+.sys-group.open > .sys-games,
+.asset-group.open > .asset-children { display: flex; }
 
 /* ---- CRT toggle switch + controls ---- */
 .switch {

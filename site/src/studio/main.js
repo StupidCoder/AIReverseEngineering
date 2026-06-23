@@ -78,7 +78,7 @@ const stage = document.getElementById('stage');
 const hud = document.getElementById('hud');
 const panel = document.getElementById('panel');
 const gameList = document.getElementById('gameList');
-const levelList = document.getElementById('levelList');
+const assetList = document.getElementById('assetList');
 const titlecard = document.getElementById('titlecard');
 const spinner = document.getElementById('spinner');
 
@@ -141,24 +141,94 @@ function markActiveGame(id) {
   if (game) openSystem(game.system); // unfold the active game's system
 }
 
-// ---- level list (rebuilt per game) ----
-function buildLevelList(m) {
-  levelList.innerHTML = '';
-  m.levels.forEach((lvl, i) => {
-    const b = document.createElement('button');
-    b.className = 'item' + (i === m.current ? ' active' : '');
-    b.innerHTML = `<span class="name">${lvl.name || `Level ${i + 1}`}</span>`;
-    b.addEventListener('click', () => selectLevel(m.game.id, i));
-    levelList.appendChild(b);
-  });
+// ---- asset list (per game). Most games are a flat list; Marble Madness is a two-level
+//      accordion: course -> { Map, Slopes }. Each leaf has { name, hud, run }. ----
+function assetEntries(m) {
+  const { game, viewer, levels } = m;
+  if (game.id === 'marble') {
+    return levels.map((course, ci) => ({
+      name: course.name,
+      children: [
+        { name: 'Map', hud: `${course.name} · Map`, run: async () => { await game.show(viewer, course, ci); viewer.setMode('tilemap'); } },
+        { name: 'Slopes', hud: `${course.name} · Slopes`, run: async () => { await game.show(viewer, course, ci); viewer.setMode('slopes'); } },
+      ],
+    }));
+  }
+  return levels.map((lvl, i) => ({
+    name: lvl.name || `Asset ${i + 1}`,
+    hud: lvl.name || `Asset ${i + 1}`,
+    run: async () => { await game.show(viewer, lvl, i); game.setup?.(viewer); },
+  }));
 }
 
-function markActiveLevel(i) {
-  [...levelList.children].forEach((b, j) => {
-    const on = j === i;
-    b.classList.toggle('active', on);
-    if (on) b.scrollIntoView({ block: 'nearest' });
-  });
+function addLeaf(m, leaf, parent) {
+  const idx = m.leaves.length;
+  m.leaves.push(leaf);
+  const b = document.createElement('button');
+  b.className = 'item asset-item';
+  b.dataset.idx = idx;
+  b.innerHTML = `<span class="name">${leaf.name}</span>`;
+  b.addEventListener('click', () => selectAsset(m, idx));
+  parent.appendChild(b);
+}
+
+function buildAssetList(m) {
+  assetList.innerHTML = '';
+  m.leaves = [];
+  for (const entry of assetEntries(m)) {
+    if (entry.children) {
+      const group = document.createElement('div');
+      group.className = 'asset-group';
+      const header = document.createElement('button');
+      header.className = 'item asset-header';
+      header.innerHTML = `<span class="name">${entry.name}</span>${CHEVRON}`;
+      header.addEventListener('click', () => toggleAssetGroup(group));
+      group.appendChild(header);
+      const sub = document.createElement('div');
+      sub.className = 'asset-children';
+      for (const leaf of entry.children) addLeaf(m, leaf, sub);
+      group.appendChild(sub);
+      assetList.appendChild(group);
+    } else {
+      addLeaf(m, entry, assetList);
+    }
+  }
+}
+
+function toggleAssetGroup(group) {
+  const open = group.classList.contains('open');
+  for (const g of assetList.querySelectorAll('.asset-group')) g.classList.toggle('open', !open && g === group);
+}
+
+function markActiveAsset(m) {
+  for (const b of assetList.querySelectorAll('.asset-item')) b.classList.toggle('active', +b.dataset.idx === m.currentIdx);
+  const active = assetList.querySelector(`.asset-item[data-idx="${m.currentIdx}"]`);
+  const grp = active && active.closest('.asset-group');
+  for (const g of assetList.querySelectorAll('.asset-group')) g.classList.toggle('open', g === grp);
+  if (active) active.scrollIntoView({ block: 'nearest' });
+}
+
+// run an asset (no busy management — used for the initial selection inside selectGame).
+async function runAsset(m, idx) {
+  const leaf = m.leaves[idx];
+  if (!leaf) return;
+  m.currentIdx = idx;
+  m.currentName = leaf.hud;
+  markActiveAsset(m);
+  await leaf.run();
+}
+
+async function selectAsset(m, idx) {
+  if (busy || idx === m.currentIdx) return;
+  setBusy(true);
+  try {
+    await runAsset(m, idx);
+    updateHud(m);
+  } catch (err) {
+    console.error('studio: failed to show asset', idx, err);
+  } finally {
+    setBusy(false);
+  }
 }
 
 function setBusy(on) {
@@ -177,6 +247,7 @@ async function selectGame(id) {
     if (activeId && mounts.has(activeId)) mounts.get(activeId).el.style.display = 'none';
 
     let m = mounts.get(id);
+    const firstMount = !m;
     if (!m) {
       const el = document.createElement('div');
       el.className = 'mount';
@@ -185,15 +256,14 @@ async function selectGame(id) {
       const Viewer = await game.load();
       const viewer = game.make(Viewer, el, hud);
       const levels = await game.list(viewer);
-      m = { game, el, viewer, levels, current: 0 };
+      m = { game, el, viewer, levels, currentIdx: 0, currentName: '' };
       mounts.set(id, m);
-      await game.show(viewer, levels[0], 0);
-      game.setup?.(viewer);
     }
     m.el.style.display = 'block';
     activeId = id;
-    buildLevelList(m);
-    markActiveLevel(m.current);
+    buildAssetList(m);
+    if (firstMount) await runAsset(m, 0); // load the first asset on first visit
+    else markActiveAsset(m);              // returning to a cached viewer: keep its asset
     await loadGameMusic(game);
     updateHud(m);
     hideTitlecard();
@@ -205,26 +275,8 @@ async function selectGame(id) {
   }
 }
 
-async function selectLevel(id, i) {
-  const m = mounts.get(id);
-  if (!m || busy || i === m.current) return;
-  setBusy(true);
-  try {
-    m.current = i;
-    markActiveLevel(i);
-    await m.game.show(m.viewer, m.levels[i], i);
-    m.game.setup?.(m.viewer);
-    updateHud(m);
-  } catch (err) {
-    console.error('studio: failed to show level', id, i, err);
-  } finally {
-    setBusy(false);
-  }
-}
-
 function updateHud(m) {
-  const lvl = m.levels[m.current];
-  hud.innerHTML = `<b>${m.game.name}</b> · ${m.game.system} &nbsp;—&nbsp; ${lvl.name || `Level ${m.current + 1}`}`;
+  hud.innerHTML = `<b>${m.game.name}</b> · ${m.game.system} &nbsp;—&nbsp; ${m.currentName}`;
 }
 
 function hideTitlecard() {
@@ -444,10 +496,11 @@ new KeyboardCamera(() => {
 buildGameList();
 wireCrt();
 panel.classList.add('open');          // start with the control window open (discoverable)
-// optional deep link: ?game=sonic&level=3
+// optional deep link: ?game=sonic&asset=3 (asset = leaf index in the list)
 const params = new URLSearchParams(location.search);
 const startGame = GAMES.find(g => g.id === params.get('game')) || GAMES[0];
-const startLevel = parseInt(params.get('level'), 10);
+const startAsset = parseInt(params.get('asset') ?? params.get('level'), 10);
 selectGame(startGame.id).then(() => {
-  if (Number.isInteger(startLevel) && startLevel > 0) selectLevel(startGame.id, startLevel);
+  const m = mounts.get(startGame.id);
+  if (m && Number.isInteger(startAsset) && startAsset > 0 && startAsset < m.leaves.length) selectAsset(m, startAsset);
 });

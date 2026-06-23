@@ -93,10 +93,11 @@ func main() {
 		idv, _ := strconv.ParseUint(*id, 16, 8)
 		objs := level.DecodeObjectsByID(data, byte(idv))
 		obp0 := m.Read(0xFF48)
+		typeFrame := level.TypeFrames(data)
 		fmt.Printf("decoded %d objects\n", len(objs))
 		for _, o := range objs {
 			// Real metasprite if we know this type's frame; else a marker box.
-			if fr, ok := level.TypeFrame[o.Type]; ok {
+			if fr, ok := typeFrame[o.Type]; ok {
 				drawSprite(img, vram, level.DecodeMetasprite(data, int(fr)), obp0, o.Col*8, o.Row*8)
 				continue
 			}

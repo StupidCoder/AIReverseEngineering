@@ -108,8 +108,9 @@ var objOrigin = [2]int{12, 12}
 // level.TypeFrame are omitted (the viewer falls back to a marker for them).
 func saveObjIcons(rom []byte, path string, vram []byte, obp0 byte) map[string]int {
 	// Stable order so the atlas is deterministic.
+	typeFrame := level.TypeFrames(rom)
 	var types []int
-	for t := range level.TypeFrame {
+	for t := range typeFrame {
 		types = append(types, int(t))
 	}
 	sort.Ints(types)
@@ -120,7 +121,7 @@ func saveObjIcons(rom []byte, path string, vram []byte, obp0 byte) map[string]in
 		out[fmt.Sprintf("%d", t)] = i
 		ox := objOrigin[0]
 		oy := i*objCell + objOrigin[1]
-		for _, s := range level.DecodeMetasprite(rom, int(level.TypeFrame[byte(t)])) {
+		for _, s := range level.DecodeMetasprite(rom, int(typeFrame[byte(t)])) {
 			for half := 0; half < 2; half++ { // 8x16: top tile, then tile|1
 				tl := gameboy.DecodeTile(vram[int(s.Tile|byte(half))*16:])
 				for py := 0; py < 8; py++ {

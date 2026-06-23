@@ -87,13 +87,42 @@ func DecodeMetasprite(rom []byte, f int) []Sprite {
 	return out
 }
 
-// TypeFrame maps an object type id to a representative metasprite frame (slot+6), observed
-// by playing every level in the oracle (extract/cmd/objsprites). It covers the enemies that
-// appear early in levels; types not seen fall back to a plain marker in the viewer.
-var TypeFrame = map[byte]byte{
-	0x00: 0x01, 0x01: 0x02, 0x04: 0x06, 0x05: 0x08, 0x0D: 0x35,
-	0x28: 0x16, 0x29: 0x16, 0x42: 0x30, 0x43: 0x34, 0x44: 0x34,
-	0x45: 0x44, 0x46: 0x0F,
+// Object behaviour is script-driven: the runner at $263F looks up each object's per-type
+// script via the table at $3495 (indexed by type id) and interprets it ($26AC). Script
+// command $F8 xx sets the animation frame ($FFC6); a type's *base* frame is the first $F8
+// in its script. So we can recover a representative metasprite frame for every type by
+// reading its script — no per-level observation needed (that earlier approach only saw the
+// enemies the oracle's auto-play reached). Verified to match those observations.
+const (
+	scriptTable = 0x3495 // per-type object script pointer table (bank-0 fixed)
+	opSetFrame  = 0xF8   // script opcode: next byte = animation frame id
+)
+
+// TypeBaseFrame returns the base metasprite frame for object type `typ` by scanning its
+// script for the first $F8 (set-frame) command. ok is false if the type has no valid script.
+func TypeBaseFrame(rom []byte, typ byte) (frame byte, ok bool) {
+	p := int(rom[scriptTable+int(typ)*2]) | int(rom[scriptTable+int(typ)*2+1])<<8
+	if p < 0x3500 || p >= 0x3B00 { // outside the script block => not a real object type
+		return 0, false
+	}
+	for i := 0; i < 96 && p+1 < len(rom); i++ {
+		if rom[p] == opSetFrame {
+			return rom[p+1], true
+		}
+		p++
+	}
+	return 0, false
+}
+
+// TypeFrames builds the full type -> base-frame map from the script table.
+func TypeFrames(rom []byte) map[byte]byte {
+	m := map[byte]byte{}
+	for t := 0; t < 0x80; t++ {
+		if fr, ok := TypeBaseFrame(rom, byte(t)); ok {
+			m[byte(t)] = fr
+		}
+	}
+	return m
 }
 
 // DecodeObjects decodes the placement list for global level index ffe4 (0-11) from the

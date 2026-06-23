@@ -418,7 +418,233 @@ handlers drive the audio each frame — the copter's engine, gunfire, explosions
 rather than a continuous melody, so the gameplay itself runs without a backing track.</p>
 `,
   },
-  turrican: {},
+  turrican: {
+    loader: `
+<div class="info-eyebrow">Turrican · Image &amp; Loader</div>
+<p>Turrican ships on a single double-density Amiga floppy that carries <strong>no filesystem</strong> —
+only a boot block the Kickstart ROM will run, and behind it the whole game laid out in a private format
+the loader pulls off by absolute sector. The build preserved here is a one-disk cracked release by
+Tristar &amp; Red Sector, whose loader decompresses the game from a crunched image on boot.</p>
+
+<h2>The disk image</h2>
+<p>An ADF is a flat dump of the floppy's 1760 logical blocks of 512 bytes — block <em>N</em> is simply
+the bytes at offset <em>N</em>&times;512. The first four bytes are the <code>"DOS\\0"</code> boot
+signature, enough for the ROM to accept the disk and run its boot code, and that is the only
+AmigaDOS-conformant thing on it. There is no directory: the program, graphics and levels sit in a
+private layout addressed by absolute byte offset through <code>trackdisk.device</code>, never through
+files. The disk falls into three regions — the boot block (blocks 0–1), a first-stage loader in plain
+68000 code (blocks 2–21), and from block 22 to the end the <strong>crunched main part</strong>: the
+entire game, compressed, and essentially incompressible at the byte level.</p>
+
+<h2>The boot block</h2>
+<p>The boot block is a complete sector loader. The ROM enters it with the boot device's I/O request
+ready; it reads blocks 2–9 to <code>$30000</code> and runs them (the cracker's intro), then clears the
+bitplane, copper and sprite DMA. It allocates a work buffer (the largest FAST-memory chunk, or the chip
+region on a 512&nbsp;KB machine), issues the main read — about 143&nbsp;KB of the crunched main part to
+<code>$50000</code> — and stops the drive. It adapts to the CPU (on a 68010 or better it installs a
+<code>TRAP</code> handler running a <code>MOVEC</code>, so the rest of the loader can treat the machine
+as a bare 68000), seizes the machine (supervisor mode, interrupts off, stack at <code>$80000</code>),
+copies a 512-byte tail routine to <code>$7F800</code> and jumps to it. The boot block never touches
+<code>dos.library</code>; it drives the hardware directly.</p>
+
+<h2>The intro and trainer</h2>
+<p>Being a cracked release, blocks 2–9 are the cracker's intro: it opens <code>graphics.library</code>
+and the Topaz font, allocates a chip buffer for its bitplanes, and scrolls the group's greetings and a
+prompt over a copper display. Pressing the joystick button after decrunching enables the
+<strong>trainer</strong> — 99 lives — and the high-score save is redirected to track 0. The game itself
+appears only once the main part is decrunched.</p>
+
+<h2>Decrunching the main part</h2>
+<p>The tail at <code>$7F800</code> is the bridge from loader to game: it calls the decruncher at the head
+of the crunched blob, then enters the game. The crunched main part is not one packed stream but the
+output of <strong>three compressors applied in series</strong>, so unpacking runs three decoders in turn
+— a Huffman bit-reader, then an LZ77 copier, then an RLE expander — each relocating its intermediate
+result to the top of memory and decoding it back down. Two of the three are byte-dispatched: they build a
+256-entry jump table whose default handler copies a literal and whose few escape values trigger
+match/run handlers, and the loop <strong>writes each control byte to the background-colour register</strong>
+as it runs — the flickering border bars you see while a cracked game "decrunches". The result is a
+214,400-byte image at <code>$43880</code>, with the game entered partway into it at <code>$5F500</code>.
+The tail then applies the trainer (overwriting two longwords with branches into the cheat code) and jumps
+into the decrunched game.</p>
+`,
+    engine: `
+<div class="info-eyebrow">Turrican · Game Engine</div>
+<p>The decruncher hands control to a flat image at <code>$43880</code>. The first thing the game does is
+split itself in two and bring up the hardware; from there it is a <strong>vertical-blank-driven loop</strong>
+with a function-pointer state machine, pulling each world's code and data off the disk as it goes.</p>
+
+<h2>Two segments</h2>
+<p>The image does not run where it is loaded. On entry the game copies the <strong>resident engine</strong>
+— roughly 112&nbsp;KB — down to low memory from <code>$10</code> onward, where <code>$10–$FF</code> is the
+68000 exception vector table and <code>$100</code> is the engine's internal jump table. The rest of the
+image — the setup code, the interrupt handler and data — runs in place. So the program is two segments:
+the relocated resident engine (the bulk of the game) and the in-place setup/ISR.</p>
+
+<h2>Bring-up</h2>
+<p>Entry reads the fire buttons to pick the trainer and option settings, waits for a press and release,
+and branches into <code>game_init</code> — the hardware bring-up. It enters supervisor mode, turns all
+interrupts and DMA off, then unpacks and runs several sub-modules, installs the level-3 (vertical-blank)
+interrupt vector, and enables the display. The vblank interrupt bumps a frame counter, cycles the
+palette, and calls the per-frame game tick.</p>
+
+<h2>The resident engine</h2>
+<p><code>game_init</code>'s last act jumps into the relocated segment through its internal jump table;
+slot 0 is <code>game_start</code>, which seizes the machine, runs the OS-interface module, initialises
+the object table, the map grid and the display interrupt, and falls into the main loop. The engine
+re-uses the <strong>same three-pass decoder</strong> at runtime to unpack graphics and level blocks,
+alongside a PowerPacker decompressor and a floppy trackloader that streams level data off the disk during
+play.</p>
+
+<h2>The streamed modules</h2>
+<p>The engine does not ship complete in the resident image; three more modules stream in at startup:</p>
+<ul>
+  <li>the <strong>music / sound driver</strong> (see Music);</li>
+  <li>a <strong>loader-sound player</strong> that installs its own vblank handler and plays the
+  disk-access sound during loading;</li>
+  <li>a PowerPacker-compressed <strong>OS-interface module</strong> — the engine's bridge to the system:
+  it opens <code>graphics.library</code> and <code>dos.library</code>, installs a <code>TRAP</code>
+  handler and saves and replaces CPU vectors for the display and disk.</li>
+</ul>
+
+<h2>The game loop</h2>
+<p><code>game_start</code> falls into level setup, which clears the playfield with the blitter, installs
+three triple-buffered display buffers, primes the level state and runs a chain of subsystem inits, then
+drops into the game loop. Two things define its shape:</p>
+<ul>
+  <li><strong>Mode dispatch.</strong> A single pointer holds the current game-mode handler, called once
+  per frame. Swapping it switches state — title, play, and so on — without touching the surrounding
+  pipeline: the classic function-pointer state machine. It is driven by a <strong>scene system</strong>:
+  a scene id indexes a descriptor table, and the descriptor's handler fields become the primary and
+  secondary per-frame handlers. The descriptors are not in the resident image — they are
+  <strong>streamed off the disk per world</strong>, so the states and their code change with the level.</li>
+  <li><strong>Frame sync.</strong> The loop raises a flag and spins until the vblank interrupt clears it,
+  locking the pipeline to the vertical blank.</li>
+</ul>
+<p>Around the mode call sits the fixed pipeline: blitter copies that draw the playfield and object layers
+from a draw list, plus a dozen further per-frame subsystems. The engine also carries its own copy of the
+sound driver on resident state, so it runs the music and the sound effects as two independent player
+instances.</p>
+`,
+    graphics: `
+<div class="info-eyebrow">Turrican · Graphics</div>
+<p>The engine and its modules are only the loader and runtime; the <strong>worlds themselves are streamed
+off the floppy</strong> as the game runs. Each is a self-describing block of tiles, a palette, a map, a
+collision layer and sprite graphics, decoded straight into memory.</p>
+
+<h2>Worlds streamed off disk</h2>
+<p>Loading a level reads a per-world entry from a table, pulls the packed block off the disk into a buffer
+just past the resident image, and decompresses it with the same three-pass decoder used at boot. Each of
+the five worlds decodes to a fixed block of about 260&nbsp;KB at a known address. A small
+<strong>section directory</strong> at the head of the block points at the tile data, a collision layer,
+the 16-colour palette, the sprite/object graphics, and a TFMX music slot — so a single decoded block
+carries everything that world needs.</p>
+
+<h2>Tiles and palette</h2>
+<p>The palette is 16 big-endian 12-bit RGB words. Tiles are reached through an offset table — a list of
+longword byte-offsets, with entry 0 equal to the table's own size, so the tile count and the start of
+the pixels both fall out of it. Each tile is <strong>32&times;32 pixels in four bitplanes</strong>,
+interleaved per row (512 bytes), drawn through the palette. World 0 has 209 tiles, world 1 has 215, and
+so on — the cave and planet surface, the machine world, and the rest.</p>
+
+<h2>The tile map</h2>
+<p>Each world holds several <strong>scenes</strong>, one per sub-map, each described by a descriptor: a
+pointer to the map data, its width and height in tiles, and the scene's per-frame handlers. The map is a
+<strong>column-major array of one byte per cell</strong>; a value below the tile count is a tile index,
+and a value at or above it is the same tile drawn <strong>horizontally flipped</strong>. World 0's three
+scenes are 137&times;51, 153&times;51 and 115&times;51 tiles, laid out back to back, while other worlds
+are shaped very differently — one world opens on a tall 12&times;269 vertical shaft.</p>
+
+<h2>Collision</h2>
+<p>Solidity is not a parallel grid; it is a <strong>per-tile-type shape</strong>. A collision section gives
+16 bytes per tile — a 4&times;4 grid of 8&times;8-pixel-block solidity — so each 32&times;32 tile carries
+sub-tile collision. The values are not merely solid or empty: passable, solid wall or ground, solid but
+reacting to shots (a hit sparks and stops), breakable or trigger (contact spawns an effect and clears the
+cell), and hazard (contact drains the player's energy). At scene load the playfield builder copies each
+map tile's shape into a screen-sized collision buffer, and the player check reads one byte at the player's
+position at 8-pixel granularity; flipped map cells mirror their columns. This is the layer the viewer's
+<strong>Collision</strong> toggle overlays.</p>
+
+<h2>Sprites — the BOB format</h2>
+<p>Enemies and effects are <strong>blitter objects</strong> cookie-cut into the back buffer: a
+four-bitplane bitmap and a one-plane mask blitted through the playfield's 16-colour palette, with plane 3
+doubling as the mask so opaque pixels carry colours 8–15 and colour 0 is transparent. Each is described by
+a 14-byte <strong>descriptor</strong> — bitmap pointer, mask pointer, modulo, a packed size word, and a
+y-adjust and flag — and a flat array of these descriptors is the animation table: an object's draw routine
+picks a frame group, then the current frame within it, then draws that descriptor. The <strong>player</strong>
+is the exception — he is drawn by a dedicated routine as a multi-part composite (three body parts plus the
+orbiting spinning weapon), indexed by his animation state.</p>
+`,
+    music: `
+<div class="info-eyebrow">Turrican · Music</div>
+<p>Turrican's score is Chris Hülsbeck's, in his own <strong>TFMX</strong> format — Turrican is the
+canonical TFMX game. The music is driven by a dedicated sound overlay, and the engine carries
+<strong>two copies of the same player</strong> so the music and the sound effects run independently.</p>
+
+<h2>The sound driver</h2>
+<p>The music and sound driver is a separate module streamed off the disk at startup, decoded with the same
+three-pass decoder as everything else and loaded at a fixed address. Its body opens with a
+<strong>branch dispatch table</strong> — its public API, which the engine calls at fixed entry points to
+start playback, initialise the player from the song and sample pointers, and set the master volume and
+channel mask. Its vertical-blank entry runs the player once per frame: it processes the voices, each with
+a period LFO (vibrato), a pitch slide (portamento) and a volume envelope, writing the Amiga's audio period
+and volume registers, while a silence call zeros all four channel volumes. The engine keeps a second,
+byte-identical copy of this player on its own state, so the music and the effects play as two independent
+instances.</p>
+
+<h2>The TFMX module</h2>
+<p>The score itself is a TFMX module. It is <em>not</em> played from the per-world scene block — that
+block's "TFMX-SONG" slot is an empty stub — but from the sound overlay, which carries the in-game player
+and two data pointers: the song data and about 50&nbsp;KB of raw signed 8-bit PCM, the instrument samples.
+The song data is a set of tables — a song table of start, end and tempo per sub-song (three real ones), a
+pattern pointer table, a macro pointer table, and a trackstep table that lays out the eight channels. A
+<strong>pattern</strong> is a stream of note-plus-macro entries and commands; a <strong>macro</strong> is a
+stream of instrument commands (set sample, volume, period, vibrato, portamento, envelope, DMA, wait, loop)
+— effectively a small instrument VM. The player runs a song sequencer and trackstep processor feeding a
+pattern reader and a per-voice update with the macro VM, driving Paula's four channels.</p>
+`,
+    gameplay: `
+<div class="info-eyebrow">Turrican · Gameplay</div>
+<p>Turrican is a run-and-gun platform shooter across five large, multi-scene worlds. Crucially, the worlds
+differ in their <strong>enemies and backdrops, not their mechanics</strong> — every world runs on the same
+engine, object system and sound interface, bringing only its own enemy roster and scene code. The parts
+that are not self-describing data — the objects, where they spawn, and how they behave — are driven by
+code.</p>
+
+<h2>The object system</h2>
+<p>Active enemies and effects are a <strong>doubly-linked list</strong> of 58-byte nodes drawn from a
+39-node pool; spare nodes sit on a free list. A spawn pops a free node, fills its fields and links it into
+the active list; a kill unlinks it back to the pool. Each node holds its position, its current frame and
+frame table, an active flag and an AI-handler pointer. Every frame the engine walks the list once calling
+each node's handler, then walks it again drawing each node — cookie-cutting its sprite through its frame
+table at the current frame and position. So a spawn is simply a node whose frame table points at one of
+the world's sprites.</p>
+
+<h2>Enemy behaviour and per-world code</h2>
+<p>Each world's scene block carries its own code in two parts. The <strong>scene handlers</strong> run the
+animated parallax backdrop and trigger ambient sounds — they only call the resident sound API, never the
+spawn routines; world 1's drives the waterfall, and worlds differ here only in which backdrop they animate.
+The <strong>enemy-AI handlers</strong> — six to eighteen per world — are the enemy roster: each is a
+complete behaviour on an object node, setting its sprite and health, animating a loop, applying damage and,
+on death, freeing the node. The per-world differences are the enemies and the backdrop, not new mechanics.</p>
+
+<h2>Enemy placement</h2>
+<p>Which enemy is seeded where is read by a <strong>scroll-triggered spawner</strong>, called twice per
+frame. It builds a spawn window from the camera — the visible screen plus a margin — and spawns any entry
+inside it, which is why enemies appear <em>just</em> as the screen reaches them. The layout is a 2D bucket
+grid, not a flat list: a per-camera-row offset table and the grid yield, for a given camera position, a
+pointer into the entry data; each distinct pointer heads a run of 6-byte entries (type, x, y in 8-pixel
+units) ending at a terminator. An entry's <strong>type</strong> selects its handler in two tiers — low
+types index a resident handler table (engine-wide objects like the little rotating mine), higher types
+index the scene's own handler table — and the handler installs the object's sprite. So the chain from a
+placement entry to a drawn enemy is <strong>type → handler → sprite</strong>.</p>
+
+<h2>Starting position</h2>
+<p>Each scene also records its initial camera tile and the player's on-screen offset, so the player spawns
+at camera-plus-offset — the same start the Amiga shows. This is the point the viewer frames each scene on.
+Orbiting the player throughout is Turrican's signature <strong>spinning energy weapon</strong>, a shared
+sprite of 32 rotation frames and a short burst.</p>
+`,
+  },
   marble: {},
   stuntcar: {},
   elite: {},

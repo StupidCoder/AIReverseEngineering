@@ -1067,8 +1067,20 @@ animation routine `$7C75`**. It takes the object's *frame-layout base* in `DE` a
 *animation sequence* in `BC` (pairs of `frameId, duration`, looping on `$FF`), and sets
 `IX+15/16 = base + frameId × 18` — so an enemy's frames are consecutive 18-byte layouts,
 and frame 0 (the base) is the idle pose. Platforms, items and bosses instead load an
-explicit layout pointer (e.g. the swing platform picks `$6910`/`$6922` by zone; the World 1
-boss, which decompresses its *own* graphics, points at `$7359`).
+explicit layout pointer; some pick it **by zone** (`LD HL, zone0-ptr` then `LD A,($D2D5)`
+overwriting `HL` with the zone-1.. variants), e.g. the swing platform is `$6910` in Green
+Hills else `$6922`, the horizontal platform `$6910`/`$6930`/`$6922` for zones 0/1/else
+(in the jungle it is a *log*). The World 1 boss decompresses its *own* graphics and points
+at `$7359`.
+
+**Where the sprite is drawn.** The object draw (`$2EE0`) reads the object's world position
+(`IX+2/3`, `IX+5/6`), subtracts the camera, and the metasprite grid's **top-left lands at
+that position** — no origin offset. An object is spawned (`$1AB3`) with its position at
+`(blockX×32, blockY×32)`, i.e. the grid top at the placement block, and then the object's
+own ground-collision snaps it up to rest on the block. A static render can't run that
+snap, so the viewer instead anchors each sprite's **bottom to the top of its placement
+block** (feet on the ground) — which is where the enemy actually sits in play, a tile or
+two above its raw spawn block.
 
 This is enough to extract every object's sprite **straight from the ROM**, with no
 emulator. `cmd/spriterip` reads each `$24B2` handler for its layout pointer (the `DE` base

@@ -52,7 +52,7 @@ func handlerBounds(rom []byte) map[uint16]uint16 {
 //
 // The scan is raw bytes (not a decoded stream) so it is immune to the data tables
 // many handlers embed; the idioms are distinctive enough to match directly.
-func analyzeSprite(rom []byte, t int) spriteRef {
+func analyzeSprite(rom []byte, t, zone int) spriteRef {
 	a := handlerAddr(rom, t)
 	if a == 0 {
 		return spriteRef{}
@@ -67,6 +67,26 @@ func analyzeSprite(rom []byte, t int) spriteRef {
 			}
 		}
 		return -1
+	}
+	// collectBefore returns every LD HL,nn immediate (opcode $21) in the window before
+	// pos, in address order, plus whether a zone read (LD A,($D2D5) = 3A D5 D2) appears
+	// in that window. Platform/zone-variant handlers load HL = the zone-0 layout first,
+	// then overwrite it with the zone-1.. layouts: HL list = [zone0, zone1, .., else].
+	collectBefore := func(pos int) ([]int, bool) {
+		var hls []int
+		zoneSel := false
+		for i := pos - 22; i < pos; i++ {
+			if i < int(a) {
+				continue
+			}
+			if rom[i] == 0x21 && i+2 < pos {
+				hls = append(hls, int(rom[i+1])|int(rom[i+2])<<8)
+			}
+			if rom[i] == 0x3A && rom[i+1] == 0xD5 && rom[i+2] == 0xD2 {
+				zoneSel = true
+			}
+		}
+		return hls, zoneSel
 	}
 	for off := int(a); off+1 < end && off+8 < len(rom); off++ {
 		b := rom[off:]
@@ -84,11 +104,18 @@ func analyzeSprite(rom []byte, t int) spriteRef {
 			b[4] == 0xDD && b[5] == 0x36 && b[6] == 0x10 {
 			return spriteRef{"direct", int(b[3]) | int(b[7])<<8, 0}
 		}
-		// LD (IX+15),L ; LD (IX+16),H  (DD 75 0F  DD 74 10) with a nearby LD HL,nn
+		// LD (IX+15),L ; LD (IX+16),H  (DD 75 0F  DD 74 10) with a nearby LD HL,nn.
+		// When the handler selects the layout by zone, pick this zone's pointer.
 		if b[0] == 0xDD && b[1] == 0x75 && b[2] == 0x0F &&
 			b[3] == 0xDD && b[4] == 0x74 && b[5] == 0x10 {
-			if hl := nearestBefore(0x21, off); hl >= 0 {
-				return spriteRef{"direct", hl, 0}
+			if hls, zoneSel := collectBefore(off); len(hls) > 0 {
+				ptr := hls[len(hls)-1]
+				if zoneSel && len(hls) > 1 {
+					if zone < len(hls) {
+						ptr = hls[zone] // [zone0, zone1, .., else]; clamp below
+					}
+				}
+				return spriteRef{"direct", ptr, 0}
 			}
 		}
 	}

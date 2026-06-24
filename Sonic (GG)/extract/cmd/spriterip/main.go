@@ -227,7 +227,7 @@ func main() {
 		var cells []*image.RGBA
 		var labels []int
 		for _, t := range placed[z] {
-			r := analyzeSprite(rom, t)
+			r := analyzeSprite(rom, t, z)
 			if r.kind == "" || r.layout == 0 || r.layout+18 > len(rom) {
 				continue
 			}

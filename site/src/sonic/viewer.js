@@ -375,11 +375,14 @@ export class LevelViewer {
         this.objectLayer.addChild(txt);
       }
     };
-    // Place a native-resolution sprite centred in the object's 32px cell.
+    // Place a native-resolution sprite. The placement (bx,by) marks the block the object
+    // rests on; the engine spawns it with its grid top there and ground-collision then
+    // snaps it up to sit on the block, so statically we anchor the sprite's BOTTOM to the
+    // top of the placement block (feet on the ground), centred horizontally.
     const sprite = (tex, bx, by) => {
       const s = new Sprite(tex);
       s.x = Math.round(bx * BLOCK + (BLOCK - tex.width) / 2);
-      s.y = Math.round(by * BLOCK + (BLOCK - tex.height) / 2);
+      s.y = Math.round(by * BLOCK - tex.height);
       this.objectLayer.addChild(s);
     };
     // Each placed object draws its ROM-extracted sprite (this zone's set); types without

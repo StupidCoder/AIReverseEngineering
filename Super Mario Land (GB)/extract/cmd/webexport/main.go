@@ -55,7 +55,7 @@ func main() {
 		// Object sprite icons: one composited metasprite per known type, in this world's
 		// OBJ tiles, packed into an atlas the viewer blits at each placement.
 		objAtlas := fmt.Sprintf("world%d-obj.png", world)
-		objTypes := saveObjIcons(data, filepath.Join(out, objAtlas), vram, obp0)
+		objTypes, marioIcon := saveObjIcons(data, filepath.Join(out, objAtlas), vram, obp0)
 
 		for lv := 1; lv <= 3; lv++ {
 			id := byte(world<<4 | lv)
@@ -87,6 +87,9 @@ func main() {
 				"objCell":   objCell,
 				"objOrigin": objOrigin, // sprite-origin offset within a cell (x,y)
 				"objTypes":  objTypes,  // type id -> icon index in the atlas (row of cells)
+				// Mario's fixed start (his sprite top-left, in map pixels) + its atlas icon.
+				// The engine spawns him at screen (50,134); minus the 16px HUD that is map px.
+				"player": map[string]any{"x": 35, "y": 96, "icon": marioIcon},
 			})
 			metas = append(metas, levelMeta{world, lv, name, file, w, 16})
 		}
@@ -105,10 +108,15 @@ const objCell = 40
 
 var objOrigin = [2]int{8, 24}
 
+// marioFrame is Mario's idle standing sprite: a 2x2 of OBJ tiles, each {tile, dx, dy}
+// from the sprite top-left (read from the running game's OAM at spawn).
+var marioFrame = []level.Sprite{{0x00, 0, 0}, {0x01, 8, 0}, {0x10, 0, 8}, {0x11, 8, 8}}
+
 // saveObjIcons composites one metasprite per known object type into a vertical atlas (in
-// this world's OBJ tiles + sprite palette) and returns type id -> icon index. Types not in
+// this world's OBJ tiles + sprite palette), plus one extra cell for Mario's idle sprite at
+// the end. It returns the type id -> icon index map and Mario's icon index. Types not in
 // level.TypeFrame are omitted (the viewer falls back to a marker for them).
-func saveObjIcons(rom []byte, path string, vram []byte, obp0 byte) map[string]int {
+func saveObjIcons(rom []byte, path string, vram []byte, obp0 byte) (map[string]int, int) {
 	// Stable order so the atlas is deterministic.
 	typeFrame := level.TypeFrames(rom)
 	var types []int
@@ -117,31 +125,34 @@ func saveObjIcons(rom []byte, path string, vram []byte, obp0 byte) map[string]in
 	}
 	sort.Ints(types)
 
-	img := image.NewNRGBA(image.Rect(0, 0, objCell, objCell*len(types)))
-	out := map[string]int{}
-	for i, t := range types {
-		out[fmt.Sprintf("%d", t)] = i
-		ox := objOrigin[0]
-		oy := i*objCell + objOrigin[1]
-		for _, s := range level.DecodeMetasprite(rom, int(typeFrame[byte(t)])) {
-			tl := gameboy.DecodeTile(vram[int(s.Tile)*16:]) // 8x8 OBJ tile at the cursor
-			for py := 0; py < 8; py++ {
-				for px := 0; px < 8; px++ {
-					v := tl[py][px]
-					if v == 0 {
-						continue // OBJ colour 0 = transparent
-					}
+	marioIdx := len(types) // Mario gets the last cell
+	img := image.NewNRGBA(image.Rect(0, 0, objCell, objCell*(len(types)+1)))
+	stamp := func(s level.Sprite, ox, oy int) {
+		tl := gameboy.DecodeTile(vram[int(s.Tile)*16:]) // 8x8 OBJ tile
+		for py := 0; py < 8; py++ {
+			for px := 0; px < 8; px++ {
+				if v := tl[py][px]; v != 0 { // OBJ colour 0 = transparent
 					g := []uint8{0xff, 0xaa, 0x55, 0x00}[(obp0>>(2*v))&3]
 					img.Set(ox+s.DX+px, oy+s.DY+py, color.NRGBA{g, g, g, 0xff})
 				}
 			}
 		}
 	}
+	out := map[string]int{}
+	for i, t := range types {
+		out[fmt.Sprintf("%d", t)] = i
+		for _, s := range level.DecodeMetasprite(rom, int(typeFrame[byte(t)])) {
+			stamp(s, objOrigin[0], i*objCell+objOrigin[1])
+		}
+	}
+	for _, s := range marioFrame { // Mario's 2x2, top-left at the cell origin
+		stamp(s, objOrigin[0], marioIdx*objCell+objOrigin[1])
+	}
 	f, err := os.Create(path)
 	must(err)
 	defer f.Close()
 	must(png.Encode(f, img))
-	return out
+	return out, marioIdx
 }
 
 // objPalette warps the oracle into `world` and returns its OBP0 sprite palette register.

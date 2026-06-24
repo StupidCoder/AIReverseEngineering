@@ -142,6 +142,16 @@ export class SMLViewer {
       g.rect(x + 0.5, y + 0.5, TILE - 1, TILE - 1).fill({ color: objColor(o.type), alpha: 0.55 });
       g.rect(x + 0.5, y + 0.5, TILE - 1, TILE - 1).stroke({ width: o.hard ? 1 : 0.5, color: o.hard ? 0xffffff : 0x101010, alpha: 0.9 });
     }
+
+    // Mario at his fixed start position (his sprite top-left is composited at the cell
+    // origin, so blit the same way as the objects: anchor px minus the cell origin).
+    if (iconSrc && level.player) {
+      const tex = new Texture({ source: iconSrc, frame: new Rectangle(0, level.player.icon * cell, cell, cell) });
+      const sp = new Sprite(tex);
+      sp.position.set(level.player.x - orgX, level.player.y - orgY);
+      layer.addChild(sp);
+    }
+
     this.objLayer = layer;
     this.objLayer.visible = this._showObjects;
     this.world.addChild(this.objLayer);

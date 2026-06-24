@@ -127,6 +127,9 @@ func main() {
 			}
 			drawBox(img, o.Col*8, o.Row*8, 8, 8, c)
 		}
+		// Mario at his fixed start (sprite top-left at map pixel 35,96).
+		mario := []level.Sprite{{Tile: 0x00}, {Tile: 0x01, DX: 8}, {Tile: 0x10, DY: 8}, {Tile: 0x11, DX: 8, DY: 8}}
+		drawSprite(img, vram, mario, m.Read(0xFF48), 35, 96)
 	}
 	save(*out, img)
 	fmt.Println("wrote", *out)

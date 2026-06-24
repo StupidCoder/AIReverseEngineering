@@ -1080,9 +1080,10 @@ exactly `(blockX×32, blockY×32)`, and — verified on the live ROM — a groun
 *stays* there (its `Y` doesn't move): the engine does **not** snap it onto the ground. The
 placement block is itself solid terrain, and the metasprite is authored to sit correctly
 when its grid top is the block's top. So the faithful placement is simply the grid top at
-`(blockX×32, blockY×32)`; the extractor records each sprite's offset within its 48-px grid
-(`ox,oy`) and the viewer draws it at `(blockX×32+ox, blockY×32+oy)`, reproducing the engine
-exactly — the crab then stands on the grass, as it does in play.
+`(blockX×32, blockY×32)`. The extractor keeps each sprite as the **whole 48×48 metasprite
+grid** (transparent where the layout has no tile) and the viewer draws it with its top-left
+at `(blockX×32, blockY×32)` — no cropping, no offsets — so the visible tiles land exactly
+where the engine puts them. The crab then stands on the grass, as it does in play.
 
 This is enough to extract every object's sprite **straight from the ROM**, with no
 emulator. `cmd/spriterip` reads each `$24B2` handler for its layout pointer (the `DE` base

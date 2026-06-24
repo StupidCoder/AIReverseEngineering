@@ -249,9 +249,11 @@ func main() {
 	zoneAct := []int{0, 3, 6, 9, 12, 15, 28}
 	zoneName := []string{"greenhills", "bridge", "jungle", "labyrinth", "scrapbrain", "skybase", "special"}
 
-	// index.json: zone (int) -> type (2-hex) -> {w,h}. The viewer loads
-	// sprites/<zone>/<hex>.png for each placed object and draws it centred in the cell.
-	index := map[string]map[string]map[string]int{}
+	// index.json: zone (int) -> type (2-hex) -> true. Each PNG is the FULL 48x48 metasprite
+	// grid; the viewer loads sprites/<zone>/<hex>.png and draws it with its top-left at the
+	// object's world position (blockX*32, blockY*32) -- exactly where the engine draws it,
+	// with the grid's transparent padding placing the visible tiles. No cropping/offsets.
+	index := map[string]map[string]bool{}
 	montages := os.Getenv("MONTAGE") != ""
 	placed := placedTypesByZone(rom)
 	total := 0
@@ -259,7 +261,7 @@ func main() {
 		tiles, pal := spriteTiles(rom, act)
 		zdir := fmt.Sprintf("%s/%d", out, z)
 		chk(os.MkdirAll(zdir, 0o755))
-		index[fmt.Sprint(z)] = map[string]map[string]int{}
+		index[fmt.Sprint(z)] = map[string]bool{}
 		var cells []*image.RGBA
 		var labels []int
 		for _, t := range placed[z] {
@@ -267,15 +269,12 @@ func main() {
 			if r.kind == "" || r.layout == 0 || r.layout+18 > len(rom) {
 				continue
 			}
-			ox, oy, spr := trimBBox(renderMeta(rom[r.layout:r.layout+18], tiles, pal))
-			if spr.Rect.Dx() <= 1 && spr.Rect.Dy() <= 1 {
+			full := renderMeta(rom[r.layout:r.layout+18], tiles, pal) // full 48x48 grid
+			if _, _, bb := trimBBox(full); bb.Rect.Dx() <= 1 && bb.Rect.Dy() <= 1 {
 				continue // empty layout
 			}
-			save(spr, fmt.Sprintf("%s/%02x.png", zdir, t))
-			// ox,oy = the sprite's offset within the metasprite grid, whose top-left the
-			// engine draws at the object's world position (blockX*32, blockY*32). The
-			// viewer places the sprite at (blockX*32+ox, blockY*32+oy) to match the engine.
-			index[fmt.Sprint(z)][fmt.Sprintf("%02x", t)] = map[string]int{"ox": ox, "oy": oy, "w": spr.Rect.Dx(), "h": spr.Rect.Dy()}
+			save(full, fmt.Sprintf("%s/%02x.png", zdir, t))
+			index[fmt.Sprint(z)][fmt.Sprintf("%02x", t)] = true
 			total++
 			if montages {
 				cells = append(cells, renderMeta(rom[r.layout:r.layout+18], tiles, pal))

@@ -1157,6 +1157,173 @@ Advancing the score is a third, separate clock: a per-frame music tick driven by
 60&nbsp;Hz envelope timer and its sample-reply note clock, each doing its own job.</p>
 `,
   },
+  sml: {
+    loader: `
+<div class="info-eyebrow">Super Mario Land · Image &amp; Loader</div>
+<p>Super Mario Land ships on a 64&nbsp;KB Game Boy cartridge with a simple bank-switching chip. There is no
+loader to speak of: the console's boot ROM only runs the cartridge after it has <strong>verified the
+cartridge itself</strong>, and then jumps into the game's own cold-start code.</p>
+
+<h2>The cartridge image</h2>
+<p>The image is four 16&nbsp;KB ROM banks behind an <strong>MBC1</strong> mapper. Bank&nbsp;0 is permanently
+visible at <code>$0000–$3FFF</code>; banks&nbsp;1–3 share the switchable window at <code>$4000–$7FFF</code>,
+selected by <em>writing</em> the bank number to ROM space (<code>$2000–$3FFF</code>) — an MBC1 register, not a
+memory store. The cartridge declares no save RAM, so there is no battery-backed high-score table. The header at
+<code>$0100–$014F</code> carries the entry point, the Nintendo logo, the title <code>SUPER MARIOLAND</code> in
+the old 16-byte form, and two checksums. The boot ROM refuses to start a cartridge whose logo isn't byte-exact
+and whose header checksum doesn't match — both pass here, which is what lets the game run at all.</p>
+
+<h2>Cold start</h2>
+<p>The entry point at <code>$0100</code> jumps to the cold-start routine at <code>$0185</code>. It disables
+interrupts, then enables only the VBlank and STAT sources (the timer interrupt that drives sound stays off for
+now). To clear video RAM — which can only be touched while the screen is off — it runs an <strong>LCD
+"safe-off" dance</strong>: turn the LCD on, wait for a known scanline, then switch it off. It sets the
+palettes, switches the sound hardware on, sets up the stack, and clears work RAM, video RAM, sprite memory and
+high RAM. It copies a 12-byte sprite-DMA routine into high RAM — the transfer has to be kicked from there
+because the CPU can't see ROM while it runs — and initialises the sound engine by paging in bank&nbsp;3 and
+calling it.</p>
+
+<h2>Interrupts and the main loop</h2>
+<p>Three interrupt vectors do the real-time work. <strong>VBlank</strong> (<code>$0060</code>) is the render
+half of each frame. <strong>STAT</strong> (<code>$0095</code>) is a mid-frame raster split that holds the status
+bar still. The <strong>timer</strong> (<code>$0050</code>) runs the sound engine on its own clock, independent
+of the video frame. Once init finishes turning the LCD back on and enabling interrupts, the game settles into a
+main loop that runs the frame's logic and then <code>HALT</code>s until the VBlank handler sets a frame-done
+flag at <code>$FF85</code> — so one trip round the loop is exactly one displayed frame.</p>
+`,
+    engine: `
+<div class="info-eyebrow">Super Mario Land · Game Engine</div>
+<p>Super Mario Land is a <strong>frame-synced state machine</strong>. A single state byte selects the whole
+behaviour of the frame through a jump table, and every frame splits into a logic half and a render half.</p>
+
+<h2>The state machine</h2>
+<p>The current state is a byte at <code>$FFB3</code>. Each frame the main body loads it and executes
+<code>RST $28</code> — a one-byte gateway that jumps through a <strong>62-entry word table</strong> to the
+handler for that state. The flow runs boot settle &rarr; title screen (which polls for a newly-pressed Start)
+&rarr; level load &rarr; in-level gameplay, with further states for death and transitions. Adding behaviour to
+the game is adding a state and its table entry.</p>
+
+<h2>Two halves of a frame</h2>
+<p>Game logic runs during the visible scan, while the screen is being drawn; rendering happens only in VBlank,
+the brief window when video RAM and sprite memory are writable. The <code>$FF85</code> flag interlocks the two
+so the loop never races the display.</p>
+
+<h2>Input</h2>
+<p>The joypad register <code>$FF00</code> is read in two passes — the d-pad, then the buttons — and the result
+is stored as two bitmaps in high RAM: the buttons currently <em>held</em> (<code>$FF80</code>) and the buttons
+<em>newly pressed</em> this frame (<code>$FF81</code>). Handlers test the edge-triggered byte, so a jump or a
+menu choice fires once per press rather than every frame the button is down.</p>
+
+<h2>Bank shadowing and the status bar</h2>
+<p>Because the sound engine and the level data both live in the switchable bank window, the engine follows a
+strict <strong>save / switch / call / restore</strong> pattern around cross-bank calls, with the active bank
+shadowed in high RAM so the timer interrupt — which always pages in bank&nbsp;3 for sound — can put it back
+afterwards. The <strong>status bar</strong> is simply the top rows of the background map held still while the
+playfield scrolls underneath: VBlank resets the scroll to zero for the bar, and the STAT handler waits for
+H-blank at the split line and reloads the playfield's scroll value. (The Game Boy's window layer, often used for
+a status bar, is here the <em>pause</em> overlay instead.)</p>
+`,
+    graphics: `
+<div class="info-eyebrow">Super Mario Land · Graphics</div>
+<p>The graphics are ordinary Game Boy tiles, but the level is <strong>streamed a column at a time</strong> from
+a compressed map, and every enemy is a metasprite assembled on the fly from 8&times;8 tiles.</p>
+
+<h2>Tiles and the screen</h2>
+<p>Every graphic is a 2-bits-per-pixel tile, 16 bytes holding two bitplanes. The background is a 32&times;32
+tilemap scrolled past the 160&times;144 screen; sprites are entries in the hardware sprite table, copied each
+frame by DMA from a shadow buffer in work RAM. Super Mario Land runs in <strong>8&times;8 sprite mode</strong>
+and uses the signed tile-addressing mode for its background art.</p>
+
+<h2>The level map</h2>
+<p>A level is a list of screen pointers — an <strong>order table</strong> — and the same screen pointer can
+appear at many positions, which is where repeated stretches of terrain come from. Each screen is 20 columns of
+<strong>run-length-encoded</strong> tiles: a run byte packs a starting row and a count, the next bytes are tiles
+placed downward, and fill and end-of-column markers finish it. The low order-table indices are reserved — a
+lead-in screen, then the two pipe-accessed bonus rooms — so the main path begins at the third entry. The map is
+decoded straight from ROM; nothing is rasterised ahead of time.</p>
+
+<h2>Column streaming</h2>
+<p>As the camera scrolls, a builder decodes the next map column into a work-RAM buffer and blits its 16 tiles
+into the background map just off the right edge of the screen. A handful of tile ids — pipes
+(<code>$70</code>) and the breakable and question blocks (<code>$80</code>/<code>$5F</code>/<code>$81</code>)
+— are normal tiles that are <em>also</em> recorded as interactive blocks in side tables as they are laid down.</p>
+
+<h2>Metasprites</h2>
+<p>Each object carries a frame id that indexes a pointer table to a <strong>turtle-graphics stream</strong>:
+control bytes move an 8&times;8 cursor and set the sprite attribute, and high-bit bytes stamp a single tile at
+the cursor. A facing flag picks between two mirror-image layout tables, which is how an enemy faces left or
+right from the same stream. The object tile art is bulk-loaded into video RAM per world, so each world brings
+its own cast of enemy graphics into the same tile region.</p>
+`,
+    music: `
+<div class="info-eyebrow">Super Mario Land · Music</div>
+<p>The music plays on the Game Boy's four-channel sound chip — two square-wave voices, one wavetable voice and
+one noise voice — driven by a sound engine in bank&nbsp;3 that runs on a <strong>hardware timer, not the video
+frame</strong>, so the tempo is independent of how busy the screen is.</p>
+
+<h2>The sound engine</h2>
+<p>The timer interrupt pages in bank&nbsp;3 and calls the engine on every tick, 64 times a second. The engine
+services a set of request slots in work RAM: per-channel slots for sound effects, and one
+<strong>music selector</strong> at <code>$DFE8</code>. Writing a song id there starts a piece of music; the
+engine then advances that song's channels on each tick.</p>
+
+<h2>The song format</h2>
+<p>A song is a header — a master byte, a duration table, and four channel pointers, one per voice. Each channel
+pointer leads to an <strong>order list</strong> of pattern pointers ending in a loop target: the patterns before
+the target play once as an intro, then playback loops from the target onward. A pattern is a short bytecode —
+set-voice (a volume envelope and a duty), set-duration (an index into the duration table), repeat-the-previous
+note, end-of-pattern, or a note number that reads its pitch from a frequency table. A duration unit is one tick,
+1/64&nbsp;s.</p>
+
+<h2>One theme per level group</h2>
+<p>Music is chosen per level by a small table indexed by the level number, so each piece covers several levels:
+the bright overworld-style theme plays in 1-1, 1-2 and 3-1; the underground theme in 1-3, 3-2 and 3-3; the Muda
+(water) theme in 2-1 and 2-2; the Chai theme in 4-1 and 4-2; a tense boss-and-vehicle theme in the
+auto-scrolling 2-3 and 4-3; and a short jingle in the pipe bonus rooms. The tracks in this viewer are named for
+the levels that table assigns them to.</p>
+`,
+    gameplay: `
+<div class="info-eyebrow">Super Mario Land · Gameplay</div>
+<p>Super Mario Land's mechanics — where enemies appear, how they behave, what counts as solid ground, the pipe
+warps, and Mario's own movement — are driven by code and small per-level tables rather than self-describing
+data.</p>
+
+<h2>The object system</h2>
+<p>Up to ten enemies and effects are live at once in a bank of object slots. A <strong>scroll-triggered
+spawner</strong> walks a per-level placement list — 3-byte entries giving a trigger column, a packed
+row-and-fine-position, and a type — sorted by column, spawning each entry as its column scrolls in off the right
+edge of the screen. That is why an enemy appears <em>just</em> as the screen reaches its position.</p>
+
+<h2>Behaviour scripts</h2>
+<p>Each object type's behaviour is a <strong>script in a small bytecode interpreter</strong>. Its opcodes set a
+velocity, coast for a number of frames, flip the facing, set the animation frame, spawn a child object,
+transform into another type (or despawn entirely), queue a sound effect, gate on how close the player is, and
+loop. A Goomba is a two-frame walk loop; world&nbsp;4's high-numbered types are the Tatanga boss fight, where one
+type spits projectiles and another fans out a spread of them. Items that pop from a block all share the same toss
+arc.</p>
+
+<h2>Collision</h2>
+<p>Solidity is a <strong>pure tile-id threshold</strong> — there is no separate collision map. An actor reads
+the background tile underneath it and treats any id at or above a fixed value as solid floor; lower ids are
+passable scenery (sky, clouds, palms, the decorative pyramids and statues); the very top range is special
+metadata that is never floor. The tileset is laid out in that order on purpose, so the test is a single
+comparison.</p>
+
+<h2>Pipes and bonus rooms</h2>
+<p>A pipe is a <code>$70</code> tile whose destination is recorded in a <strong>parallel metadata map</strong>
+that shadows the background. Pressing Down while standing on one reads the destination, animates Mario sliding
+in, and re-points the screen index at one of the reserved bonus-room screens; leaving the room repositions him
+back where he entered. A "bonus room", then, is just another screen entry the engine warps to and returns
+from.</p>
+
+<h2>Mario's movement</h2>
+<p>Mario is a <strong>special object on the same velocity integrator as the enemies</strong>, flagged so that
+moving him also scrolls the camera. Jump height is variable through a hold timer — a tap gives a short hop, a
+held button a full jump — and the B button makes him run. Gravity accelerates the fall a pixel per frame at a
+time, and dropping below the bottom of the playfield is a death. He starts each level at the same fixed
+on-screen position, which is the point this viewer frames every level on.</p>
+`,
+  },
   stuntcar: {},
   elite: {
     loader: `

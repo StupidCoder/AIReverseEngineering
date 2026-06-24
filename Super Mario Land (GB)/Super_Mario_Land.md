@@ -770,7 +770,10 @@ straight at the `$401A` table; the data itself is then decoded from the cartridg
 
 Each object draws its graphics through a shared **metasprite** engine. The object sprite
 routine `$25B7` takes the slot's frame field (`slot+6`, seen as `$FFC6`) as an index into
-the pointer table at `$2FD9` (bank-0 fixed). The pointed-at stream is *turtle graphics*:
+a metasprite pointer table (bank-0 fixed). There are **two** tables — `$2FD9` and `$30AB` —
+mirror layouts chosen by the object's facing flag (`$FFC5` bit 0); `$30AB` is the natural,
+unflipped one (columns left-to-right like the tile sheet), so the extractor uses it. The
+pointed-at stream is *turtle graphics*:
 
 ```
 byte, bit7 = 0 : control — low nibble moves the cursor (bit3 up / bit2 down /

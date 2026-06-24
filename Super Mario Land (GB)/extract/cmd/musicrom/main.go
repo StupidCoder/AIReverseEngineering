@@ -60,13 +60,14 @@ type channel struct {
 func decodeChannel(hdr, durTbl int, isNoise bool) channel {
 	// The order list is a run of 2-byte pattern pointers ending in an $FF entry followed by a
 	// 2-byte LOOP TARGET (an address back into the list). Patterns before the target are a
-	// one-shot intro; the seamless loop is the patterns from the target to the $FF, so we
-	// decode only those.
-	start := hdr
+	// one-shot intro; the seamless loop is the patterns from the target to the $FF. We decode
+	// the WHOLE channel (so the instrument/duration set in the intro carry into the loop) and
+	// then keep only the loop-body events, re-based to tick 0.
 	end := hdr
+	target := hdr
 	for guard := 0; guard < 512; guard++ {
 		if rb(end) == 0xFF {
-			start = rw(end + 2) // loop target
+			target = rw(end + 2)
 			break
 		}
 		if rb(end) == 0x00 {
@@ -75,10 +76,13 @@ func decodeChannel(hdr, durTbl int, isNoise bool) channel {
 		end += 2
 	}
 
-	var ch channel
+	var all []chanEvent
 	var inst instrument
-	dur, tick, order, prev := 1, 0, start, 0
+	dur, tick, order, prev, loopTick := 1, 0, hdr, 0, 0
 	for order < end {
+		if order == target {
+			loopTick = tick
+		}
 		pat := rw(order)
 		order += 2
 		for g2 := 0; g2 < 4096; g2++ {
@@ -105,13 +109,21 @@ func decodeChannel(hdr, durTbl int, isNoise bool) channel {
 					ev.freq = rw(0x6F70 + int(c))
 					prev = ev.freq
 				}
-				ch.events = append(ch.events, ev)
+				all = append(all, ev)
 				tick += dur
 				pat++
 			}
 		}
 	}
-	ch.loopTicks = tick
+	// keep the loop body, re-based to tick 0 (instrument state carried from the intro).
+	var ch channel
+	for _, e := range all {
+		if e.tick >= loopTick {
+			e.tick -= loopTick
+			ch.events = append(ch.events, e)
+		}
+	}
+	ch.loopTicks = tick - loopTick
 	return ch
 }
 

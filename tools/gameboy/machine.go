@@ -76,6 +76,9 @@ type Machine struct {
 	timaCounter int
 	lcdDot      int
 
+	// Cycles is a free-running absolute T-cycle counter (for timestamping APU writes etc.).
+	Cycles int64
+
 	// Buttons is the injected joypad state (see Btn* bits; 1 = pressed).
 	Buttons byte
 
@@ -269,6 +272,7 @@ func (m *Machine) joyp() byte {
 // tick advances the timer and the LCD line counter by cyc T-cycles, raising the
 // timer/VBlank/STAT interrupt request bits as their schedules come due.
 func (m *Machine) tick(cyc int) {
+	m.Cycles += int64(cyc)
 	// DIV: high byte of a free-running 16-bit counter.
 	m.divCounter = (m.divCounter + cyc) & 0xFFFF
 	m.io[regDIV-0xFF00] = byte(m.divCounter >> 8)

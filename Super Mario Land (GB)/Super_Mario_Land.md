@@ -63,6 +63,7 @@ pipes, collision and Mario's physics) — only scoring/progression bookkeeping i
   - [5. How a level is drawn](#5-how-a-level-is-drawn)
   - [6. The level data format (frontier)](#6-the-level-data-format-frontier)
 - [Part V — Game mechanics](#part-v--game-mechanics)
+- [Part VI — Music and sound](#part-vi--music-and-sound)
 - [Appendix A — Toolchain and reproduction](#appendix-a--toolchain-and-reproduction)
 
 ---
@@ -1102,6 +1103,60 @@ both the disassembly and a live capture in the oracle (`tools/gameboy`).
 
 *Still stubbed for Part V:* the fine sub-pixel accel/friction constants, scoring, and level
 progression — the remaining bookkeeping rather than new mechanisms.
+
+---
+
+# Part VI — Music and sound
+
+Super Mario Land's audio runs on the Game Boy's four-channel sound hardware (the **APU**:
+two square-wave channels — channel 1 with a frequency sweep — one 32-sample wave channel,
+and a noise channel) driven by a compact sound engine in **bank 3**.
+
+## 1. The sound engine
+
+The engine is **timer-driven, not frame-driven**: the timer interrupt (`$0050`) pages in
+bank 3 and jumps through the fixed table at `$7FF0` to the tick at **`$6762`** (`$7FF3` →
+`$6B26` is the init). Running off the timer keeps the tempo steady regardless of frame rate.
+
+Each tick reads a set of **request slots** in WRAM and services the channels:
+
+| Slot | Channel(s) | Pointer table | Role |
+|---|---|---|---|
+| `$DFE0`/`$DFE1` | square 1 / square 2 | `$6700` / `$6716` | tone sound effects |
+| `$DFF0`/`$DFF1` | wave (ch 3) | — (`$67F4`) | wave sound effects |
+| `$DFF8`/`$DFF9` | noise (ch 4) | `$672C` / `$6734` | noise/percussion effects |
+| **`$DFE8`/`$DFE9`** | **all** | **`$673C`** | **the music/BGM selector** |
+
+A non-zero id in a slot selects an entry from that slot's pointer table (`$6AFD`: `id-1`,
+×2, into the table → a pointer to that sound's byte-stream), and the tick advances each
+active stream, writing the APU registers (`$FF10`–`$FF26`, plus wave RAM `$FF30`–`$FF3F`
+loaded by `$6B19`). Writing a **song id to `$DFE8`** starts a piece of background music
+(`$673C` holds the song headers — tempo at `$6C2B`, channel data pointers); sound effects on
+`$DFE0`/`$DFF0`/`$DFF8` temporarily steal their channel from the music. `$FF` in a slot
+silences/stops it.
+
+## 2. Rendering to MP3
+
+The engine is intricate enough that reimplementing it byte-for-byte would be a project in
+itself, so — exactly as Part IV renders graphics by reading the running game's VRAM — we
+**run the real engine and synthesise the hardware it drives**. A new **Game Boy APU
+emulator** (`tools/gameboy/apu.go`) models the four channels with their length, envelope and
+sweep units (stepped from a 512 Hz frame sequencer) and per-channel phase accumulators. The
+machine (`tools/gameboy`) executes the real ROM; `extract/cmd/musicrom`:
+
+1. boots into gameplay (so the engine is initialised and the timer is ticking),
+2. writes a song id to `$DFE8`, then captures every APU register write with a CPU-cycle
+   timestamp (the machine now exposes a free-running `Cycles` counter),
+3. seeds the APU with the master volume / panning / wave-RAM that were set before the capture
+   window, replays the timed writes through it to 44.1 kHz PCM, peak-normalises, and lets
+   **ffmpeg** (libmp3lame) encode the MP3.
+
+The square-channel pitch checks out against the chip formula (fundamental
+`131072 / (2048 − freq)` Hz): the overworld theme's melody reads **E5 D♯5 D♯5 D5 C5 …** — the
+familiar Birabuto/main theme. Twelve songs (`$DFE8` ids `$01`–`$0C`) render under
+`rendered/music/`; `id $07` is the overworld theme (named; the rest keep id-based names
+pending a listen-by-listen identification). The same harness renders sound effects by writing
+to the `$DFE0`/`$DFF0`/`$DFF8` slots instead.
 
 ---
 

@@ -59,6 +59,18 @@ FFB6 oam_dma            HRAM OAM-DMA routine (DMA $C000 shadow -> OAM); copied f
 1983 mario_head_check   rising: tile above Mario; solid stops jump, bonks ?-block/brick
 0AE1 mario_stomp        Mario vs objects: drop onto enemy from above -> stomp ($29F8)
 4B6F mario_pit_death    Mario Y >= $B4 (below playfield) -> death state $FFB3=1
+
+# --- sound engine (Part VI; BANK 3) ---
+# entry: timer ISR $0050 -> page bank3 -> $7FF0 (JP $6762 tick / $7FF3=JP $6B26 init)
+6762 snd_tick           per-timer-tick: service request slots, advance channel streams
+6B26 snd_init           reset sound state; NR52 on; NR51=$FF; envelope regs
+6B59 snd_ch12_req       $DFE0/$DFE1 tone SFX (tables $6700/$6716)
+6B79 snd_ch4_req        $DFF8/$DFF9 noise SFX (tables $672C/$6734)
+6B9D snd_music_req      $DFE8/$DFE9 = MUSIC/BGM selector (table $673C; tempo $6C2B)
+67F4 snd_ch3_req        $DFF0/$DFF1 wave SFX
+6AFD snd_select         id-1 *2 -> pointer from the given table (HL)
+6B19 snd_load_wave      copy 16 bytes (HL) -> wave RAM $FF30-$FF3F
+# $673C[id-1] = song header; write song id to $DFE8 to start a piece of music
 175C pipe_enter         Down on a $70 pipe: read $C800[above] -> $FFF4-7 (dest/ret screen,X,Y)
 1612 pipe_descend       animate Mario into the pipe to $FFF8, then state $0A
 1626 pipe_warp_in       state $0A: $FFE5=$FFF4 (bonus screen 1/2), reload screen+objects

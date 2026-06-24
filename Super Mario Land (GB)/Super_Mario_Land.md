@@ -1085,6 +1085,12 @@ bonk. *Falling*, the foot check `$17B3` reads the tile under each foot; a solid 
 Mario onto it (`$1815`, `$C207`→0) and otherwise he keeps falling. Dropping onto an enemy
 from above (`$0AE1`, only while not rising) stomps it.
 
+**Start position.** Mario always spawns at the same place: screen **(50, 134)** with the
+camera unscrolled (SCX 0), identical in every level (confirmed by reading the oracle on all
+twelve). So he stands at the left edge of the map (≈ column 6) on the ground; his idle
+sprite is the 2×2 of tiles `$00`/`$01`/`$10`/`$11`. The Studio viewer draws him there as
+part of the **Objects & enemies** layer.
+
 **Death.** Falling into a pit — Mario's Y passing **`$B4`** (below the playfield) — triggers
 the death state (`$4B6F`: `$FFB3`=1, death jingle); time-up and enemy contact reach the same
 state from elsewhere.

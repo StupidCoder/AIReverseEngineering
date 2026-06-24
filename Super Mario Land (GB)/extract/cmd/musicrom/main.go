@@ -29,6 +29,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 
 	"stupidcoder.com/tools/gameboy"
 )
@@ -208,12 +209,12 @@ func render(chs [4]channel, loops int) []int16 {
 			}
 		}
 	}
-	pcm := normalize(apuRender(ev, int64(total)*cycPerTick))
-	return fadeOut(pcm, 2.5)
-}
+	// Events were appended channel-by-channel; the APU consumes them in order, so they must be
+	// globally sorted by cycle (a stable sort keeps each tick's writes in their emitted order).
+	sort.SliceStable(ev, func(i, j int) bool { return ev[i].Cycle < ev[j].Cycle })
 
-func apuRender(ev []gameboy.RegWrite, total int64) []int16 {
-	return gameboy.NewAPU().Render(ev, total)
+	pcm := normalize(gameboy.NewAPU().Render(ev, int64(total)*cycPerTick))
+	return fadeOut(pcm, 2.5)
 }
 
 // fadeOut applies a linear fade over the final `secs` seconds.

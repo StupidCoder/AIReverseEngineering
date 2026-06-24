@@ -233,13 +233,13 @@ func fadeOut(pcm []int16, secs float64) []int16 {
 // emitNote appends the APU register writes for one note event on channel ci.
 func emitNote(ev *[]gameboy.RegWrite, at func(int, uint16, byte), ci int, base uint16, e chanEvent) {
 	switch ci {
-	case 0, 1: // square
+	case 0, 1: // square — the $9D bytes are (env, _, duty): NRx2=env, NRx1=duty/length
 		envv := e.inst.env
 		if e.rest {
 			envv = 0x01 // DAC off -> silence (note-off)
 		}
-		at(e.tick, base, e.inst.duty) // NRx1 duty/length
-		at(e.tick, base+1, envv)      // NRx2 envelope
+		at(e.tick, base, e.inst.x) // NRx1 duty/length (the 3rd $9D byte)
+		at(e.tick, base+1, envv)   // NRx2 envelope (the 1st $9D byte)
 		at(e.tick, base+2, byte(e.freq))
 		at(e.tick, base+3, byte(e.freq>>8)|0x80) // trigger
 	case 2: // wave — the instrument's first two bytes are a pointer to 16 bytes of wave RAM

@@ -375,23 +375,23 @@ export class LevelViewer {
         this.objectLayer.addChild(txt);
       }
     };
-    // Place a native-resolution sprite. The placement (bx,by) marks the block the object
-    // rests on; the engine spawns it with its grid top there and ground-collision then
-    // snaps it up to sit on the block, so statically we anchor the sprite's BOTTOM to the
-    // top of the placement block (feet on the ground), centred horizontally.
-    const sprite = (tex, bx, by) => {
+    // Place a native-resolution sprite exactly where the engine draws it: the metasprite
+    // grid's top-left is the object's world position (blockX*32, blockY*32), and the
+    // sprite sits at the grid-relative offset (ox,oy) the extractor recorded.
+    const sprite = (tex, bx, by, meta) => {
       const s = new Sprite(tex);
-      s.x = Math.round(bx * BLOCK + (BLOCK - tex.width) / 2);
-      s.y = Math.round(by * BLOCK - tex.height);
+      s.x = Math.round(bx * BLOCK + (meta ? meta.ox : (BLOCK - tex.width) / 2));
+      s.y = Math.round(by * BLOCK + (meta ? meta.oy : (BLOCK - tex.height) / 2));
       this.objectLayer.addChild(s);
     };
     // Each placed object draws its ROM-extracted sprite (this zone's set); types without
     // an extractable metasprite (invisible triggers, own-gfx loaders) fall back to a marker.
     const zoneSprites = this.zoneSprites || {};
+    const zoneMeta = (this.spriteIndex && this.spriteIndex[level.zone]) || {};
     for (const o of level.objects) {
       if (o.type === 0) continue; // Sonic handled as the spawn marker
       const tex = zoneSprites[o.type];
-      if (tex) { sprite(tex, o.bx, o.by); continue; }
+      if (tex) { sprite(tex, o.bx, o.by, zoneMeta[o.type.toString(16).padStart(2, '0')]); continue; }
       const cat = OBJ_CAT[o.name] || 'default';
       mk(o.bx, o.by, BLOCK, BLOCK, OBJ_COLORS[cat], o.name || '?' + o.type.toString(16));
     }

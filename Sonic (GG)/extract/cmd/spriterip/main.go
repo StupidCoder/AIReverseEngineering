@@ -91,6 +91,42 @@ func renderMeta(layout, tiles []byte, pal color.Palette) *image.RGBA {
 	return img
 }
 
+// trimBBox crops an RGBA to its non-transparent bounding box and returns the box's
+// top-left offset (minX, minY) within the source so callers can keep the sprite's
+// position relative to the original (untrimmed) metasprite grid.
+func trimBBox(src *image.RGBA) (int, int, *image.RGBA) {
+	b := src.Bounds()
+	minX, minY, maxX, maxY := b.Max.X, b.Max.Y, b.Min.X, b.Min.Y
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			if _, _, _, al := src.At(x, y).RGBA(); al != 0 {
+				if x < minX {
+					minX = x
+				}
+				if x > maxX {
+					maxX = x
+				}
+				if y < minY {
+					minY = y
+				}
+				if y > maxY {
+					maxY = y
+				}
+			}
+		}
+	}
+	if minX > maxX {
+		return 0, 0, image.NewRGBA(image.Rect(0, 0, 1, 1))
+	}
+	out := image.NewRGBA(image.Rect(0, 0, maxX-minX+1, maxY-minY+1))
+	for y := minY; y <= maxY; y++ {
+		for x := minX; x <= maxX; x++ {
+			out.Set(x-minX, y-minY, src.At(x, y))
+		}
+	}
+	return minX, minY, out
+}
+
 // trim crops an RGBA to its non-transparent bounding box (keeps sprites compact).
 func trim(src *image.RGBA) *image.RGBA {
 	b := src.Bounds()
@@ -231,12 +267,15 @@ func main() {
 			if r.kind == "" || r.layout == 0 || r.layout+18 > len(rom) {
 				continue
 			}
-			spr := trim(renderMeta(rom[r.layout:r.layout+18], tiles, pal))
+			ox, oy, spr := trimBBox(renderMeta(rom[r.layout:r.layout+18], tiles, pal))
 			if spr.Rect.Dx() <= 1 && spr.Rect.Dy() <= 1 {
 				continue // empty layout
 			}
 			save(spr, fmt.Sprintf("%s/%02x.png", zdir, t))
-			index[fmt.Sprint(z)][fmt.Sprintf("%02x", t)] = map[string]int{"w": spr.Rect.Dx(), "h": spr.Rect.Dy()}
+			// ox,oy = the sprite's offset within the metasprite grid, whose top-left the
+			// engine draws at the object's world position (blockX*32, blockY*32). The
+			// viewer places the sprite at (blockX*32+ox, blockY*32+oy) to match the engine.
+			index[fmt.Sprint(z)][fmt.Sprintf("%02x", t)] = map[string]int{"ox": ox, "oy": oy, "w": spr.Rect.Dx(), "h": spr.Rect.Dy()}
 			total++
 			if montages {
 				cells = append(cells, renderMeta(rom[r.layout:r.layout+18], tiles, pal))

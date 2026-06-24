@@ -1076,11 +1076,13 @@ at `$7359`.
 **Where the sprite is drawn.** The object draw (`$2EE0`) reads the object's world position
 (`IX+2/3`, `IX+5/6`), subtracts the camera, and the metasprite grid's **top-left lands at
 that position** — no origin offset. An object is spawned (`$1AB3`) with its position at
-`(blockX×32, blockY×32)`, i.e. the grid top at the placement block, and then the object's
-own ground-collision snaps it up to rest on the block. A static render can't run that
-snap, so the viewer instead anchors each sprite's **bottom to the top of its placement
-block** (feet on the ground) — which is where the enemy actually sits in play, a tile or
-two above its raw spawn block.
+exactly `(blockX×32, blockY×32)`, and — verified on the live ROM — a ground enemy then
+*stays* there (its `Y` doesn't move): the engine does **not** snap it onto the ground. The
+placement block is itself solid terrain, and the metasprite is authored to sit correctly
+when its grid top is the block's top. So the faithful placement is simply the grid top at
+`(blockX×32, blockY×32)`; the extractor records each sprite's offset within its 48-px grid
+(`ox,oy`) and the viewer draws it at `(blockX×32+ox, blockY×32+oy)`, reproducing the engine
+exactly — the crab then stands on the grass, as it does in play.
 
 This is enough to extract every object's sprite **straight from the ROM**, with no
 emulator. `cmd/spriterip` reads each `$24B2` handler for its layout pointer (the `DE` base

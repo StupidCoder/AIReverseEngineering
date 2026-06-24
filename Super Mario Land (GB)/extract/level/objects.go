@@ -132,6 +132,14 @@ func TypeFrames(rom []byte) map[byte]byte {
 	return m
 }
 
+// SolidTile reports whether a background tile id is solid ground — something Mario and
+// enemies stand on (as opposed to passable scenery). Solidity is decided purely by the
+// tile id: the engine's foot/side checks read the BG tile under the actor ($0153) and
+// compare it to a threshold. Mario ($17B3) treats id >= $60 as floor; the enemy checks
+// ($2B7B/$2B91/$2BB2/...) treat the range [$5F, $F0) as solid (tiles >= $F0 are special
+// metadata tiles, never floor). We use the shared range [$60, $F0).
+func SolidTile(id byte) bool { return id >= 0x60 && id < 0xF0 }
+
 // Pipe is one warp pipe: standing on the pipe tile ($70) at (Screen,Col) of the main path
 // and pressing Down sends Mario to screen Dest (the bonus rooms are screens 1 and 2 of the
 // order table); leaving the bonus room returns him to screen RetScreen at pixel (RetX,RetY).

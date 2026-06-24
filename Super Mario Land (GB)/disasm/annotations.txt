@@ -44,7 +44,11 @@ FFB6 oam_dma            HRAM OAM-DMA routine (DMA $C000 shadow -> OAM); copied f
 2318 tile80_meta        $80/$5F map tile -> breakable/?-block table $6536[ffe4] (bank 3)
 2260 col_blit           copy decoded column $C0B0 -> BG $9800; clear parallel map $C800 cell
 0153 get_tile_at        HBlank-safe read of the BG tile at ($FFAD,$FFAE); ret A=tile, HL=$98xx
-17B3 mario_foot_check   tile under Mario's feet: $70=pipe (->$175C), $E1/$60+ solid, etc.
+17B3 mario_foot_check   tile under Mario's feet (via $0153): $70=pipe(->$175C), $E1 special,
+#                       id>=$60 = solid floor (->$1815); else fall. Probes both feet.
+1815 mario_on_solid     stand on a solid tile (snap Y to tile top, set on-ground)
+2B7B enemy_solid_side   enemy collision probe: read tile, solid iff in [$5F,$F0) (carry=clear)
+2B91 enemy_solid_v      (sibling probes $2BB2/$2BDB/$2BF5/$2C18 = feet/side/slope, same rule)
 175C pipe_enter         Down on a $70 pipe: read $C800[above] -> $FFF4-7 (dest/ret screen,X,Y)
 1612 pipe_descend       animate Mario into the pipe to $FFF8, then state $0A
 1626 pipe_warp_in       state $0A: $FFE5=$FFF4 (bonus screen 1/2), reload screen+objects

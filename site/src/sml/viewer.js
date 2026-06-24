@@ -18,6 +18,10 @@ const OBJ_COLORS = [
 ];
 const objColor = (type) => OBJ_COLORS[type % OBJ_COLORS.length];
 
+// Solidity is decided purely by the background tile id: Mario's foot check ($17B3) treats
+// id >= $60 as floor and the enemy checks ($2B7B..) use [$5F,$F0); we use the shared range.
+const isSolid = (id) => id >= 0x60 && id < 0xF0;
+
 export class SMLViewer {
   constructor(viewportEl, hudEl) {
     this.el = viewportEl;
@@ -26,17 +30,22 @@ export class SMLViewer {
     this.world = new Container();
     this.zoom = 1; this.minZoom = 0.05; this.maxZoom = 16;
     this.layer = null;
+    this.collisionLayer = null;
     this.objLayer = null;
     this.src = null;
     this._texMode = 'nearest';
     this._showObjects = true;
+    this._showCollision = false;
   }
 
-  // Display-layer toggle (studio adapter drives this). Only 'objects' for now.
+  // Display-layer toggle (studio adapter drives this).
   setLayer(id, on) {
     if (id === 'objects') {
       this._showObjects = on;
       if (this.objLayer) this.objLayer.visible = on;
+    } else if (id === 'collision') {
+      this._showCollision = on;
+      if (this.collisionLayer) this.collisionLayer.visible = on;
     }
   }
 
@@ -66,12 +75,35 @@ export class SMLViewer {
     this.layer = container;
     this.src = src;
     this.world.addChild(this.layer);
+    this._buildCollision(level);
     await this._buildObjects(level);
     this.levelW = level.width * TILE;
     this.levelH = level.height * TILE;
     this._fitDefault();
     const nObj = (level.objects || []).length;
     if (this.hud) this.hud.textContent = `${this.name} · ${level.width}×${level.height} tiles · ${nObj} objects`;
+  }
+
+  // Collision overlay: every solid 8x8 tile (the ones Mario and enemies stand on, decided
+  // by isSolid on the tile id) is filled semi-transparent red. Adjacent solid cells in a row
+  // are merged into one rect to keep the geometry light.
+  _buildCollision(level) {
+    if (this.collisionLayer) { this.world.removeChild(this.collisionLayer); this.collisionLayer.destroy({ children: true }); }
+    const g = new Graphics();
+    const W = level.width, H = level.height, cells = level.cells;
+    for (let r = 0; r < H; r++) {
+      let runStart = -1;
+      const flush = (xEnd) => { if (runStart >= 0) { g.rect(runStart * TILE, r * TILE, (xEnd - runStart) * TILE, TILE); runStart = -1; } };
+      for (let x = 0; x < W; x++) {
+        if (isSolid(cells[r * W + x])) { if (runStart < 0) runStart = x; }
+        else flush(x);
+      }
+      flush(W);
+    }
+    g.fill({ color: 0xff2020, alpha: 0.45 });
+    this.collisionLayer = g;
+    this.collisionLayer.visible = this._showCollision;
+    this.world.addChild(this.collisionLayer);
   }
 
   // Object/enemy overlay: known types are drawn as their real metasprite (sliced from the

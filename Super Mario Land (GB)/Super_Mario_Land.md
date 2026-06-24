@@ -1016,8 +1016,36 @@ bullets, while `$60` fans `$5C` → `$5E`/`$5F`/`$5D` spreads. Note how heavily 
 small parts — the `become`/`spawn` chains build big enemies from a launch state, a walk state
 and a projectile, and the eight item types all share the one `$0D` toss arc.
 
+## 6. Tile collision
+
+What can Mario (and the enemies) stand on? The answer is pleasingly simple: **solidity is a
+property of the background tile id alone** — there is no separate collision map for the
+terrain. Every frame, the actor's collision routine reads the BG tile under it with the
+HBlank-safe `$0153` (which returns the tile id stored in the `$9800` map) and compares it to
+a threshold:
+
+- **Mario** (`$17B3`, his foot check): the tile under each foot is read and tested with
+  `CP $60 / JR NC` — **id ≥ `$60` is floor** (`$1815` snaps him onto it; otherwise he falls).
+  Two ids are intercepted first for special behaviour: `$70` (a pipe mouth → §4) and `$E1`.
+- **Enemies** (`$2B7B`, `$2B91`, `$2BB2`, `$2BDB`, `$2BF5` — feet, sides, slopes): each reads
+  its tile and returns solid for the range **`[$5F, $F0)`** (`CP $5F; RET C` then
+  `CP $F0; CCF`). Tiles `≥ $F0` are special metadata tiles, never floor.
+
+So the tileset is laid out by convention: ids `$00`–`$5F` are passable scenery (sky, clouds,
+palms, the decorative Birabuto pyramids, Easton's stone statues…) and `$60`–`$EF` are solid
+(ground, blocks, pipes, climbable step-pyramids). `level.SolidTile` uses the shared range
+`[$60, $F0)`, and `extract/cmd/levelmap -id NN -collision` tints the solid tiles to verify
+it — the decorative pyramids stay clear while the ground and blocks light up:
+
+![1-1 solid tiles tinted](rendered/level-1-1-collision.png)
+
+The Studio viewer exposes this as a **Collision layer** toggle: it fills every solid cell
+(computed from the tile id in the level JSON) semi-transparent red, merging horizontal runs.
+The `?`/brick blocks and pipes carry extra per-tile behaviour through the `$C800` metadata
+map (§4 / the `$651C`/`$6536` tables), but for *standing on* it is purely the id threshold.
+
 *Still stubbed for Part V:* Mario's own physics, the per-opcode movement maths (`$266D`/
-`$2870` velocity→position, gravity), collision/score handling, and progression.
+`$2870` velocity→position, gravity), score handling, and progression.
 
 ---
 

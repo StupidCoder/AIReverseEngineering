@@ -26,6 +26,7 @@ func main() {
 	bank := flag.Int("bank", 2, "ROM bank holding the level data (when -id is not used)")
 	p1s := flag.String("p1", "6192", "screen-order table address (hex; when -id is not used)")
 	start := flag.Int("start", 3, "first main-path screen index (0=lead-in, 1/2=bonus rooms)")
+	collision := flag.Bool("collision", false, "tint solid tiles to verify the collision rule")
 	out := flag.String("o", "../rendered/level-1-1-map.png", "output PNG")
 	flag.Parse()
 
@@ -85,10 +86,29 @@ func main() {
 		}
 	}
 
-	// Overlay the object/enemy placements (decoded from the ROM, not the oracle) as
-	// red boxes at their map-tile positions, to verify the placement decoder visually.
 	img := image.NewRGBA(pimg.Bounds())
 	draw.Draw(img, img.Bounds(), pimg, image.Point{}, draw.Src)
+
+	// Optionally tint solid tiles (a tile is solid ground if its id is in [$60,$F0) —
+	// Mario's foot check $17B3 uses >=$60, the enemy checks $2B7B.. use [$5F,$F0)).
+	if *collision {
+		for x, col := range cols {
+			for row := 0; row < 16; row++ {
+				if level.SolidTile(col[row]) {
+					for py := 0; py < 8; py++ {
+						for px := 0; px < 8; px++ {
+							r, g, b, _ := img.At(x*8+px, row*8+py).RGBA()
+							img.Set(x*8+px, row*8+py, color.RGBA{
+								uint8(r >> 9), uint8(g>>9) + 0x40, uint8(b>>9) + 0x80, 0xff})
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Overlay the object/enemy placements (decoded from the ROM, not the oracle) as
+	// red boxes at their map-tile positions, to verify the placement decoder visually.
 	if *id != "" {
 		idv, _ := strconv.ParseUint(*id, 16, 8)
 		objs := level.DecodeObjectsByID(data, byte(idv))

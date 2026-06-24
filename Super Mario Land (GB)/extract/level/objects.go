@@ -48,7 +48,12 @@ func DecodeObjectsByID(rom []byte, id byte) []Object {
 // all) at the cursor. ($FF ends.) SML runs sprites in 8x8 mode (LCDC bit2 = 0), so each
 // emitted byte is one 8x8 tile — e.g. the Goomba (frame $01) is the single tile $90.
 
-const msTable = 0x2FD9 // object metasprite pointer table (bank-0 fixed)
+// The draw routine ($25B7) chooses one of two metasprite pointer tables by the object's
+// facing flag ($FFC5 bit0): $2FD9 for one direction, $30AB for the other — the two hold
+// mirror-image layouts (and per-tile X-flip attrs). For a static render we want the
+// natural, unflipped layout (tiles ordered left-to-right like the tile sheet / Mario's
+// $04,$05), which is $30AB; $2FD9 reverses the columns.
+const msTable = 0x30AB // object metasprite pointer table (natural facing; bank-0 fixed)
 
 // Sprite is one 8x8 OBJ sprite of a metasprite: the tile id and its pixel offset from the
 // metasprite origin (DY negative = above the origin).

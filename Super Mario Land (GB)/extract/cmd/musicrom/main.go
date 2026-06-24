@@ -258,19 +258,19 @@ func emitNote(ev *[]gameboy.RegWrite, at func(int, uint16, byte), ci int, base u
 		at(e.tick, 0xFF1C, e.inst.x) // NR32 volume (3rd $9D byte)
 		at(e.tick, 0xFF1D, byte(e.freq))
 		at(e.tick, 0xFF1E, byte(e.freq>>8)|0x80)
-	case 3: // noise — the note byte indexes the $7002 envelope/poly table
+	case 3: // noise — the note byte indexes a 5-byte entry in the $7002 table:
+		// [NR42 env, (unused), NR41 length, NR43 poly, NR44]. NR44 is $C0 = trigger +
+		// length-enable, so each drum is a short percussive hit that auto-cuts (this is what
+		// the engine does; without the length counter the drums droned and were far too loud).
+		p := 0x7002 + e.freq
 		if e.rest {
 			at(e.tick, 0xFF21, 0x01) // DAC off
 			return
 		}
-		env := rb(0x7002 + e.freq)
-		poly := rb(0x7002 + e.freq + 1)
-		if env&0xF0 == 0 {
-			env = 0xA1 // fallback drum envelope
-		}
-		at(e.tick, 0xFF21, env)
-		at(e.tick, 0xFF22, poly)
-		at(e.tick, 0xFF23, 0x80)
+		at(e.tick, 0xFF20, rb(p+2)) // NR41 length
+		at(e.tick, 0xFF21, rb(p))   // NR42 envelope
+		at(e.tick, 0xFF22, rb(p+3)) // NR43 polynomial counter
+		at(e.tick, 0xFF23, rb(p+4)) // NR44 trigger + length-enable ($C0)
 	}
 }
 

@@ -85,6 +85,14 @@ const GAMES = [
     ],
     // world -> level accordion: "2-1" -> { World 2, 2-1 }
     group: (lvl) => ({ section: `World ${lvl.world}`, label: lvl.name }),
+    music: async () => [
+      { name: 'Levels 1-1, 1-2, 3-1', url: 'public/sml/music/level-1-1.mp3' },
+      { name: 'Levels 1-3, 3-2, 3-3', url: 'public/sml/music/level-1-3.mp3' },
+      { name: 'Levels 2-1, 2-2 (Muda)', url: 'public/sml/music/level-2-1.mp3' },
+      { name: 'Levels 4-1, 4-2 (Chai)', url: 'public/sml/music/level-4-1.mp3' },
+      { name: 'Levels 2-3, 4-3 (boss)', url: 'public/sml/music/level-2-3.mp3' },
+      { name: 'Bonus rooms', url: 'public/sml/music/bonus.mp3' },
+    ],
   },
   {
     id: 'stuntcar', name: 'Stunt Car Racer', system: 'Amiga', render: '3d',

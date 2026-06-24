@@ -1153,7 +1153,9 @@ $A0-$AF   : set the note duration to durtable[low nibble]  (ticks; 1 tick = 1/64
 note N    : play a note — pitch is the GB frequency freqtable[$6F70 + N] (2 bytes/semitone;
             e.g. $52 = E5). The NOISE channel has no $9D; its note N indexes the table at
             $7002 for the envelope and polynomial-counter (NR42/NR43) of a drum hit.
-$01       : repeat the previous note (retrigger same pitch)
+$01       : note-off / rest — the engine retriggers with a DAC-off envelope ($01, volume 0)
+            to cut the channel, which is what articulates each part (without it every voice
+            is a continuous drone and the channels blur into one).
 $00       : end of pattern (advance to the next order entry)
 ```
 
@@ -1163,13 +1165,15 @@ Rather than run the engine, `extract/cmd/musicrom` is a **Go reimplementation** 
 the Sonic and Elite music tools): it decodes the four channels straight from the ROM bytes
 into note events and renders them through a small **DMG APU emulator** (`tools/gameboy/apu.go`
 — two squares + wave + noise with length/envelope/sweep off a 512 Hz frame sequencer). The
-decode is checked against ground truth with `musicrom -verify <id>`, which boots the real
-engine and prints its note stream beside the port's — they match (the overworld melody
-**E5 E5 D5 C5 C5 E5 …** lines up exactly from the loop point).
+decode is checked against ground truth with **`musicrom -verify <id>`**, which boots the real
+engine and prints its note *and envelope* stream beside the port's, channel by channel — the
+indispensable debugging tool here. (Two bugs it caught: the wave instrument is a *pointer* to
+wave-RAM data the port wasn't loading, leaving a DC drone; and note `$01` is a *note-off*, not
+a sustained note — without honouring it every channel droned and they blurred into one voice.)
 
-Because the player follows the data's own loop (the `$FF` target), each track is **trimmed to
-exactly one loop** and so loops seamlessly; channels of unequal loop length tile to their
-least common multiple. ffmpeg (libmp3lame) encodes the MP3.
+Each track is rendered as its **intro plus two loop iterations with a 2.5 s fade-out**: the
+intro plays once, then the body repeats (channels of unequal loop length tile to their least
+common multiple). ffmpeg (libmp3lame) encodes the MP3.
 
 ### Naming the tracks
 

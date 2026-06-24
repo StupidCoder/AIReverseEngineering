@@ -6,19 +6,20 @@
 //     each of the twelve levels uses, so the tracks are named by that.
 //   - A song header is: master byte, a 16-bit pointer to the song's DURATION TABLE, then four
 //     16-bit channel-header pointers (square1, square2, wave, noise).
-//   - A channel header is an ORDER LIST of 16-bit pattern pointers; lo byte $FF is the LOOP
-//     point, $00 ends the song.
-//   - A pattern is a byte stream: $9D a b c = set instrument (envelope, duty/len, 3rd byte);
-//     $A0-$AF = set note duration to durtable[low nibble]; $00 ends the pattern; note $01 = tie
-//     (hold, no retrigger); any other byte N is a note whose pitch is the GB frequency
-//     freqtable[$6F70 + N] (two bytes per semitone). The noise channel's N indexes a
-//     polynomial-counter table at $7002 instead of a pitch.
+//   - A channel header is an ORDER LIST of 16-bit pattern pointers ending in an $FF entry
+//     followed by a 2-byte LOOP TARGET; patterns before the target are a one-shot intro.
+//   - A pattern is a byte stream: $9D a b c = set voice (squares: NRx2 env, NRx1 duty, a 3rd
+//     byte; WAVE: a|b<<8 is a pointer to 16 bytes of wave RAM, c is NR32 vol); $A0-$AF = set
+//     note duration to durtable[low nibble]; $00 ends the pattern; note $01 = NOTE-OFF/rest
+//     (the engine retriggers with a DAC-off envelope to articulate the part); any other byte N
+//     is a note — pitch = freqtable[$6F70 + N] (two bytes/semitone), except the noise channel,
+//     whose N indexes the envelope/poly table at $7002.
 //   - The engine ticks at 64 Hz (one durtable unit = 1/64 s).
 //
-// The decoded notes are rendered through our DMG APU (tools/gameboy/apu.go). Each channel
-// loops at its $FF, so the render is trimmed to exactly one loop for a seamless file. ffmpeg
-// (libmp3lame) encodes the MP3. -verify boots the real engine in the emulator and prints both
-// the decoded and the engine's note streams so the port can be checked.
+// The decoded notes drive our DMG APU (tools/gameboy/apu.go). Each track is rendered as its
+// intro + two loop iterations with a fade-out tail. ffmpeg (libmp3lame) encodes the MP3.
+// -verify boots the real engine and prints its note/envelope stream beside the port's, so the
+// port can be checked channel-by-channel against ground truth.
 package main
 
 import (
@@ -51,18 +52,18 @@ type chanEvent struct {
 }
 
 type channel struct {
-	events    []chanEvent
-	loopTicks int
+	events    []chanEvent // the whole channel: intro then one loop, ticks from 0
+	loopStart int         // tick where the looping body begins (intro plays once)
+	loopLen   int         // length of the loop body in ticks
 }
 
 // decodeChannel walks a channel's order list and patterns into note events, stopping at the
 // $FF loop marker (one full loop). isNoise selects the noise vs pitch interpretation.
 func decodeChannel(hdr, durTbl int, isNoise bool) channel {
 	// The order list is a run of 2-byte pattern pointers ending in an $FF entry followed by a
-	// 2-byte LOOP TARGET (an address back into the list). Patterns before the target are a
-	// one-shot intro; the seamless loop is the patterns from the target to the $FF. We decode
-	// the WHOLE channel (so the instrument/duration set in the intro carry into the loop) and
-	// then keep only the loop-body events, re-based to tick 0.
+	// 2-byte LOOP TARGET (an address back into the list): the patterns before the target are a
+	// one-shot intro, the rest is the looping body. We decode the whole channel and record
+	// where the loop body starts so the renderer can play "intro + N loops".
 	end := hdr
 	target := hdr
 	for guard := 0; guard < 512; guard++ {
@@ -100,8 +101,10 @@ func decodeChannel(hdr, durTbl int, isNoise bool) channel {
 			default:
 				ev := chanEvent{tick: tick, dur: dur, inst: inst}
 				switch {
-				case c == 0x01: // repeat previous note (retrigger same pitch)
+				case c == 0x01: // note-off: the engine retriggers with a DAC-off envelope
+					// ($01) to silence the channel — a rest that articulates the part.
 					ev.freq = prev
+					ev.rest = true
 				case isNoise:
 					ev.freq = int(c)
 					prev = ev.freq
@@ -115,16 +118,7 @@ func decodeChannel(hdr, durTbl int, isNoise bool) channel {
 			}
 		}
 	}
-	// keep the loop body, re-based to tick 0 (instrument state carried from the intro).
-	var ch channel
-	for _, e := range all {
-		if e.tick >= loopTick {
-			e.tick -= loopTick
-			ch.events = append(ch.events, e)
-		}
-	}
-	ch.loopTicks = tick - loopTick
-	return ch
+	return channel{events: all, loopStart: loopTick, loopLen: tick - loopTick}
 }
 
 // song decodes a music id into its four channels. A channel whose header pointer is not in
@@ -151,81 +145,107 @@ func gcd(a, b int) int {
 // regBase is the first APU register of each channel (NR_1).
 var regBase = [4]uint16{0xFF11, 0xFF16, 0xFF1B, 0xFF20}
 
-// render turns the four decoded channels into an APU register-write stream and PCM, trimmed
-// to one loop (the longest channel's loop length).
-func render(chs [4]channel) []int16 {
-	// The channels loop at different lengths (e.g. a short noise drum under a long melody);
-	// the song repeats seamlessly at the least common multiple, where they all realign. If a
-	// secondary channel makes that unreasonably long, fall back to the square channels (the
-	// melody/harmony that define the song) and let the others tile with a tiny seam.
+// render plays each channel's intro once and then loops its body, for the whole song's
+// intro + `loops` loop iterations, and returns peak-normalised PCM with the tail faded out.
+func render(chs [4]channel, loops int) []int16 {
+	// Song loop length: the LCM of the channels' loop bodies (where they realign), falling
+	// back to the square channels if a secondary channel makes it unreasonably long.
 	lcm := func(chans []channel) int {
 		l := 1
 		for _, c := range chans {
-			if c.loopTicks > 0 {
-				l = l / gcd(l, c.loopTicks) * c.loopTicks
+			if c.loopLen > 0 {
+				l = l / gcd(l, c.loopLen) * c.loopLen
 			}
 		}
 		return l
 	}
-	loop := lcm(chs[:])
-	if loop > 5000 {
-		loop = lcm(chs[0:2]) // squares only
+	songLoop := lcm(chs[:])
+	if songLoop > 5000 {
+		songLoop = lcm(chs[0:2])
 	}
-	if os.Getenv("MUSDBG") != "" {
-		for i, c := range chs {
-			fmt.Fprintf(os.Stderr, "ch%d: %d events, loop %d ticks\n", i, len(c.events), c.loopTicks)
+	maxIntro := 0
+	for _, c := range chs {
+		if c.loopStart > maxIntro {
+			maxIntro = c.loopStart
 		}
-		fmt.Fprintf(os.Stderr, "song loop %d ticks\n", loop)
 	}
+	total := maxIntro + loops*songLoop // ticks to render
+
 	var ev []gameboy.RegWrite
 	at := func(tick int, reg uint16, v byte) {
 		ev = append(ev, gameboy.RegWrite{Cycle: int64(tick) * cycPerTick, Reg: reg, Val: v})
 	}
-	// power on, full panning, master volume.
-	at(0, 0xFF26, 0x80)
+	at(0, 0xFF26, 0x80) // power on, full panning, master volume, wave DAC on
 	at(0, 0xFF25, 0xFF)
 	at(0, 0xFF24, 0x77)
-	at(0, 0xFF1A, 0x80) // wave DAC on
+	at(0, 0xFF1A, 0x80)
 
 	solo := os.Getenv("MUSSOLO")
 	for ci, c := range chs {
-		if c.loopTicks == 0 {
+		if len(c.events) == 0 || (solo != "" && solo != fmt.Sprint(ci)) {
 			continue
-		}
-		if solo != "" && solo != fmt.Sprint(ci) {
-			continue
-		}
-		if os.Getenv("MUSDBG") != "" && len(c.events) > 0 {
-			fmt.Fprintf(os.Stderr, "ch%d first note: freq=%d env=$%02X duty=$%02X\n", ci, c.events[0].freq, c.events[0].inst.env, c.events[0].inst.duty)
 		}
 		base := regBase[ci]
-		// repeat the channel's own loop to fill the song loop
-		for rep := 0; rep*c.loopTicks < loop; rep++ {
-			off := rep * c.loopTicks
+		// the intro (events before loopStart) plays once; then the loop body repeats.
+		for rep := 0; ; rep++ {
+			off := rep * c.loopLen
+			done := true
 			for _, e := range c.events {
-				tk := e.tick + off
-				if tk >= loop {
-					break
+				if rep > 0 && e.tick < c.loopStart {
+					continue // intro only on the first pass
 				}
+				tk := e.tick + off
+				if tk >= total {
+					continue
+				}
+				done = false
 				e := e
 				e.tick = tk
 				emitNote(&ev, at, ci, base, e)
 			}
+			if done || c.loopLen == 0 {
+				break
+			}
 		}
 	}
-	apu := gameboy.NewAPU()
-	return normalize(apu.Render(ev, int64(loop)*cycPerTick))
+	pcm := normalize(apuRender(ev, int64(total)*cycPerTick))
+	return fadeOut(pcm, 2.5)
+}
+
+func apuRender(ev []gameboy.RegWrite, total int64) []int16 {
+	return gameboy.NewAPU().Render(ev, total)
+}
+
+// fadeOut applies a linear fade over the final `secs` seconds.
+func fadeOut(pcm []int16, secs float64) []int16 {
+	n := int(secs * gameboy.APURate)
+	if n > len(pcm) {
+		n = len(pcm)
+	}
+	for i := 0; i < n; i++ {
+		g := float64(n-i) / float64(n)
+		pcm[len(pcm)-n+i] = int16(float64(pcm[len(pcm)-n+i]) * g)
+	}
+	return pcm
 }
 
 // emitNote appends the APU register writes for one note event on channel ci.
 func emitNote(ev *[]gameboy.RegWrite, at func(int, uint16, byte), ci int, base uint16, e chanEvent) {
 	switch ci {
 	case 0, 1: // square
-		at(e.tick, base, e.inst.duty)  // NRx1 duty/length
-		at(e.tick, base+1, e.inst.env) // NRx2 envelope
+		envv := e.inst.env
+		if e.rest {
+			envv = 0x01 // DAC off -> silence (note-off)
+		}
+		at(e.tick, base, e.inst.duty) // NRx1 duty/length
+		at(e.tick, base+1, envv)      // NRx2 envelope
 		at(e.tick, base+2, byte(e.freq))
 		at(e.tick, base+3, byte(e.freq>>8)|0x80) // trigger
 	case 2: // wave — the instrument's first two bytes are a pointer to 16 bytes of wave RAM
+		if e.rest {
+			at(e.tick, 0xFF1C, 0x00) // NR32 volume 0 -> mute
+			return
+		}
 		wp := int(e.inst.env) | int(e.inst.duty)<<8
 		if wp >= 0x6000 && wp < 0x8000 {
 			at(e.tick, 0xFF1A, 0x00) // DAC off while loading wave RAM
@@ -238,8 +258,12 @@ func emitNote(ev *[]gameboy.RegWrite, at func(int, uint16, byte), ci int, base u
 		at(e.tick, 0xFF1D, byte(e.freq))
 		at(e.tick, 0xFF1E, byte(e.freq>>8)|0x80)
 	case 3: // noise — the note byte indexes the $7002 envelope/poly table
+		if e.rest {
+			at(e.tick, 0xFF21, 0x01) // DAC off
+			return
+		}
 		env := rb(0x7002 + e.freq)
-		poly := rb(0x7002 + e.freq + 2)
+		poly := rb(0x7002 + e.freq + 1)
 		if env&0xF0 == 0 {
 			env = 0xA1 // fallback drum envelope
 		}
@@ -298,7 +322,7 @@ func main() {
 	}
 	ck(os.MkdirAll(*out, 0o755))
 	for _, t := range tracks {
-		pcm := render(song(t.id))
+		pcm := render(song(t.id), 2) // intro + 2 loops
 		wav := filepath.Join(*out, t.name+".wav")
 		writeWAV(wav, pcm)
 		mp3 := filepath.Join(*out, t.name+".mp3")
@@ -310,7 +334,7 @@ func main() {
 		}
 		os.Remove(wav)
 		fi, _ := os.Stat(mp3)
-		fmt.Printf("%-12s id $%02X -> %s (%d KB, loop %.1fs)\n", t.name, t.id, t.name+".mp3",
+		fmt.Printf("%-12s id $%02X -> %s (%d KB, length %.1fs)\n", t.name, t.id, t.name+".mp3",
 			fi.Size()/1024, float64(len(pcm))/gameboy.APURate)
 	}
 }

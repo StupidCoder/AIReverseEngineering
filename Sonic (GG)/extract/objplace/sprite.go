@@ -350,17 +350,23 @@ const (
 // SonicSeq returns one anim id's sequence as (graphic frame, hold frames) steps plus
 // the loop-back step index.
 func SonicSeq(rom []byte, anim int) (steps []AnimFrame, loopStep int) {
-	p := word(rom, sonicAnimTable+anim*2)
+	return perFrameSeq(rom, word(rom, sonicAnimTable+anim*2), 0xFF)
+}
+
+// perFrameSeq parses a one-byte-per-engine-frame sequence (Sonic $4E6D and the goal
+// sign $63E7 share the format): each byte is the frame id for that engine frame; a
+// byte >= stop is a control whose next byte is the new cursor (the loop point).
+// Returns run-length-collapsed steps (frame id in Layout) and the loop step index.
+func perFrameSeq(rom []byte, p int, stop byte) (steps []AnimFrame, loopStep int) {
 	var perFrame []int
 	loopByte := 0
 	for q := p; q < p+256; q++ {
-		if rom[q]&0x80 != 0 {
+		if rom[q] >= stop {
 			loopByte = int(rom[q+1])
 			break
 		}
 		perFrame = append(perFrame, int(rom[q]))
 	}
-	// run-length collapse, tracking which step the loop byte-offset falls into
 	for i := 0; i < len(perFrame); {
 		j := i
 		for j < len(perFrame) && perFrame[j] == perFrame[i] {
@@ -369,7 +375,7 @@ func SonicSeq(rom []byte, anim int) (steps []AnimFrame, loopStep int) {
 		if loopByte >= i && loopByte < j {
 			loopStep = len(steps)
 		}
-		steps = append(steps, AnimFrame{Layout: perFrame[i], Frames: j - i}) // Layout = graphic frame id here
+		steps = append(steps, AnimFrame{Layout: perFrame[i], Frames: j - i}) // Layout = frame id here
 		i = j
 	}
 	return steps, loopStep
@@ -511,4 +517,38 @@ func BobPath() [][2]int {
 		}
 	}
 	return path
+}
+
+// --- the goal sign ($07, handler $61F8) ----------------------------------------------
+//
+// The end-of-act sign is the one own-gfx object that is a plain metasprite: on its
+// first frame it decompresses its OWN sprite sheet over VRAM $2000 ($620E: bank 9
+// file $27AB8 — the sign plates and post) and switches the sprite palette to index
+// $0E ($6219, via ($D22D)). Its animation uses the same one-byte-per-frame sequencer
+// as Sonic ($63E7, cursor IX+18): layout = $652D + frameId*18 ($6404). The IDLE
+// sequence at $64A8 spins the sign continuously — plates 0, 3 (quarter), 2 (edge),
+// 4, six frames each; the post-clear sequences ($64C2..$6513) stop it on the result
+// plate. The Studio viewer shows the idle spin.
+const (
+	goalLayoutBase = 0x652D
+	goalIdleSeq    = 0x64A8
+	goalPalette    = 0x0E
+)
+
+// GoalAnim returns the goal sign's animation as (layout file offset, hold frames)
+// steps, plus its own sheet source and palette index. The engine idles the sign
+// STATIC on the "?" plate (state sequence $64C2 = one frame) and plays the $64A8
+// spin — plates 0, 3, 2, 4 at six frames each, hopping upward — while Sonic crosses
+// it (oracle-verified). For the viewer the steps are the static plate held ~5
+// seconds, then three spin cycles, looping — the flowers' wait-then-play pattern.
+func GoalAnim(rom []byte) (steps []AnimFrame, sheetSrc, pal int) {
+	spin, _ := perFrameSeq(rom, goalIdleSeq, 0xFF)
+	steps = append(steps, AnimFrame{Layout: goalLayoutBase, Frames: 300})
+	for cycle := 0; cycle < 3; cycle++ {
+		for _, st := range spin {
+			steps = append(steps, AnimFrame{Layout: goalLayoutBase + st.Layout*18, Frames: st.Frames})
+		}
+	}
+	src, _, _ := OwnGfx(rom, 0x07)
+	return steps, src, goalPalette
 }

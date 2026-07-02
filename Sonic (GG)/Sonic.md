@@ -1023,7 +1023,7 @@ slot:
 | `$01`/`$02`/`$03` | bonus item | b1 `$5DE1`/`$5EB1`/`$5EDD` | |
 | `$04` | shield power-up | b1 `$5FAF` | |
 | `$06` | chaos emerald | b1 `$6183` | |
-| `$07` | goal sign | b1 `$61F8` | end of act |
+| `$07` | goal sign | b1 `$61F8` | end of act. Loads its **own sprite sheet** over VRAM `$2000` (bank 9 file `$27AB8`) + palette `$0E` on its first frame; idles **static** on the "?" plate (state sequence `$64C2`), and when Sonic crosses it hops and **spins** (per-frame sequence `$64A8`, the same one-byte-per-frame format as Sonic's animations, plates 0→3→2→4 × 6 frames; layout = `$652D` + plate×18), stopping on the outcome plate (`$64C5`/`$64DF`/`$64F9`/`$6513`). Also clamps the camera (`$D26D/$D26F`) so the act ends at the sign |
 | `$08` | **crab** | b1 `$65F9` | walker (~0.16 px/frame) that stops to fire a projectile each side; 4 in Green Hills Act 1 |
 | `$09` | swinging platform | b1 `$6747` | pendulum: 180° arc, radius ~51 px, ~3.7 s/cycle; carries Sonic |
 | `$0E` | bird | b1 `$6BD9` | enemy |
@@ -1154,10 +1154,11 @@ emulator. `cmd/spriterip` reads each `$24B2` handler for its layout pointer (the
 fed to `$7C75`, or a direct `IX+15/16` load), decompresses each zone's sprite tile set and
 palette, and renders the metasprite — **68 sprites across the seven zones**: the crab,
 beetle, bird, fish, porcupine, the moving/swinging platforms (the jungle's are *logs*), the
-item boxes, and all four world bosses, each in its own zone's colours. The few that stay
-markers are invisible triggers (`$03`, the camera lock `$50`), the passive checkpoint, and
-objects that load their own graphics on demand (the goal sign). The Studio viewer draws
-these in its **Objects** layer, replacing the three oracle-captured placeholders.
+item boxes, and all four world bosses, each in its own zone's colours. The **goal sign** is the one own-gfx object that is still a plain metasprite, so it IS
+extracted: its own sheet (bank 9 `$27AB8`) and palette (`$0E`), spinning through plates
+`$652D`+n×18 (the viewer shows the static "?" plate with a periodic spin — in play it
+spins only while Sonic crosses it). The few that stay markers are invisible triggers and
+the boss set-pieces. The Studio viewer draws all of this in its **Objects** layer.
 
 ### Horizontal moving platform (`$0F`)
 

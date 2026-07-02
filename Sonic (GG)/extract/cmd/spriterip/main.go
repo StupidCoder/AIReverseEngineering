@@ -21,6 +21,7 @@ import (
 	"os"
 	"sort"
 
+	"sonicgg/extract/decomp"
 	"sonicgg/extract/objplace"
 	"stupidcoder.com/tools/gamegear"
 )
@@ -202,6 +203,39 @@ func renderAnimStrip(rom, tiles []byte, pal color.Palette, typ, zone int) (*imag
 		}
 	}
 	return strip, durs
+}
+
+// goalStrip renders the goal sign's idle spin from its own graphics: the handler
+// decompresses its sheet over VRAM $2000 and switches to sprite palette $0E, so the
+// sign looks the same in every zone (objplace.GoalAnim).
+func goalStrip(rom []byte) (*image.RGBA, [][2]int) {
+	steps, src, palIdx := objplace.GoalAnim(rom)
+	tiles := make([]byte, 256*32)
+	copy(tiles, decomp.Decompress(rom, src))
+	copy(tiles[0x80*32:], decomp.Decompress(rom, objplace.CommonTilesFile))
+	pal := romPalette(rom, palIdx)
+	var gfx []int
+	idxOf := map[int]int{}
+	for _, st := range steps {
+		if _, ok := idxOf[st.Layout]; !ok {
+			idxOf[st.Layout] = len(gfx)
+			gfx = append(gfx, st.Layout)
+		}
+	}
+	strip := image.NewRGBA(image.Rect(0, 0, len(gfx)*48, 48))
+	for i, lay := range gfx {
+		cell := renderMeta(rom[lay:lay+18], tiles, pal)
+		for y := 0; y < 48; y++ {
+			for x := 0; x < 48; x++ {
+				strip.Set(i*48+x, y, cell.At(x, y))
+			}
+		}
+	}
+	var seq [][2]int
+	for _, st := range steps {
+		seq = append(seq, [2]int{idxOf[st.Layout], st.Frames})
+	}
+	return strip, seq
 }
 
 // trimBBox crops an RGBA to its non-transparent bounding box and returns the box's
@@ -391,6 +425,13 @@ func main() {
 			if t == 0 {
 				continue
 			}
+			if t == 0x07 { // the goal sign: own gfx but a plain metasprite — render its spin
+				strip, seq := goalStrip(rom)
+				save(strip, fmt.Sprintf("%s/%02x.png", zdir, t))
+				index[fmt.Sprint(z)]["07"] = sprMeta{F: strip.Rect.Dx() / 48, D: []int{0}, S: seq}
+				total++
+				continue
+			}
 			r := objplace.AnalyzeSprite(rom, t, z)
 			if r.Kind == "" || r.Layout == 0 || r.Layout+18 > len(rom) {
 				continue
@@ -401,7 +442,8 @@ func main() {
 			// (the Bridge 1 "mess in the sky" was the Egg Mobile flyby). Skip them;
 			// the viewer shows its labelled marker instead.
 			if _, _, own := objplace.OwnGfx(rom, t); own || t == 0x25 {
-				// (the capsule 0x25 draws with the BOSS's runtime tiles - same problem)
+				// (the bosses draw multi-part script sprites with their own tiles, and
+				// the capsule 0x25 borrows the boss's runtime tiles - marker fallback)
 				continue
 			}
 			tt := objplace.ApplyIconUpload(rom, tiles, t)

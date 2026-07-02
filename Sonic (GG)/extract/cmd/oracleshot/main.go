@@ -45,6 +45,26 @@ func main() {
 			m.RunFrame()
 		}
 	}
+	if os.Getenv("TELEPORT") != "" {
+		var tx int
+		fmt.Sscanf(os.Getenv("TELEPORT"), "%d", &tx)
+		for i := 0; i < 60; i++ {
+			m.RunFrame()
+		}
+		m.Write(0xD3FD+2, byte(tx))
+		m.Write(0xD3FD+3, byte(tx>>8))
+		m.Write(0xD3FD+5, 100)
+		m.Write(0xD3FD+6, 0)
+	}
+	if tf := os.Getenv("TOUCH"); tf != "" {
+		var n int
+		fmt.Sscanf(tf, "%d", &n)
+		for i := 0; i < n; i++ {
+			m.RunFrame()
+		}
+		m.PadDC = 0xF7 // hold Right: walk into the sign
+		settle -= n
+	}
 	for i := 0; i < settle; i++ {
 		m.RunFrame()
 	}

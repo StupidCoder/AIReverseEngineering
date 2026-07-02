@@ -1,5 +1,10 @@
 # Website — implementation plan
 
+> **Historical document.** The site has since evolved: every 2-D tilemap game now runs on
+> one shared viewer (`src/shared/`) consuming the common level format specified in
+> [FORMAT.md](FORMAT.md); the per-game JSON sketches below describe the original Sonic-only
+> formats and are superseded.
+
 An interactive companion site for the reverse-engineering work in this repo. It presents
 findings across all four games with visualizations that markdown and static PNGs can't do:
 a draggable, zoomable Sonic level viewer with toggleable layers (collision shapes, objects)

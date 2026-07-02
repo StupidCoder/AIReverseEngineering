@@ -65,12 +65,21 @@ export class LevelViewer {
     const level = await this.data.loadLevel(entry);
     this.level = level;
 
+    // Drop every consumer of the old tilemap's textures BEFORE destroying it —
+    // the awaits below yield to the render loop, and a tick drawing a sprite
+    // whose baked TextureSource is gone crashes the renderer (pool stamps) or
+    // paints into a dead canvas (tile anims).
+    this.anim.reset();
+    this.poolLayer.removeChildren();
+    this.objectLayer.removeChildren();
+    this.collisionLayer.removeChildren();
+    this.tileLayer.removeChildren();
+
     // tilemap (owns its textures; destroyed on reload). Games with block
     // indirection (level.blocks) use the block-baked strategy automatically.
     if (this.tilemap) this.tilemap.destroy();
     for (const m of this._extraMaps || []) m.destroy();
     this._extraMaps = [];
-    this.tileLayer.removeChildren();
     const atlasImg = await this.data.atlasImage(level.grid.atlas);
     const mkMap = () => level.blocks
       ? new BlockTilemap(level, atlasImg, { water: buildWaterInfo(level) })
@@ -89,7 +98,6 @@ export class LevelViewer {
     this._texMode = 'nearest';
 
     // animation subsystems
-    this.anim.reset();
     for (const a of level.tileAnims || []) {
       this.anim.tileAnims.push({
         anim: a, acc: 0, step: 0,
@@ -135,7 +143,6 @@ export class LevelViewer {
     if (cycle) this.anim.fx.push(cycle);
 
     // collision overlay
-    this.collisionLayer.removeChildren();
     if (level.collision) {
       if (level.collision.kind === 'grid') {
         this.collisionLayer.addChild(buildCollisionGrid(level));
@@ -146,7 +153,6 @@ export class LevelViewer {
     }
 
     // objects + spawn (fixed placements)
-    this.objectLayer.removeChildren();
     const { container, animObjs, pathObjs } = await buildObjects(level, this.data, {
       markerCat: this.config.markerCat || (() => 'default'),
     });

@@ -22,8 +22,13 @@ python3 -m http.server 8000
   picks the game and asset; the selected viewer renders full-bleed, with display-layer toggles,
   a music player, an optional CRT filter, and a technical-details panel. This is the whole site.
 - `src/studio/` — the Studio shell (`main.js`, `info-content.js`, `crt.js`, `camera.js`).
-- `src/<game>/viewer.js` — the per-game viewer modules the Studio loads on demand
-  (`src/sonic/`, `src/elite/`, `src/fort/`, `src/turrican/`, `src/marble/`, `src/stuntcar/`).
+- `src/shared/` — the **shared 2-D level viewer** every tilemap game runs on (Sonic, Fort,
+  Turrican, Marble's map view, SML): camera, tilemap renderer (sliced / baked / block
+  strategies), overlay layers, the animation runner and palette effects. It consumes the
+  **common level format** specified in [FORMAT.md](FORMAT.md); per-game specifics live in a
+  small `src/<game>/config.js`.
+- `src/elite/`, `src/stuntcar/`, `src/marble/slopes.js` — the three.js 3-D viewers (wireframe
+  ships, track ribbons, the slope height-mesh), outside the tilemap format.
 - `public/marble/` — per-course `<course>.png` + `meta.json`. Regenerate from the disk with:
 
   ```sh

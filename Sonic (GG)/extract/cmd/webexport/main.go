@@ -23,6 +23,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"sonicgg/extract/decomp"
 	"sonicgg/extract/objplace"
@@ -134,15 +135,15 @@ func romPalette(rom []byte, idx int) color.Palette {
 
 // objectTable reads a level's [type, blockX, blockY] placements straight from ROM.
 type Obj struct {
-	Type byte   `json:"type"`
-	Bx   int    `json:"bx"`
-	By   int    `json:"by"`
-	X    int    `json:"x"` // rest position (world px): spawn + the engine's placement
-	Y    int    `json:"y"` // ($6089 pickup adjust + $2CD4 floor snap), objplace.Settle
-	Name string `json:"name"`
+	Type   byte   `json:"type"`
+	X      int    `json:"x"` // rest position (world px): spawn + the engine's placement
+	Y      int    `json:"y"` // ($6089 pickup adjust + $2CD4 floor snap), objplace.Settle
+	Name   string `json:"name,omitempty"`
+	Sprite string `json:"sprite,omitempty"` // sprites/index.json key ("<zone>/<hex>")
+	bx, by int    // spawn blocks (internal: settle input)
 }
 
-func objectTable(rom []byte, act int) []Obj {
+func objectTable(rom []byte, act, zone int) []Obj {
 	d := descTable + w(rom, descTable+act*2)
 	t := objTable + w(rom, d+30)
 	count := int(rom[t])
@@ -151,7 +152,11 @@ func objectTable(rom []byte, act int) []Obj {
 		p := t + 1 + i*3
 		typ := rom[p]
 		bx, by := int(rom[p+1]), int(rom[p+2])
-		objs = append(objs, Obj{typ, bx, by, bx * 32, by * 32, objNames[typ]})
+		o := Obj{Type: typ, X: bx * 32, Y: by * 32, Name: objNames[typ], bx: bx, by: by}
+		if zone >= 0 && zone <= 6 {
+			o.Sprite = fmt.Sprintf("%d/%02x", zone, typ) // resolved (or not) via sprites/index.json
+		}
+		objs = append(objs, o)
 	}
 	return objs
 }
@@ -162,7 +167,7 @@ func objectTable(rom []byte, act int) []Obj {
 func settleObjects(rom []byte, objs []Obj, lvl *objplace.Level) {
 	for i := range objs {
 		t := int(objs[i].Type)
-		x, y, grounded := lvl.Settle(t, objs[i].Bx*32, objs[i].By*32)
+		x, y, grounded := lvl.Settle(t, objs[i].bx*32, objs[i].by*32)
 		// A handler with per-frame gravity (and terrain collision) pulls its object
 		// down to the floor below when the spawn block has none — the porcupine in
 		// Bridge 1 drops 48 px onto the lower ground on activation (oracle-verified).
@@ -201,7 +206,7 @@ func cellAnims(rom []byte, objs []Obj) []CellAnim {
 	var out []CellAnim
 	for _, o := range objs {
 		if o.Type == 0x50 {
-			out = append(out, CellAnim{Tx: o.Bx * 4, Ty: o.By * 4, Phases: phases})
+			out = append(out, CellAnim{Tx: o.bx * 4, Ty: o.by * 4, Phases: phases})
 		}
 	}
 	return out
@@ -450,19 +455,22 @@ func capturePaletteCycle(rom []byte, act int, staticPal color.Palette) *PaletteC
 // JSON shapes ----------------------------------------------------------------
 
 type Meta struct {
-	Zones []string   `json:"zones"`
-	Acts  []ActIndex `json:"acts"`
-	Anim  AnimMeta   `json:"anim"`
+	Format int            `json:"format"`
+	Game   string         `json:"game"`
+	Native map[string]int `json:"native"`
+	TickHz int            `json:"tickHz"`
+	Levels []ActIndex     `json:"levels"`
 }
 type ActIndex struct {
-	File  string `json:"file"`
-	Zone  int    `json:"zone"`
-	Name  string `json:"name"`
-	Atlas string `json:"atlas"`
+	Name    string `json:"name"`
+	Section string `json:"section"`
+	File    string `json:"file"`
+	Atlas   string `json:"atlas"`
 }
-type AnimMeta struct {
-	FramesPerTick int `json:"framesPerTick"`
-}
+
+// framesPerTick is the engine's tile-animation cadence (the $15FF update's ~10-frame
+// cycle), emitted as each tileAnims group's periodFrames.
+const framesPerTick = 10
 
 type Shapes struct {
 	Count    int     `json:"count"`
@@ -470,27 +478,83 @@ type Shapes struct {
 	Angles   []int   `json:"angles"`   // 48 signed angles
 }
 
+type Grid struct {
+	TileSize    int    `json:"tileSize"`
+	Atlas       string `json:"atlas"`
+	AtlasCols   int    `json:"atlasCols"`
+	AtlasGutter int    `json:"atlasGutter"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+	Cells       []int  `json:"cells"` // block indices (see Blocks)
+}
+
+type Blocks struct {
+	Size   int     `json:"size"`
+	Tiles  [][]int `json:"tiles"`  // block -> 16 tile indices (4x4)
+	Shapes []int   `json:"shapes"` // block -> collision shape 0-47
+}
+
+type Rect struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+	W int `json:"w"`
+	H int `json:"h"`
+}
+
+type Spawn struct {
+	X      int    `json:"x"`
+	Y      int    `json:"y"`
+	Sprite string `json:"sprite,omitempty"`
+}
+
+type TileAnim struct {
+	Tiles        []int   `json:"tiles"`
+	Frames       [][]int `json:"frames"`
+	PeriodFrames int     `json:"periodFrames"`
+}
+
+type Collision struct {
+	Kind       string `json:"kind"`
+	ShapesFile string `json:"shapesFile"`
+}
+
+type PaletteFx struct {
+	Palette   []string      `json:"palette"`
+	Cycle     *PaletteCycle `json:"cycle,omitempty"`
+	WaterLine *WaterLine    `json:"waterLine,omitempty"`
+}
+
+type WaterLine struct {
+	Y       int      `json:"y"`
+	Palette []string `json:"palette"`
+}
+
 type ActFile struct {
-	Zone         int           `json:"zone"`
-	Act          int           `json:"act"`
-	Name         string        `json:"name"`
-	Atlas        string        `json:"atlas"`
-	TileSize     int           `json:"tileSize"`
-	Stride       int           `json:"stride"`
-	WidthBlocks  int           `json:"widthBlocks"`
-	HeightBlocks int           `json:"heightBlocks"`
-	Palette      []string      `json:"palette"`
-	BlockTiles   [][]int       `json:"blockTiles"` // block -> 16 tile indices (4x4)
-	BlockShape   []int         `json:"blockShape"` // block -> collision shape 0-47
-	Blocks       []int         `json:"blocks"`     // block-index map, row-major, len = w*h
-	Spawn        [2]int        `json:"spawn"`      // [bx, by] raw spawn blocks (view centring)
-	SpawnPx      [3]int        `json:"spawnPx"`    // Sonic's rest [x, y, grounded]: spawn dropped to the first floor line (objplace.DropToFloor)
-	Objects      []Obj         `json:"objects"`
-	Anim         []AnimGroup   `json:"anim"`                   // animated tile groups (atlas indices per frame)
-	CellAnims    []CellAnim    `json:"cellAnims,omitempty"`    // type-$50 background animators (growing flowers / sea twinkle)
-	PaletteCycle *PaletteCycle `json:"paletteCycle,omitempty"` // runtime BG-palette rotation (water/waterfall)
-	Water        *Water        `json:"water,omitempty"`        // Labyrinth flooded-act underwater split (Part V §3)
-	Music        string        `json:"music,omitempty"`        // background-music track name (descriptor +36 -> id)
+	Format    int        `json:"format"`
+	Name      string     `json:"name"`
+	Grid      Grid       `json:"grid"`
+	Blocks    Blocks     `json:"blocks"`
+	View      Rect       `json:"view"`
+	Spawn     Spawn      `json:"spawn"` // Sonic's rest position (dropped to the floor)
+	Objects   []Obj      `json:"objects"`
+	TileAnims []TileAnim `json:"tileAnims"`           // rings/flowers (atlas indices per frame)
+	CellAnims []CellAnim `json:"cellAnims,omitempty"` // type-$50 background animators
+	Collision Collision  `json:"collision"`           // kind "profiles" -> shapes.json + Blocks.Shapes
+	PaletteFx *PaletteFx `json:"paletteFx,omitempty"` // palette + cycle + Labyrinth waterline
+	Music     string     `json:"music,omitempty"`     // background-music track name (descriptor +36 -> id)
+}
+
+// sectionOf derives the Studio accordion section from the act's name: the text
+// before " Act " ("Green Hills Act 1" -> "Green Hills", "Scrap Brain Act 2a" ->
+// "Scrap Brain"); the special stages group under their own name.
+func sectionOf(a Act) string {
+	if i := strings.Index(a.name, " Act "); i > 0 {
+		return a.name[:i]
+	}
+	if strings.HasPrefix(a.name, "Special Stage") {
+		return "Special Stage"
+	}
+	return a.name
 }
 
 // musicTrack returns the act's background-music track name. The music id is descriptor byte
@@ -527,9 +591,9 @@ func waterLine(rom []byte, act int) int {
 	if act < 9 || act > 11 {
 		return -1
 	}
-	for _, o := range objectTable(rom, act) {
+	for _, o := range objectTable(rom, act, -1) {
 		if o.Type == 0x40 {
-			return o.By * 32
+			return o.by * 32
 		}
 	}
 	return -1
@@ -566,7 +630,7 @@ func main() {
 	atlasName := map[[2]int]string{}
 	atlasAnim := map[string][]AnimGroup{}
 	cycleCache := map[int]*PaletteCycle{} // by bgPal: the BG-palette cycle (oracle-captured)
-	meta := Meta{Zones: zoneNames, Anim: AnimMeta{FramesPerTick: 10}}
+	meta := Meta{Format: 1, Game: "sonic", Native: map[string]int{"w": 160, "h": 144}, TickHz: 60}
 
 	const screenBlk = 5
 	for _, a := range acts {
@@ -612,31 +676,51 @@ func main() {
 		// His handler then pulls him down onto the first floor line (gravity + the $2CD4
 		// snap), so his visible start is the dropped rest position. Objects likewise rest
 		// where the engine's first live frame puts them (objplace, verified by objsettle).
-		spawn := [2]int{a.spawnX, a.spawnY}
-		objs := objectTable(rom, a.num)
+		objs := objectTable(rom, a.num, a.zone)
 		lvl := objplace.NewLevel(rom, mp, a.stride, a.engZone)
 		settleObjects(rom, objs, lvl)
-		sx, sy, grounded := lvl.DropToFloor(0, a.spawnX*32, a.spawnY*32)
-		spawnPx := [3]int{sx, sy, 0}
-		if grounded {
-			spawnPx[2] = 1
+		acts50 := cellAnims(rom, objs) // the $50 background animators become cellAnims...
+		visible := objs[:0]
+		for _, o := range objs {
+			if o.Type != 0x50 { // ...and leave the object list (their visual IS the animation)
+				visible = append(visible, o)
+			}
+		}
+		objs = visible
+		sx, sy, _ := lvl.DropToFloor(0, a.spawnX*32, a.spawnY*32)
+		spawn := Spawn{X: sx, Y: sy}
+		if a.zone >= 0 && a.zone <= 6 {
+			spawn.Sprite = fmt.Sprintf("%d/00", a.zone)
 		}
 
-		actNo := a.num%3 + 1
-		if a.zone == 6 {
-			actNo = a.num - bonusFirst + 1 // Special Stage round number
+		// tile animations: each group's frame 0 is the base tiles; the engine's
+		// update cadence (framesPerTick) is the shared periodFrames
+		var tileAnims []TileAnim
+		for _, g := range atlasAnim[atlas] {
+			tileAnims = append(tileAnims, TileAnim{Tiles: g.Frames[0], Frames: g.Frames, PeriodFrames: framesPerTick})
 		}
+
 		af := ActFile{
-			Zone: a.zone, Act: actNo, Name: a.name, Atlas: atlas,
-			TileSize: 8, Stride: a.stride, WidthBlocks: cols, HeightBlocks: rows,
-			Palette:    paletteHex(pal),
-			BlockTiles: bt, BlockShape: blockShapes(rom, a.engZone),
-			Blocks: blocks, Spawn: spawn, SpawnPx: spawnPx, Objects: objs,
-			Anim: atlasAnim[atlas], CellAnims: cellAnims(rom, objs), Music: musicTrack(rom, a.num),
+			Format: 1,
+			Name:   a.name,
+			Grid: Grid{
+				TileSize: 8, Atlas: atlas, AtlasCols: 16,
+				Width: cols, Height: rows, Cells: blocks,
+			},
+			Blocks: Blocks{Size: 4, Tiles: bt, Shapes: blockShapes(rom, a.engZone)},
+			// initial framing: one GG screen centred on the spawn block's anchor
+			View:      Rect{X: a.spawnX*32 + 8 - 80, Y: a.spawnY*32 + 16 - 72, W: 160, H: 144},
+			Spawn:     spawn,
+			Objects:   objs,
+			TileAnims: tileAnims,
+			CellAnims: acts50,
+			Collision: Collision{Kind: "profiles", ShapesFile: "shapes.json"},
+			Music:     musicTrack(rom, a.num),
 		}
 		// The palette cycle is oracle-captured by booting the act; only do it for the real
 		// zones (the bonus stages can't be reached by forcing $D238 and have no water/lava
 		// cycle anyway).
+		fx := &PaletteFx{Palette: paletteHex(pal)}
 		var pc *PaletteCycle
 		if a.zone < 6 {
 			var seen bool
@@ -649,14 +733,17 @@ func main() {
 		if pc != nil {
 			actPC := *pc // per-act copy: the cycling tiles depend on this act's tile set
 			actPC.Tiles = cyclingTiles(tiles, pc.Slots)
-			af.PaletteCycle = &actPC
+			fx.Cycle = &actPC
 		}
 		if ly := waterLine(rom, a.num); ly >= 0 {
-			af.Water = &Water{LineY: ly, Palette: underwaterPalette(rom)}
+			fx.WaterLine = &WaterLine{Y: ly, Palette: underwaterPalette(rom)}
+		}
+		if fx.Cycle != nil || fx.WaterLine != nil {
+			af.PaletteFx = fx
 		}
 		file := fmt.Sprintf("act%02d.json", a.num+1)
 		writeJSON(filepath.Join(outdir, file), af)
-		meta.Acts = append(meta.Acts, ActIndex{File: file, Zone: a.zone, Name: a.name, Atlas: atlas})
+		meta.Levels = append(meta.Levels, ActIndex{Name: a.name, Section: sectionOf(a), File: file, Atlas: atlas})
 		fmt.Printf("%-16s %3dx%-3d blocks  atlas %s  %d objects\n", a.name, cols, rows, atlas, len(objs))
 	}
 	writeJSON(filepath.Join(outdir, "meta.json"), meta)

@@ -16,18 +16,19 @@ import { INFO_TABS, infoHtml } from './info-content.js';
 const GAMES = [
   {
     id: 'sonic', name: 'Sonic the Hedgehog', system: 'Sega Game Gear',
-    load: () => import('../sonic/viewer.js').then(m => m.LevelViewer),
+    load: () => Promise.all([
+      import('../shared/viewer.js'), import('../sonic/config.js'),
+    ]).then(([m, c]) => class extends m.LevelViewer {
+      constructor(el, hud) { super(el, hud, c.default); }
+    }),
     make: (V, el, hud) => new V(el, hud),
-    list: async (v) => (await v.init()).acts,
-    show: (v, lvl, i) => v.loadAct(lvl),
-    // zone -> act accordion: "Green Hills Act 1" -> {Green Hills, Act 1}; "Special Stage 3" -> {Special Stage, Stage 3}
-    group: (lvl) => {
-      let mm = lvl.name.match(/^(.*?) (Act .+)$/);
-      if (mm) return { section: mm[1], label: mm[2] };
-      mm = lvl.name.match(/^(Special Stage) (\d+)$/);
-      if (mm) return { section: mm[1], label: `Stage ${mm[2]}` };
-      return { section: lvl.name, label: lvl.name };
-    },
+    list: async (v) => (await v.init()).levels,
+    show: (v, lvl, i) => v.loadLevel(lvl),
+    // zone -> act accordion from the meta's section field ("Green Hills" -> "Act 1")
+    group: (lvl) => ({
+      section: lvl.section || lvl.name,
+      label: lvl.name.startsWith(lvl.section) ? lvl.name.slice(lvl.section.length).trim() || lvl.name : lvl.name,
+    }),
     layers: [
       { id: 'objects', label: 'Objects & enemies', default: true },
       { id: 'collision', label: 'Collision layer', default: false },

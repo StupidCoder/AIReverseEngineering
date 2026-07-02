@@ -134,3 +134,136 @@ export class Tilemap {
     this.baked = null;
   }
 }
+
+// BlockTilemap — the block-indirected strategy (Sonic): cells are indices into
+// blocks.tiles, each a size x size arrangement of atlas tiles baked once onto a
+// canvas texture; the map is one Sprite per block cell sharing those textures.
+// Tile animation and the palette effects repaint the canvases in place, updating
+// every cell that shows the block. An optional waterline bakes an underwater-
+// palette variant of every block for the map rows at/below the line.
+export class BlockTilemap {
+  // water: { row, map } — block row of the split + surface->underwater colour Map
+  constructor(level, atlasImg, { water = null } = {}) {
+    this.level = level;
+    this.grid = level.grid;
+    this.blocks = level.blocks;
+    this.atlasImg = atlasImg;
+    this.water = water;
+    this.blockPx = this.grid.tileSize * this.blocks.size;
+    this.container = new Container();
+    this.sources = [];
+    this.owned = [];
+    this.tileOverride = new Map();   // animated tileId -> current atlas tile
+    this.blockCanvas = {};
+    this.blockTex = {};
+    this.blockCanvasUW = {};
+    this.blockTexUW = {};
+    this.blocksWithTile = new Map(); // tileId -> Set of block indices
+    this._texMode = 'nearest';
+    this._build();
+  }
+
+  _build() {
+    const g = this.grid;
+    const B = this.blockPx;
+    for (const idx of new Set(g.cells)) {
+      const mk = () => {
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = B;
+        const tex = Texture.from(cv);
+        tex.source.autoGenerateMipmaps = true;    // no moiré when zoomed far out
+        tex.source.scaleMode = 'nearest';
+        this.sources.push(tex.source);
+        this.owned.push(tex.source);
+        return { cv, tex };
+      };
+      const m = mk();
+      this.blockCanvas[idx] = m.cv;
+      this.blockTex[idx] = m.tex;
+      if (this.water) {
+        const u = mk();
+        this.blockCanvasUW[idx] = u.cv;
+        this.blockTexUW[idx] = u.tex;
+      }
+      this.repaintBlock(idx);
+      for (const t of this.blocks.tiles[idx]) {
+        if (!this.blocksWithTile.has(t)) this.blocksWithTile.set(t, new Set());
+        this.blocksWithTile.get(t).add(idx);
+      }
+    }
+    for (let r = 0; r < g.height; r++) {
+      const uw = this.water && r >= this.water.row;
+      for (let c = 0; c < g.width; c++) {
+        const blk = g.cells[r * g.width + c];
+        const tex = (uw && this.blockTexUW[blk]) ? this.blockTexUW[blk] : this.blockTex[blk];
+        if (!tex) continue;
+        const s = new Sprite(tex);
+        s.x = c * B;
+        s.y = r * B;
+        this.container.addChild(s);
+      }
+    }
+    this.widthPx = g.width * B;
+    this.heightPx = g.height * B;
+  }
+
+  _paint(ctx, idx) {
+    ctx.imageSmoothingEnabled = false;
+    const ts = this.grid.tileSize;
+    const n = this.blocks.size;
+    const cols = this.grid.atlasCols ?? 16;
+    const cell = ts + 2 * (this.grid.atlasGutter ?? 0);
+    const tiles = this.blocks.tiles[idx];
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n; c++) {
+        let tile = tiles[r * n + c];
+        if (this.tileOverride.has(tile)) tile = this.tileOverride.get(tile);
+        ctx.drawImage(this.atlasImg,
+          (tile % cols) * cell + (this.grid.atlasGutter ?? 0),
+          ((tile / cols) | 0) * cell + (this.grid.atlasGutter ?? 0),
+          ts, ts, c * ts, r * ts, ts, ts);
+      }
+    }
+  }
+
+  repaintBlock(idx) {
+    const B = this.blockPx;
+    this._paint(this.blockCanvas[idx].getContext('2d'), idx);
+    this.blockTex[idx].source.update();
+    if (this.water && this.blockCanvasUW[idx]) {
+      // underwater variant: repaint, then remap surface colours to the static
+      // underwater palette (these rows never run the cycle)
+      const ctx = this.blockCanvasUW[idx].getContext('2d', { willReadFrequently: true });
+      this._paint(ctx, idx);
+      const img = ctx.getImageData(0, 0, B, B), d = img.data;
+      for (let p = 0; p < d.length; p += 4) {
+        const u = this.water.map.get((d[p] << 16) | (d[p + 1] << 8) | d[p + 2]);
+        if (u) { d[p] = u[0]; d[p + 1] = u[1]; d[p + 2] = u[2]; }
+      }
+      ctx.putImageData(img, 0, 0);
+      this.blockTexUW[idx].source.update();
+    }
+  }
+
+  // Tile animation entry point (same signature as Tilemap.paintTile): set the
+  // tile's current frame and repaint every block that shows it.
+  paintTile(tileId, atlasTile) {
+    this.tileOverride.set(tileId, atlasTile);
+    for (const idx of this.blocksWithTile.get(tileId) || []) this.repaintBlock(idx);
+  }
+
+  tileTexture() { return null; } // block games have no per-tile stamps
+
+  setScaleMode(mode) {
+    if (mode === this._texMode) return;
+    this._texMode = mode;
+    for (const s of this.sources) s.scaleMode = mode;
+  }
+
+  destroy() {
+    this.container.destroy({ children: true });
+    for (const s of this.owned) s.destroy();
+    this.sources = [];
+    this.owned = [];
+  }
+}

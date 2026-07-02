@@ -400,12 +400,25 @@ func main() {
 	// grid; the viewer loads sprites/<zone>/<hex>.png and draws it with its top-left at the
 	// object's world position (blockX*32, blockY*32) -- exactly where the engine draws it,
 	// with the grid's transparent padding placing the visible tiles. No cropping/offsets.
+	// common-format sprite entries (site/FORMAT.md): explicit frame rects into the
+	// strip PNG, per-frame durations or an explicit play sequence, and the movement
+	// path for the moving platforms — keyed "<zone>/<hex>".
 	type sprMeta struct {
-		F int      `json:"f"`
-		D []int    `json:"d"`
-		S [][2]int `json:"s,omitempty"` // explicit play sequence: (strip frame, hold frames)
+		Src       string   `json:"src"`
+		Frames    [][4]int `json:"frames"`
+		Durations []int    `json:"durations,omitempty"`
+		Steps     [][2]int `json:"steps,omitempty"`
+		Path      [][2]int `json:"path,omitempty"`
 	}
-	index := map[string]map[string]sprMeta{}
+	rects := func(n int) [][4]int {
+		out := make([][4]int, n)
+		for i := range out {
+			out[i] = [4]int{i * 48, 0, 48, 48}
+		}
+		return out
+	}
+	index := map[string]sprMeta{}
+	paths := objplace.PlatformPaths(rom)
 	montages := os.Getenv("MONTAGE") != ""
 	placed := placedTypesByZone(rom)
 	total := 0
@@ -413,13 +426,15 @@ func main() {
 		tiles, pal := spriteTiles(rom, act)
 		zdir := fmt.Sprintf("%s/%d", out, z)
 		chk(os.MkdirAll(zdir, 0o755))
-		index[fmt.Sprint(z)] = map[string]sprMeta{}
+
 		var cells []*image.RGBA
 		var labels []int
 		// Sonic (type $00): his own ROM tiles, this zone's sprite palette.
 		sonic, seq := sonicStrip(rom, pal)
 		save(sonic, zdir+"/00.png")
-		index[fmt.Sprint(z)]["00"] = sprMeta{F: sonic.Rect.Dx() / 48, D: []int{0}, S: seq}
+		index[fmt.Sprintf("%d/00", z)] = sprMeta{
+			Src: fmt.Sprintf("sprites/%d/00.png", z), Frames: rects(sonic.Rect.Dx() / 48), Steps: seq,
+		}
 		total++
 		for _, t := range placed[z] {
 			if t == 0 {
@@ -428,7 +443,9 @@ func main() {
 			if t == 0x07 { // the goal sign: own gfx but a plain metasprite — render its spin
 				strip, seq := goalStrip(rom)
 				save(strip, fmt.Sprintf("%s/%02x.png", zdir, t))
-				index[fmt.Sprint(z)]["07"] = sprMeta{F: strip.Rect.Dx() / 48, D: []int{0}, S: seq}
+				index[fmt.Sprintf("%d/07", z)] = sprMeta{
+					Src: fmt.Sprintf("sprites/%d/07.png", z), Frames: rects(strip.Rect.Dx() / 48), Steps: seq,
+				}
 				total++
 				continue
 			}
@@ -448,7 +465,10 @@ func main() {
 					seq = append(seq, [2]int{0, 6}, [2]int{1, 6}, [2]int{2, 6})
 				}
 				save(strip, fmt.Sprintf("%s/%02x.png", zdir, t))
-				index[fmt.Sprint(z)]["29"] = sprMeta{F: len(lays), D: []int{0}, S: seq}
+				index[fmt.Sprintf("%d/29", z)] = sprMeta{
+					Src: fmt.Sprintf("sprites/%d/29.png", z), Frames: rects(len(lays)),
+					Steps: seq, Path: paths["29"],
+				}
 				total++
 				continue
 			}
@@ -475,7 +495,14 @@ func main() {
 				continue // empty layout
 			}
 			save(strip, fmt.Sprintf("%s/%02x.png", zdir, t))
-			index[fmt.Sprint(z)][fmt.Sprintf("%02x", t)] = sprMeta{F: strip.Rect.Dx() / 48, D: durs}
+			entry := sprMeta{
+				Src: fmt.Sprintf("sprites/%d/%02x.png", z, t), Frames: rects(strip.Rect.Dx() / 48),
+				Path: paths[fmt.Sprintf("%02x", t)],
+			}
+			if len(entry.Frames) > 1 {
+				entry.Durations = durs
+			}
+			index[fmt.Sprintf("%d/%02x", z, t)] = entry
 			total++
 			if montages {
 				cells = append(cells, renderMeta(rom[r.Layout:r.Layout+18], tiles, pal))
@@ -485,17 +512,11 @@ func main() {
 		if montages {
 			save(montage(cells, labels, pal), fmt.Sprintf("%s/_montage_%s.png", out, zoneName[z]))
 		}
-		fmt.Printf("%-11s act%2d: %d sprites\n", zoneName[z], act, len(index[fmt.Sprint(z)]))
-	}
-	// movement paths for the moving platforms: per-frame (dx,dy) offsets from the
-	// placement, sampled from the handlers' own tables (objplace.PlatformPaths).
-	full := map[string]any{"paths": objplace.PlatformPaths(rom)}
-	for k, v := range index {
-		full[k] = v
+		fmt.Printf("%-11s act%2d done\n", zoneName[z], act)
 	}
 	f, err := os.Create(out + "/index.json")
 	chk(err)
-	chk(json.NewEncoder(f).Encode(full))
+	chk(json.NewEncoder(f).Encode(index))
 	f.Close()
 	fmt.Printf("wrote %d sprites + index.json to %s\n", total, out)
 }

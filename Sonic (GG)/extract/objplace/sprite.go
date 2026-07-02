@@ -434,7 +434,7 @@ func PlatformPaths(rom []byte) map[string][][2]int {
 		}
 		horiz = append(horiz, [2]int{off, 0})
 	}
-	return map[string][][2]int{"09": swing, "0f": horiz, "3b": BobPath()}
+	return map[string][][2]int{"09": swing, "0f": horiz, "3b": BobPath(), "29": LogBobPath()}
 }
 
 // OwnGfx reports a handler that decompresses its OWN sprite graphics (the bosses:
@@ -551,4 +551,57 @@ func GoalAnim(rom []byte) (steps []AnimFrame, sheetSrc, pal int) {
 	}
 	src, _, _ := OwnGfx(rom, 0x07)
 	return steps, src, goalPalette
+}
+
+// --- the floating log ($29, handler $7EFC — Jungle's rideable "barrel") -------------
+//
+// No terrain contact (SET 5); box 10x16. On its first frame it lifts itself 24 px
+// ($7F0E: Y += $FFE8, the same one-shot spawn-adjust pattern as the pickups), then
+// bobs on the water: the handler SETS the Y velocity to +$40 sub-px (0.25 px/frame,
+// down) while its counter IX+17 < 20 and -$40 while 20..39 ($7F22/$7F34, wrap at 40)
+// — a gentle 5 px triangle bob. Ridden, it becomes a log-roll: Sonic steers it at
+// HALF his speed (the handler adds vel/2 to the log's X and writes the log's X back
+// to Sonic, $7F8F-$7FB2), a roll phase accumulates |vel| mod $900 (IX+18/19), and
+// the phase's high byte picks one of THREE roll layouts through the offset table
+// $8031: layouts $803A + {0, $12, $24} (a 16x16 log, zone sprite tiles). Idle it
+// rests on frame 0.
+const (
+	logLayoutBase = 0x803A
+	logFrames     = 3
+)
+
+// LogAnim returns the log's three roll layouts.
+func LogAnim() []int {
+	return []int{logLayoutBase, logLayoutBase + 0x12, logLayoutBase + 0x24}
+}
+
+// LogBobPath samples the 40-frame bob (offsets from the adjusted rest position).
+func LogBobPath() [][2]int {
+	var path [][2]int
+	pos := 0
+	for t := 0; t < 40; t++ {
+		if t < 20 {
+			pos += 0x40
+		} else {
+			pos -= 0x40
+		}
+		path = append(path, [2]int{0, pos >> 8})
+	}
+	return path
+}
+
+// SpawnYAdjust returns the one-shot Y offset a handler applies to its own spawn
+// position in its init block (LD L,(IX+5) / LD H,(IX+6) / LD DE,nn / ADD HL,DE /
+// store — the floating log lifts itself 24 px), or 0.
+func SpawnYAdjust(rom []byte, typ int) int {
+	a, end := HandlerRange(rom, typ)
+	for i := a; a != 0 && i+14 < end; i++ {
+		if rom[i] == 0xDD && rom[i+1] == 0x6E && rom[i+2] == 0x05 &&
+			rom[i+3] == 0xDD && rom[i+4] == 0x66 && rom[i+5] == 0x06 &&
+			rom[i+6] == 0x11 && rom[i+9] == 0x19 &&
+			rom[i+10] == 0xDD && rom[i+11] == 0x75 && rom[i+12] == 0x05 {
+			return int(int16(uint16(rom[i+7]) | uint16(rom[i+8])<<8))
+		}
+	}
+	return 0
 }

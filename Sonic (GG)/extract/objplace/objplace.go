@@ -146,6 +146,7 @@ func (l *Level) Settle(typ, x, y int) (rx, ry int, grounded bool) {
 			x += 4
 		}
 	}
+	y += SpawnYAdjust(l.rom, typ) // e.g. the floating log lifts itself 24 px ($7F0E)
 	bottom := y + h
 	cx := x + w/2
 	if p, bias, ok := l.floorAt(cx>>5, bottom>>5, cx); ok && (bottom&0x1F)+bias >= p {

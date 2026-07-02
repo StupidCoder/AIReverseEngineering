@@ -1038,13 +1038,14 @@ slot:
 | `$49` | **world 4 boss** | b2 `$9271` | |
 | `$4E` | seesaw | b2 `$8681` | tilt-arm catapult; launch height scales with Sonic's landing impact (momentum transfer) |
 | `$0B` | sinking platform | b1 `$69ED` | gives under Sonic's weight: sinks 16 px at ½ px/frame while stood on, floats back up when left |
+| `$29` | floating log | b2 `$7EFC` | Jungle's rideable log: floats on the water (spawns lifted 24 px, then a gentle 5 px bob on a 40-frame cycle); ridden, it becomes a **log-roll** — Sonic steers it at *half* his speed (the handler moves the log by `vel/2` and writes the log's X back to Sonic), the roll phase (`IX+18/19`, mod `$900`) picking one of **three roll layouts** (`$803A`+n×18, the rotating grain) — and it stops against solid terrain probed beside it |
 | `$3B` | bobbing platform | b1 `$B4E8` | free-floating (no terrain contact): Y-velocity ±$10 sub-px/frame on an 160-frame phase, clamped to ±2 px/frame — from the spawn it sinks ~160 px, then bobs in a 96 px, 160-frame cycle (Bridge's floating logs; rideable via `$7CF5`) |
 | `$50` | background animator | b1 `$7B29` | repaints its *own* map cell each frame through the scroll-draw request (`$D2AB/$D2AD` target, `$D2AF` source): a 4-phase sequence of block pairs (`$7BC1` patterns → `$7B99` blocks) — the growing flowers and twinkling sea. Steady-state timing: bare and full-grown hold ~240 frames, the transitions 16 (`webexport` emits each placement as a `cellAnims` entry and the Studio viewer runs them). Not a camera lock: `$D2AB` is the blit request, the camera is `$D254` |
 | `$51` | **checkpoint** | b1 `$6010` | on contact, writes the *checkpoint's own* block position into the respawn table `$D32F + act×2` (the `$6034` respawn-save code) |
 
 Unnamed but present (handlers confirmed, behaviour not yet identified): `$05` b1 `$5FD7`,
 `$0A`/`$0C`/`$0D` b1, `$11` b1 `$6F61`, `$13`–`$24` (mostly bank 2),
-`$27`–`$2B`, `$2E`–`$3A`, `$3C`–`$4C`, `$52`–`$56`. The full table is dumped by inspecting `$24B2`.
+`$27`/`$28`/`$2A`/`$2B`, `$2E`–`$3A`, `$3C`–`$4C`, `$52`–`$56`. The full table is dumped by inspecting `$24B2`.
 
 ### Object sprites — the metasprite format
 
@@ -1197,7 +1198,8 @@ arc both horizontally and vertically. Artwork by zone: zone 0 → `$6910`, else 
 Both moving platforms' cycles are exported for the Studio viewer as **movement paths** —
 per-frame `(dx, dy)` offsets from the placement, sampled straight from the handlers'
 own tables (`objplace.PlatformPaths` → `sprites/index.json` `paths`): the swing's
-224-frame arc sweep and the horizontal platform's 320-frame triangle. The viewer moves
+224-frame arc sweep, the horizontal platform's 320-frame triangle, the bobbing
+platform's 160-frame float and the floating log's 40-frame water bob. The viewer moves
 the sprites along them at engine timing.
 
 ### Sinking platform (`$0B`)

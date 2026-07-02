@@ -8481,55 +8481,58 @@
 7EC5  .byte FF FF FF DD CB 18 EE DD 36 0D 1A DD 36 0E 10 DD ; ........6...6...
 7ED5  .byte 36 0F EF DD 36 10 7E 2A 03 D3 11 28 00 A7 ED 52 ; 6...6.~*...(...R
 7EE5  .byte DD 75 05 DD 74 06 CD 9A 7E C9 FE FF FF FF FF FF ; .u..t...~.......
-7EF5  .byte 6C 6E 6E 48 FF FF FF DD CB 18 EE DD 36 0D 0A DD ; lnnH........6...
-7F05  .byte 36 0E 10 DD CB 18 46 20 14 DD 6E 05 DD 66 06 11 ; 6.....F ..n..f..
-7F15  .byte E8 FF 19 DD 75 05 DD 74 06 DD CB 18 C6 DD 36 0A ; ....u..t......6.
-7F25  .byte 40 AF DD 77 0B DD 77 0C DD 7E 11 FE 14 38 0C DD ; @..w..w..~...8..
-7F35  .byte 36 0A C0 DD 36 0B FF DD 36 0C FF 3A 09 D4 A7 FA ; 6...6...6..:....
-7F45  .byte 1B 80 21 06 08 22 15 D2 CD 28 33 DA 1B 80 01 10 ; ..!.."...(3.....
-7F55  .byte 00 DD 5E 0A DD 56 0B CD F5 7C 2A 04 D4 7D B4 28 ; ..^..V...|*..}.(
-7F65  .byte 29 01 12 00 CB 7C 28 03 01 FE FF 11 00 00 CD D5 ; )....|(.........
-7F75  .byte 30 5E 16 00 3A D5 D2 87 4F 42 21 3D 34 09 7E 23 ; 0^..:...OB!=4.~#
-7F85  .byte 66 6F 19 7E E6 3F 7A 5A 20 0C 3A 04 D4 ED 5B 05 ; fo.~.?zZ .:...[.
-7F95  .byte D4 CB 2A CB 1B 1F DD 6E 02 DD 66 03 DD 86 01 ED ; ..*....n..f.....
-7FA5  .byte 5A DD 77 01 DD 75 02 DD 74 03 32 FE D3 22 FF D3 ; Z.w..u..t.2.."..
-7FB5  .byte ED 5B 04 D4 CB 7A 28 07 7B 2F 5F 7A 2F 57 13 DD ; .[...z(.{/_z/W..
-7FC5  .byte 6E 12 DD 66 13 19 7C FE 09 38 31 D6 09 67 18 2C ; n..f..|..81..g.,
-7FD5  .byte 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
-7FE5  .byte 00 00 00 00 00 00 00 00 00 00 00 54 4D 52 20 53 ; ...........TMR S
-7FF5  .byte 45 47 41 00 00 00 00 08 24 00 60 00 DD 75 12 DD ; EGA.....$.`..u..
-8005  .byte 74 13 5F 16 00 21 31 80 19 5E 21 3A 80 19 DD 75 ; t._..!1..^!:...u
-8015  .byte 0F DD 74 10 18 08 DD 36 0F 3A DD 36 10 80 DD 34 ; ..t....6.:.6...4
-8025  .byte 11 DD 7E 11 FE 28 D8 DD 36 11 00 C9 00 00 00 12 ; ..~..(..6.......
-8035  .byte 12 12 24 24 24 FE FF FF FF FF FF 3A 3C FF FF FF ; ..$$$......:<...
-8045  .byte FF FF FF FF FF FF FF FE FF FF FF FF FF 36 38 FF ; .............68.
-8055  .byte FF FF FF FF FF FF FF FF FF FE FF FF FF FF FF 4C ; ...............L
-8065  .byte 4E FF FF FF FF FF DD CB 18 EE DD 36 0D 20 DD 36 ; N..........6. .6
-8075  .byte 0E 1C DD CB 18 46 20 48 2A 02 D4 11 E0 00 A7 ED ; .....F H*.......
-8085  .byte 52 D0 3A 15 D4 07 D0 21 B7 A8 11 00 20 3E 09 CD ; R.:....!.... >..
-8095  .byte 06 04 3E 11 32 2D D2 3E 0B DF AF 32 ED D2 2A 54 ; ..>.2-.>...2..*T
-80A5  .byte D2 22 6D D2 22 6F D2 2A 57 D2 22 71 D2 22 73 D2 ; ."m."o.*W."q."s.
-80B5  .byte 21 E0 01 22 75 D2 21 50 00 22 77 D2 DD CB 18 C6 ; !.."u.!P."w.....
-80C5  .byte CD DA 7C DD CB 11 46 20 2E DD 36 0F 09 DD 36 10 ; ..|...F ..6...6.
-80D5  .byte 82 DD 36 0A 80 DD 36 0B 00 DD 36 0C 00 DD 6E 05 ; ..6...6...6...n.
-80E5  .byte DD 66 06 11 70 00 AF ED 52 D8 DD 77 0A DD 77 0B ; .f..p...R..w..w.
-80F5  .byte DD 77 0C DD CB 11 C6 DD 7E 12 A7 C2 5F 81 DD 6E ; .w......~..._..n
-8105  .byte 02 DD 66 03 DD CB 11 4E 20 28 DD 36 0F 09 DD 36 ; ..f....N (.6...6
-8115  .byte 10 82 DD CB 18 8E DD 36 07 80 DD 36 08 FF DD 36 ; .......6...6...6
-8125  .byte 09 FF 11 1C 02 A7 ED 52 D2 FC 81 DD 36 12 57 C3 ; .......R....6.W.
-8135  .byte FC 81 DD 36 0F 1B DD 36 10 82 DD CB 18 CE DD 36 ; ...6...6.......6
-8145  .byte 07 80 DD 36 08 00 DD 36 09 00 11 88 02 A7 ED 52 ; ...6...6.......R
-8155  .byte DA FC 81 DD 36 12 57 C3 FC 81 AF DD 77 07 DD 77 ; ....6.W.....w..w
-8165  .byte 08 DD 77 09 21 01 00 DD 35 12 28 12 DD 7E 12 FE ; ..w.!...5.(..~..
-8175  .byte 38 30 0E 21 FF FF FE 20 38 07 FE 34 28 0F 21 00 ; 80.!... 8..4(.!.
-8185  .byte 00 DD 36 0A 00 DD 75 0B DD 74 0C 18 6A DD 7E 11 ; ..6...u..t..j.~.
-8195  .byte EE 02 DD 77 11 3A ED D2 FE 08 30 5B CD AF 7C D8 ; ...w.:....0[..|.
-81A5  .byte DD 5E 02 DD 56 03 DD 4E 05 DD 46 06 DD E5 E5 DD ; .^..V..N..F.....
-81B5  .byte E1 DD 36 00 2B AF DD 77 01 21 0B 00 19 DD 75 02 ; ..6.+..w.!....u.
-81C5  .byte DD 74 03 DD 77 04 21 30 00 09 DD 75 05 DD 74 06 ; .t..w.!0...u..t.
-81D5  .byte DD 77 07 DD 77 08 DD 77 09 DD 77 0A DD 77 0B DD ; .w..w..w..w..w..
-81E5  .byte 77 0C DD 77 11 DD 77 16 DD 77 17 CD 88 06 E6 3F ; w..w..w..w.....?
-81F5  .byte C6 64 DD 77 12 DD E1 21 5A 00                   ; .d.w...!Z.
+7EF5  .byte 6C 6E 6E 48 FF FF FF                            ; lnnH...
+
+; --- obj_floating_log  $7EFC — (bank2) type $29 = Jungle's FLOATING LOG (rideable "barrel"). SET5 no terrain contact, box 10x16. Init: lifts itself 24px ($7F0E: Y += $FFE8, one-shot via IX+24 bit0). Bob: the handler SETS Yvel = +$40 sub-px (0.25px/f down) while counter IX+17 < 20, -$40 while 20..39 (wrap 40) = a gentle 5px triangle bob on the water. RIDDEN ($3328 box $0806): rides via $7CF5; if the side terrain probe ($30D5 at X+$12 right / X-2 left -> $343D shape) is clear, the log X += Sonic's Xvel/2 AND Sonic's X ($D3FF) is written to the log's = he steers it at half speed, a LOG-ROLL; roll phase IX+18/19 += |Xvel| mod $900, its high byte -> offset table $8031 -> one of THREE roll layouts $803A/$804C/$805E (16x16 end-on log, rotating grain). Idle layout = $803A ($801B). objplace.LogAnim/LogBobPath/SpawnYAdjust export it; live-verified (rest = spawn-24, bob) by cmd/logprobe. (data) ---
+7EFC  .byte DD CB 18 EE DD 36 0D 0A DD 36 0E 10 DD CB 18 46 ; .....6...6.....F
+7F0C  .byte 20 14 DD 6E 05 DD 66 06 11 E8 FF 19 DD 75 05 DD ;  ..n..f......u..
+7F1C  .byte 74 06 DD CB 18 C6 DD 36 0A 40 AF DD 77 0B DD 77 ; t......6.@..w..w
+7F2C  .byte 0C DD 7E 11 FE 14 38 0C DD 36 0A C0 DD 36 0B FF ; ..~...8..6...6..
+7F3C  .byte DD 36 0C FF 3A 09 D4 A7 FA 1B 80 21 06 08 22 15 ; .6..:......!..".
+7F4C  .byte D2 CD 28 33 DA 1B 80 01 10 00 DD 5E 0A DD 56 0B ; ..(3.......^..V.
+7F5C  .byte CD F5 7C 2A 04 D4 7D B4 28 29 01 12 00 CB 7C 28 ; ..|*..}.()....|(
+7F6C  .byte 03 01 FE FF 11 00 00 CD D5 30 5E 16 00 3A D5 D2 ; .........0^..:..
+7F7C  .byte 87 4F 42 21 3D 34 09 7E 23 66 6F 19 7E E6 3F 7A ; .OB!=4.~#fo.~.?z
+7F8C  .byte 5A 20 0C 3A 04 D4 ED 5B 05 D4 CB 2A CB 1B 1F DD ; Z .:...[...*....
+7F9C  .byte 6E 02 DD 66 03 DD 86 01 ED 5A DD 77 01 DD 75 02 ; n..f.....Z.w..u.
+7FAC  .byte DD 74 03 32 FE D3 22 FF D3 ED 5B 04 D4 CB 7A 28 ; .t.2.."...[...z(
+7FBC  .byte 07 7B 2F 5F 7A 2F 57 13 DD 6E 12 DD 66 13 19 7C ; .{/_z/W..n..f..|
+7FCC  .byte FE 09 38 31 D6 09 67 18 2C 00 00 00 00 00 00 00 ; ..81..g.,.......
+7FDC  .byte 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 ; ................
+7FEC  .byte 00 00 00 00 54 4D 52 20 53 45 47 41 00 00 00 00 ; ....TMR SEGA....
+7FFC  .byte 08 24 00 60 00 DD 75 12 DD 74 13 5F 16 00 21 31 ; .$.`..u..t._..!1
+800C  .byte 80 19 5E 21 3A 80 19 DD 75 0F DD 74 10 18 08 DD ; ..^!:...u..t....
+801C  .byte 36 0F 3A DD 36 10 80 DD 34 11 DD 7E 11 FE 28 D8 ; 6.:.6...4..~..(.
+802C  .byte DD 36 11 00 C9 00 00 00 12 12 12 24 24 24 FE FF ; .6.........$$$..
+803C  .byte FF FF FF FF 3A 3C FF FF FF FF FF FF FF FF FF FF ; ....:<..........
+804C  .byte FE FF FF FF FF FF 36 38 FF FF FF FF FF FF FF FF ; ......68........
+805C  .byte FF FF FE FF FF FF FF FF 4C 4E FF FF FF FF FF DD ; ........LN......
+806C  .byte CB 18 EE DD 36 0D 20 DD 36 0E 1C DD CB 18 46 20 ; ....6. .6.....F 
+807C  .byte 48 2A 02 D4 11 E0 00 A7 ED 52 D0 3A 15 D4 07 D0 ; H*.......R.:....
+808C  .byte 21 B7 A8 11 00 20 3E 09 CD 06 04 3E 11 32 2D D2 ; !.... >....>.2-.
+809C  .byte 3E 0B DF AF 32 ED D2 2A 54 D2 22 6D D2 22 6F D2 ; >...2..*T."m."o.
+80AC  .byte 2A 57 D2 22 71 D2 22 73 D2 21 E0 01 22 75 D2 21 ; *W."q."s.!.."u.!
+80BC  .byte 50 00 22 77 D2 DD CB 18 C6 CD DA 7C DD CB 11 46 ; P."w.......|...F
+80CC  .byte 20 2E DD 36 0F 09 DD 36 10 82 DD 36 0A 80 DD 36 ;  ..6...6...6...6
+80DC  .byte 0B 00 DD 36 0C 00 DD 6E 05 DD 66 06 11 70 00 AF ; ...6...n..f..p..
+80EC  .byte ED 52 D8 DD 77 0A DD 77 0B DD 77 0C DD CB 11 C6 ; .R..w..w..w.....
+80FC  .byte DD 7E 12 A7 C2 5F 81 DD 6E 02 DD 66 03 DD CB 11 ; .~..._..n..f....
+810C  .byte 4E 20 28 DD 36 0F 09 DD 36 10 82 DD CB 18 8E DD ; N (.6...6.......
+811C  .byte 36 07 80 DD 36 08 FF DD 36 09 FF 11 1C 02 A7 ED ; 6...6...6.......
+812C  .byte 52 D2 FC 81 DD 36 12 57 C3 FC 81 DD 36 0F 1B DD ; R....6.W....6...
+813C  .byte 36 10 82 DD CB 18 CE DD 36 07 80 DD 36 08 00 DD ; 6.......6...6...
+814C  .byte 36 09 00 11 88 02 A7 ED 52 DA FC 81 DD 36 12 57 ; 6.......R....6.W
+815C  .byte C3 FC 81 AF DD 77 07 DD 77 08 DD 77 09 21 01 00 ; .....w..w..w.!..
+816C  .byte DD 35 12 28 12 DD 7E 12 FE 38 30 0E 21 FF FF FE ; .5.(..~..80.!...
+817C  .byte 20 38 07 FE 34 28 0F 21 00 00 DD 36 0A 00 DD 75 ;  8..4(.!...6...u
+818C  .byte 0B DD 74 0C 18 6A DD 7E 11 EE 02 DD 77 11 3A ED ; ..t..j.~....w.:.
+819C  .byte D2 FE 08 30 5B CD AF 7C D8 DD 5E 02 DD 56 03 DD ; ...0[..|..^..V..
+81AC  .byte 4E 05 DD 46 06 DD E5 E5 DD E1 DD 36 00 2B AF DD ; N..F.......6.+..
+81BC  .byte 77 01 21 0B 00 19 DD 75 02 DD 74 03 DD 77 04 21 ; w.!....u..t..w.!
+81CC  .byte 30 00 09 DD 75 05 DD 74 06 DD 77 07 DD 77 08 DD ; 0...u..t..w..w..
+81DC  .byte 77 09 DD 77 0A DD 77 0B DD 77 0C DD 77 11 DD 77 ; w..w..w..w..w..w
+81EC  .byte 16 DD 77 17 CD 88 06 E6 3F C6 64 DD 77 12 DD E1 ; ..w.....?.d.w...
+81FC  .byte 21 5A 00                                        ; !Z.
 
 ; ==== sub_81FF (1 caller) ====
 81FF  22 17 D2    LD ($D217),HL

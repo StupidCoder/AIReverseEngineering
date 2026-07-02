@@ -432,6 +432,26 @@ func main() {
 				total++
 				continue
 			}
+			if t == 0x29 { // the floating log: 3 table-driven roll layouts ($803A+)
+				lays := objplace.LogAnim()
+				strip := image.NewRGBA(image.Rect(0, 0, len(lays)*48, 48))
+				for i, lay := range lays {
+					cell := renderMeta(rom[lay:lay+18], tiles, pal)
+					for y := 0; y < 48; y++ {
+						for x := 0; x < 48; x++ {
+							strip.Set(i*48+x, y, cell.At(x, y))
+						}
+					}
+				}
+				seq := [][2]int{{0, 240}}
+				for c := 0; c < 2; c++ {
+					seq = append(seq, [2]int{0, 6}, [2]int{1, 6}, [2]int{2, 6})
+				}
+				save(strip, fmt.Sprintf("%s/%02x.png", zdir, t))
+				index[fmt.Sprint(z)]["29"] = sprMeta{F: len(lays), D: []int{0}, S: seq}
+				total++
+				continue
+			}
 			r := objplace.AnalyzeSprite(rom, t, z)
 			if r.Kind == "" || r.Layout == 0 || r.Layout+18 > len(rom) {
 				continue

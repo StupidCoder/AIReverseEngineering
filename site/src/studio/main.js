@@ -690,6 +690,10 @@ setMenu(true);                        // start with the control window open (dis
 const params = new URLSearchParams(location.search);
 const startGame = GAMES.find(g => g.id === params.get('game'));
 const startAsset = parseInt(params.get('asset') ?? params.get('level'), 10);
+// ?debug=1 exposes the mount table for the headless screenshot driver; ?seed=N makes
+// randomized object placement (Fort) reproducible (consumed by the shared layers code).
+if (params.get('debug')) window.__studio = { mounts, get activeId() { return activeId; } };
+window.__studioSeed = params.get('seed') ? parseInt(params.get('seed'), 10) : null;
 if (startGame) {
   selectGame(startGame.id).then(() => {
     const m = mounts.get(startGame.id);

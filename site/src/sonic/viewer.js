@@ -7,6 +7,7 @@
 // bar, overlay the collision height-profiles and the object placements.
 
 import { Application, Container, Sprite, Texture, Graphics, Text, Rectangle } from 'pixi.js';
+import { MapCamera } from '../shared/camera.js';
 
 const TILE = 8;
 const BLOCK = 32;       // 4x4 tiles
@@ -40,7 +41,6 @@ export class LevelViewer {
     this.objectLayer = new Container();
     this.collisionLayer.visible = false; // toggled by the control bar; persists across acts
     this.objectLayer.visible = false;
-    this.zoom = 1; this.minZoom = 0.1; this.maxZoom = 12;
     this._texMode = 'nearest';
     this.atlasCache = new Map();   // atlas name -> HTMLImageElement
     this.shapes = null;
@@ -54,7 +54,11 @@ export class LevelViewer {
     this.app.stage.addChild(this.world);
     this.shapes = await fetch(DATA + 'shapes.json').then((r) => r.json());
     await this._loadSprites();
-    this._wireCamera();
+    this.cam = new MapCamera(this, { onApply: () => {
+      this._updateTexFilter();
+      if (this.hud) this.hud.textContent = `${this.levelW / BLOCK}x${this.levelH / BLOCK} blocks`;
+    } });
+    this.cam.wirePointer();
     this.animOn = true; this.animTick = 0; this.animAccum = 0;
     this.app.ticker.add(() => this._advanceAnim());
     const meta = await fetch(DATA + 'meta.json').then((r) => r.json());
@@ -509,112 +513,33 @@ export class LevelViewer {
           for (const i of this.animBlocks) { this._drawBlock(i, 0); if (this.water && this.blockTexUW[i]) this._drawBlockUW(i, 0); }
         }
         if (this.cycleColors && this.cycleBlocks.length) { this.cycleStep = 0; this._applyCycleStep(0); }
+        // reset the stepped subsystems too, so animation-off is a deterministic state
+        for (const c of this.cellAnims || []) { c.idx = 0; c.acc = 0; c.sprite.texture = c.texs[0]; }
+        for (const o of this.animObjs || []) { o.idx = 0; o.acc = 0; o.sprite.texture = o.steps[0].tex; }
+        for (const o of this.pathObjs || []) { o.t = 0; o.sprite.x = o.baseX + o.path[0][0]; o.sprite.y = o.baseY + o.path[0][1]; }
       }
     }
   }
 
-  // --- camera -------------------------------------------------------------
+  // --- camera (shared MapCamera; only the fit + texture-filter policy live here) ----
   _fitDefault(level) {
     const W = this.app.screen.width, H = this.app.screen.height;
-    this.minZoom = Math.min(W / this.levelW, H / this.levelH) * 0.95;
-    this.maxZoom = W / GG_W;                                  // GG 1:1 — never magnify past the original viewport
-    this.zoom = Math.min(this.maxZoom, Math.max(this.minZoom, H / GG_H)); // start showing the full GG screen height (144px)
+    this.cam.minZoom = Math.min(W / this.levelW, H / this.levelH) * 0.95;
+    this.cam.maxZoom = W / GG_W;                                  // GG 1:1 — never magnify past the original viewport
+    this.cam.zoom = Math.min(this.cam.maxZoom, Math.max(this.cam.minZoom, H / GG_H)); // start showing the full GG screen height (144px)
     // centre on Sonic's spawn
     const [sx, sy] = level.spawn;
-    this._panTo((sx * BLOCK + 8), (sy * BLOCK + 16));
-    this._apply();
-  }
-  _panTo(wx, wy) {
-    this.world.position.set(this.app.screen.width / 2 - wx * this.zoom, this.app.screen.height / 2 - wy * this.zoom);
-  }
-  // Map a client (CSS-px) point to app screen-px, accounting for the canvas CSS scaling.
-  _screenPt(cx, cy) {
-    const r = this.el.getBoundingClientRect();
-    return { x: (cx - r.left) * (this.app.screen.width / r.width), y: (cy - r.top) * (this.app.screen.height / r.height) };
-  }
-  // Zoom by `f` about the screen point (px,py), keeping the world point under it fixed.
-  _zoomAt(px, py, f) {
-    const wx = (px - this.world.position.x) / this.zoom, wy = (py - this.world.position.y) / this.zoom;
-    this.zoom = Math.min(this.maxZoom, Math.max(this.minZoom, this.zoom * f));
-    this.world.position.set(px - wx * this.zoom, py - wy * this.zoom);
-    this._apply();
-  }
-  _clampPan() {
-    const sw = this.app.screen.width, sh = this.app.screen.height;
-    const lw = this.levelW * this.zoom, lh = this.levelH * this.zoom;
-    let { x, y } = this.world.position;
-    x = lw <= sw ? (sw - lw) / 2 : Math.min(0, Math.max(sw - lw, x));
-    y = lh <= sh ? (sh - lh) / 2 : Math.min(0, Math.max(sh - lh, y));
-    this.world.position.set(x, y);
-  }
-  _apply() {
-    this.world.scale.set(this.zoom);
-    this._clampPan();
-    this._updateTexFilter();
-    if (this.hud) this.hud.textContent = `${this.levelW / BLOCK}x${this.levelH / BLOCK} blocks`;
+    this.cam.panTo(sx * BLOCK + 8, sy * BLOCK + 16);
+    this.cam.apply();
   }
 
   // Crisp nearest-neighbour when magnifying (zoom >= 1), but linear + mipmaps when minifying
   // (zoomed out) so the downscaled tiles don't moiré/shimmer.
   _updateTexFilter() {
-    const mode = this.zoom < 1 ? 'linear' : 'nearest';
+    const mode = this.cam.zoom < 1 ? 'linear' : 'nearest';
     if (mode === this._texMode) return;
     this._texMode = mode;
     for (const idx in this.blockTex) this.blockTex[idx].source.scaleMode = mode;
     if (this.blockTexUW) for (const idx in this.blockTexUW) this.blockTexUW[idx].source.scaleMode = mode;
-  }
-  // Drag to pan (mouse or one finger); pinch with two fingers to zoom; wheel to zoom.
-  // Tracks every active pointer so the same handlers serve mouse and multi-touch.
-  _wireCamera() {
-    const c = this.el;
-    const pts = new Map();        // pointerId -> last {x, y} in client (CSS) px
-    let pinchDist = 0, pinchMid = null; // previous two-finger distance + midpoint
-
-    c.addEventListener('pointerdown', (e) => {
-      try { c.setPointerCapture(e.pointerId); } catch {}
-      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      c.classList.add('dragging');
-      if (pts.size === 2) {
-        const [a, b] = [...pts.values()];
-        pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
-        pinchMid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      }
-    });
-
-    c.addEventListener('pointermove', (e) => {
-      const p = pts.get(e.pointerId);
-      if (!p) return;
-      const dx = e.clientX - p.x, dy = e.clientY - p.y;
-      p.x = e.clientX; p.y = e.clientY;
-      if (pts.size >= 2) {
-        // Pinch: pan by the midpoint's motion, then zoom by the distance ratio about it.
-        const [a, b] = [...pts.values()];
-        const dist = Math.hypot(a.x - b.x, a.y - b.y);
-        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-        if (pinchMid) { this.world.position.x += mid.x - pinchMid.x; this.world.position.y += mid.y - pinchMid.y; }
-        const sp = this._screenPt(mid.x, mid.y);
-        this._zoomAt(sp.x, sp.y, pinchDist > 0 ? dist / pinchDist : 1);
-        pinchDist = dist; pinchMid = mid;
-      } else {
-        // Single pointer: drag-pan.
-        this.world.position.x += dx; this.world.position.y += dy;
-        this._clampPan();
-      }
-    });
-
-    const end = (e) => {
-      pts.delete(e.pointerId);
-      try { c.releasePointerCapture(e.pointerId); } catch {}
-      if (pts.size < 2) { pinchMid = null; pinchDist = 0; }
-      if (pts.size === 0) c.classList.remove('dragging');
-    };
-    c.addEventListener('pointerup', end);
-    c.addEventListener('pointercancel', end);
-
-    c.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      const sp = this._screenPt(e.clientX, e.clientY);
-      this._zoomAt(sp.x, sp.y, e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
-    }, { passive: false });
   }
 }

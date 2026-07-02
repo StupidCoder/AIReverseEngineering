@@ -1,7 +1,7 @@
 // Keyboard camera control for the Studio. Cursor keys scroll the active viewer with
 // acceleration (speed ramps while held) and momentum (it coasts and eases out after release);
-// +/- zoom. It drives each viewer family directly -- the Pixi map viewers share a world/zoom
-// camera (pan = move world, zoom = _zoomAt), the three.js viewers an OrbitControls camera
+// +/- zoom. It drives each viewer family directly -- the 2-D map viewers expose a shared
+// MapCamera at v.cam (pan = panBy, zoom = zoomAtCenter), the three.js viewers an OrbitControls camera
 // (pan = translate camera+target, zoom = dolly) -- since synthesising pointer drags would
 // trip OrbitControls' pointer capture.
 
@@ -61,7 +61,7 @@ function dollyThree(t, factor) {
   controls.update();
 }
 
-function isPixi(v) { return v && v.world && v.app && typeof v._zoomAt === 'function'; }
+function mapCam(v) { return v && v.cam && v.cam.isMapCamera ? v.cam : null; }
 
 export class KeyboardCamera {
   constructor(getActiveViewer) {
@@ -125,10 +125,9 @@ export class KeyboardCamera {
   }
 
   _pan(v, dx, dy) {
-    if (isPixi(v)) {
-      v.world.position.x += dx;
-      v.world.position.y += dy;
-      if (v._clampPan) v._clampPan();
+    const cam = mapCam(v);
+    if (cam) {
+      cam.panBy(dx, dy);
     } else {
       const t = threeCam(v);
       if (t) panThree(t, dx, dy);
@@ -136,8 +135,9 @@ export class KeyboardCamera {
   }
 
   _zoom(v, factor) {
-    if (isPixi(v)) {
-      v._zoomAt(v.app.screen.width / 2, v.app.screen.height / 2, factor);
+    const cam = mapCam(v);
+    if (cam) {
+      cam.zoomAtCenter(factor);
     } else {
       const t = threeCam(v);
       if (t) dollyThree(t, factor);

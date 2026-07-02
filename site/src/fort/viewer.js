@@ -8,6 +8,7 @@
 // drive the soft-char animations and the object overlay.
 
 import { Application, Container, Sprite, Texture } from 'pixi.js';
+import { MapCamera } from '../shared/camera.js';
 
 const CHAR = 8;            // character cell size (px)
 const ATLAS_COLS = 16;     // atlas is 16 chars wide
@@ -39,7 +40,6 @@ export class FortViewer {
     this.tileLayer = new Container();
     this.objectLayer = new Container();
     this.objectLayer.visible = false;
-    this.zoom = 1; this.minZoom = 0.1; this.maxZoom = 12;
     this._texMode = 'nearest';
     this.animOn = true; this.animFrame = 0; this.animAccum = 0;
     this.objectsOn = false;
@@ -51,7 +51,14 @@ export class FortViewer {
     this.el.appendChild(this.app.canvas);
     this.world.addChild(this.tileLayer, this.objectLayer);
     this.app.stage.addChild(this.world);
-    this._wireCamera();
+    this.cam = new MapCamera(this, {
+      wrapX: () => this.cyl || 0,
+      onApply: () => {
+        this._updateTexFilter();
+        if (this.hud) this.hud.textContent = `${this.levelW / CHAR}x${this.levelH / CHAR} chars · wraps`;
+      },
+    });
+    this.cam.wirePointer();
     this.app.ticker.add(() => this._advanceAnim());
     // Helicopter sprites (white on transparent → tinted per side when placed).
     this.chopperFwd = await this._loadTex('chopper-fwd.png');
@@ -251,97 +258,20 @@ export class FortViewer {
     const W = this.app.screen.width, H = this.app.screen.height;
     // Don't zoom out past one cylinder period: the whole course is one loop, and
     // showing more would repeat the objects (e.g. all 8 prisoners twice).
-    this.minZoom = W / this.cyl;
-    this.maxZoom = (W / NATIVE_W) * 3;
+    this.cam.minZoom = W / this.cyl;
+    this.cam.maxZoom = (W / NATIVE_W) * 3;
     // Default view: show one C64 screen height (200px) of the level vertically,
     // top edge at the top, the player spawn centred horizontally.
-    this.zoom = H / NATIVE_H;
+    this.cam.zoom = H / NATIVE_H;
     const [sx] = level.spawn;
     const centreX = (sx + 2) * CHAR; // centre of the 4-char-wide copter
-    this.world.position.set(W / 2 - centreX * this.zoom, 0);
-    this._apply();
-  }
-  _panTo(wx, wy) {
-    this.world.position.set(this.app.screen.width / 2 - wx * this.zoom, this.app.screen.height / 2 - wy * this.zoom);
-  }
-  _screenPt(cx, cy) {
-    const r = this.el.getBoundingClientRect();
-    return { x: (cx - r.left) * (this.app.screen.width / r.width), y: (cy - r.top) * (this.app.screen.height / r.height) };
-  }
-  _zoomAt(px, py, f) {
-    const wx = (px - this.world.position.x) / this.zoom, wy = (py - this.world.position.y) / this.zoom;
-    this.zoom = Math.min(this.maxZoom, Math.max(this.minZoom, this.zoom * f));
-    this.world.position.set(px - wx * this.zoom, py - wy * this.zoom);
-    this._apply();
-  }
-  // Vertical clamps to the map; horizontal wraps the cylinder: the camera x is
-  // kept so the viewport's left edge maps into the first copy's [0, cyl) range,
-  // which the three copies always cover.
-  _clampPan() {
-    const sh = this.app.screen.height;
-    const lh = this.levelH * this.zoom;
-    let { x, y } = this.world.position;
-    y = lh <= sh ? (sh - lh) / 2 : Math.min(0, Math.max(sh - lh, y));
-    const m = this.cyl * this.zoom;
-    if (m > 0) x = -(((-x % m) + m) % m);
-    this.world.position.set(x, y);
-  }
-  _apply() {
-    this.world.scale.set(this.zoom);
-    this._clampPan();
-    this._updateTexFilter();
-    if (this.hud) this.hud.textContent = `${this.levelW / CHAR}x${this.levelH / CHAR} chars · wraps`;
+    this.world.position.set(W / 2 - centreX * this.cam.zoom, 0);
+    this.cam.apply();
   }
   _updateTexFilter() {
-    const mode = this.zoom < 1 ? 'linear' : 'nearest';
+    const mode = this.cam.zoom < 1 ? 'linear' : 'nearest';
     if (mode === this._texMode) return;
     this._texMode = mode;
     if (this.charTex) for (const t of this.charTex) t.source.scaleMode = mode;
-  }
-  _wireCamera() {
-    const c = this.el;
-    const pts = new Map();
-    let pinchDist = 0, pinchMid = null;
-    c.addEventListener('pointerdown', (e) => {
-      try { c.setPointerCapture(e.pointerId); } catch {}
-      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      c.classList.add('dragging');
-      if (pts.size === 2) {
-        const [a, b] = [...pts.values()];
-        pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
-        pinchMid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      }
-    });
-    c.addEventListener('pointermove', (e) => {
-      const p = pts.get(e.pointerId);
-      if (!p) return;
-      const dx = e.clientX - p.x, dy = e.clientY - p.y;
-      p.x = e.clientX; p.y = e.clientY;
-      if (pts.size >= 2) {
-        const [a, b] = [...pts.values()];
-        const dist = Math.hypot(a.x - b.x, a.y - b.y);
-        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-        if (pinchMid) { this.world.position.x += mid.x - pinchMid.x; this.world.position.y += mid.y - pinchMid.y; }
-        const sp = this._screenPt(mid.x, mid.y);
-        this._zoomAt(sp.x, sp.y, pinchDist > 0 ? dist / pinchDist : 1);
-        pinchDist = dist; pinchMid = mid;
-      } else {
-        this.world.position.x += dx; this.world.position.y += dy;
-        this._clampPan();
-      }
-    });
-    const end = (e) => {
-      pts.delete(e.pointerId);
-      try { c.releasePointerCapture(e.pointerId); } catch {}
-      if (pts.size < 2) { pinchMid = null; pinchDist = 0; }
-      if (pts.size === 0) c.classList.remove('dragging');
-    };
-    c.addEventListener('pointerup', end);
-    c.addEventListener('pointercancel', end);
-    c.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      const sp = this._screenPt(e.clientX, e.clientY);
-      this._zoomAt(sp.x, sp.y, e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
-    }, { passive: false });
   }
 }

@@ -10,6 +10,7 @@
 import { Application, Container } from 'pixi.js';
 import * as THREE from 'three';
 import { composeTilemap } from '../tilemap-compose.js';
+import { MapCamera } from '../shared/camera.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const DATA = 'public/marble/';
@@ -42,7 +43,6 @@ export class MarbleViewer {
     this.mode = 'tilemap';
     this.app = new Application();
     this.world = new Container();
-    this.zoom = 1; this.minZoom = 0.1; this.maxZoom = 12;
     this._texMode = 'nearest';
     this.layer = null;
     this.three = null;
@@ -65,7 +65,11 @@ export class MarbleViewer {
     this.app.canvas.classList.add('mm-pixi');
     this.el.appendChild(this.app.canvas);
     this.app.stage.addChild(this.world);
-    this._wireCamera();
+    this.cam = new MapCamera(this, {
+      enabled: () => this.mode === 'tilemap',
+      onApply: () => this._updateTexFilter(),
+    });
+    this.cam.wirePointer();
     return fetch(DATA + 'meta.json').then((r) => r.json());
   }
 
@@ -315,91 +319,16 @@ export class MarbleViewer {
     // (NATIVE_H lines), independent of the viewport's aspect — rather than fitting
     // the whole course width. Mirrors the Turrican viewer's native-resolution framing.
     const z = H / NATIVE_H;
-    this.minZoom = Math.min(Math.min(W / this.levelW, H / this.levelH) * 0.95, z);
-    this.maxZoom = Math.max((W / NATIVE_W) * 3, z);
-    this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, z));
-    this._panTo(this.levelW / 2, 0); // start framed at the top of the course
-    this._apply();
-  }
-  _panTo(wx, wy) {
-    this.world.position.set(this.app.screen.width / 2 - wx * this.zoom, this.app.screen.height / 2 - wy * this.zoom);
-  }
-  _screenPt(cx, cy) {
-    const r = this.el.getBoundingClientRect();
-    return { x: (cx - r.left) * (this.app.screen.width / r.width), y: (cy - r.top) * (this.app.screen.height / r.height) };
-  }
-  _zoomAt(px, py, f) {
-    const wx = (px - this.world.position.x) / this.zoom, wy = (py - this.world.position.y) / this.zoom;
-    this.zoom = Math.min(this.maxZoom, Math.max(this.minZoom, this.zoom * f));
-    this.world.position.set(px - wx * this.zoom, py - wy * this.zoom);
-    this._apply();
-  }
-  _clampPan() {
-    const sw = this.app.screen.width, sh = this.app.screen.height;
-    const lw = this.levelW * this.zoom, lh = this.levelH * this.zoom;
-    let { x, y } = this.world.position;
-    x = lw <= sw ? (sw - lw) / 2 : Math.min(0, Math.max(sw - lw, x));
-    y = lh <= sh ? (sh - lh) / 2 : Math.min(0, Math.max(sh - lh, y));
-    this.world.position.set(x, y);
-  }
-  _apply() {
-    this.world.scale.set(this.zoom);
-    this._clampPan();
-    this._updateTexFilter();
+    this.cam.minZoom = Math.min(Math.min(W / this.levelW, H / this.levelH) * 0.95, z);
+    this.cam.maxZoom = Math.max((W / NATIVE_W) * 3, z);
+    this.cam.zoom = Math.max(this.cam.minZoom, Math.min(this.cam.maxZoom, z));
+    this.cam.panTo(this.levelW / 2, 0); // start framed at the top of the course
+    this.cam.apply();
   }
   _updateTexFilter() {
-    const mode = this.zoom < 1 ? 'linear' : 'nearest';
+    const mode = this.cam.zoom < 1 ? 'linear' : 'nearest';
     if (mode === this._texMode) return;
     this._texMode = mode;
     if (this.atlasSrc) this.atlasSrc.scaleMode = mode;
-  }
-  _wireCamera() {
-    const c = this.el;
-    const pts = new Map();
-    let pinchDist = 0, pinchMid = null;
-    c.addEventListener('pointerdown', (e) => {
-      if (this.mode !== 'tilemap') return;
-      try { c.setPointerCapture(e.pointerId); } catch {}
-      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      c.classList.add('dragging');
-      if (pts.size === 2) {
-        const [a, b] = [...pts.values()];
-        pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
-        pinchMid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      }
-    });
-    c.addEventListener('pointermove', (e) => {
-      if (this.mode !== 'tilemap') return;
-      const p = pts.get(e.pointerId);
-      if (!p) return;
-      const dx = e.clientX - p.x, dy = e.clientY - p.y;
-      p.x = e.clientX; p.y = e.clientY;
-      if (pts.size >= 2) {
-        const [a, b] = [...pts.values()];
-        const dist = Math.hypot(a.x - b.x, a.y - b.y);
-        const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-        if (pinchMid) { this.world.position.x += mid.x - pinchMid.x; this.world.position.y += mid.y - pinchMid.y; }
-        const sp = this._screenPt(mid.x, mid.y);
-        this._zoomAt(sp.x, sp.y, pinchDist > 0 ? dist / pinchDist : 1);
-        pinchDist = dist; pinchMid = mid;
-      } else {
-        this.world.position.x += dx; this.world.position.y += dy;
-        this._clampPan();
-      }
-    });
-    const end = (e) => {
-      pts.delete(e.pointerId);
-      try { c.releasePointerCapture(e.pointerId); } catch {}
-      if (pts.size < 2) { pinchMid = null; pinchDist = 0; }
-      if (pts.size === 0) c.classList.remove('dragging');
-    };
-    c.addEventListener('pointerup', end);
-    c.addEventListener('pointercancel', end);
-    c.addEventListener('wheel', (e) => {
-      if (this.mode !== 'tilemap') return;
-      e.preventDefault();
-      const sp = this._screenPt(e.clientX, e.clientY);
-      this._zoomAt(sp.x, sp.y, e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP);
-    }, { passive: false });
   }
 }

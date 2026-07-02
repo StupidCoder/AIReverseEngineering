@@ -395,6 +395,15 @@ func main() {
 			if r.Kind == "" || r.Layout == 0 || r.Layout+18 > len(rom) {
 				continue
 			}
+			// The bosses are self-contained set-pieces: they decompress their OWN
+			// graphics over the zone sprite sheet and draw multi-part sprites from a
+			// bytecode script — a single extracted metasprite renders as garbage
+			// (the Bridge 1 "mess in the sky" was the Egg Mobile flyby). Skip them;
+			// the viewer shows its labelled marker instead.
+			if _, _, own := objplace.OwnGfx(rom, t); own || t == 0x25 {
+				// (the capsule 0x25 draws with the BOSS's runtime tiles - same problem)
+				continue
+			}
 			tt := objplace.ApplyIconUpload(rom, tiles, t)
 			strip, durs := renderAnimStrip(rom, tt, pal, t, z)
 			if strip == nil {

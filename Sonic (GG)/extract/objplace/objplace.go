@@ -43,25 +43,23 @@ func Hitbox(rom []byte, typ int) (w, h int, ok bool) {
 	if a == 0 {
 		return 0, 0, false
 	}
-	w, h = -1, -1
+	// Collect every LD (IX+13),w / LD (IX+14),h pair and keep the TALLEST: handlers
+	// may store transient state boxes (the porcupine's 16x14 crouch precedes its
+	// operative 20x32), and the standing box is what the ground probe uses.
+	lastW := -1
 	for o := a; o+3 < end; o++ {
 		if rom[o] == 0xDD && rom[o+1] == 0x36 {
 			switch rom[o+2] {
 			case 13:
-				if w < 0 {
-					w = int(rom[o+3])
-				}
+				lastW = int(rom[o+3])
 			case 14:
-				if h < 0 {
-					h = int(rom[o+3])
+				if lastW >= 0 && int(rom[o+3]) > h {
+					w, h, ok = lastW, int(rom[o+3]), true
 				}
-			}
-			if w >= 0 && h >= 0 {
-				return w, h, true
 			}
 		}
 	}
-	return 0, 0, false
+	return w, h, ok
 }
 
 // HasSpawnAdjust reports whether the type's handler is in the pickup family that

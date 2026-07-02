@@ -58,7 +58,7 @@ var objNames = map[byte]string{
 	0x25: "capsule", 0x26: "fish", 0x2C: "world 3 boss", 0x2D: "porcupine",
 	0x48: "world 2 boss", 0x49: "world 4 boss", 0x4E: "seesaw",
 	0x50: "bg animator", 0x51: "checkpoint", 0x13: "teleporter",
-	0x21: "bumper", 0x52: "continue", // special-stage objects ($52 = Continue powerup)
+	0x21: "bumper", 0x52: "continue", 0x3B: "bobbing platform", // special-stage objects ($52 = Continue powerup)
 	// (rings are not objects: they are baked into the block map as $79-$7B, like normal zones)
 }
 
@@ -159,9 +159,17 @@ func objectTable(rom []byte, act int) []Obj {
 // settleObjects replaces each object's raw spawn (blockX*32, blockY*32) with its rest
 // position on its first live frame, exactly as the engine computes it (objplace,
 // verified against the running game by cmd/objsettle).
-func settleObjects(objs []Obj, lvl *objplace.Level) {
+func settleObjects(rom []byte, objs []Obj, lvl *objplace.Level) {
 	for i := range objs {
-		objs[i].X, objs[i].Y, _ = lvl.Settle(int(objs[i].Type), objs[i].Bx*32, objs[i].By*32)
+		t := int(objs[i].Type)
+		x, y, grounded := lvl.Settle(t, objs[i].Bx*32, objs[i].By*32)
+		// A handler with per-frame gravity (and terrain collision) pulls its object
+		// down to the floor below when the spawn block has none — the porcupine in
+		// Bridge 1 drops 48 px onto the lower ground on activation (oracle-verified).
+		if !grounded && objplace.HasGravity(rom, t) && !objplace.NoCollide(rom, t) {
+			x, y, _ = lvl.DropToFloor(t, x, y)
+		}
+		objs[i].X, objs[i].Y = x, y
 	}
 }
 
@@ -607,7 +615,7 @@ func main() {
 		spawn := [2]int{a.spawnX, a.spawnY}
 		objs := objectTable(rom, a.num)
 		lvl := objplace.NewLevel(rom, mp, a.stride, a.engZone)
-		settleObjects(objs, lvl)
+		settleObjects(rom, objs, lvl)
 		sx, sy, grounded := lvl.DropToFloor(0, a.spawnX*32, a.spawnY*32)
 		spawnPx := [3]int{sx, sy, 0}
 		if grounded {

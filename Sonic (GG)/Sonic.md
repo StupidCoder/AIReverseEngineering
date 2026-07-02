@@ -1038,12 +1038,13 @@ slot:
 | `$49` | **world 4 boss** | b2 `$9271` | |
 | `$4E` | seesaw | b2 `$8681` | tilt-arm catapult; launch height scales with Sonic's landing impact (momentum transfer) |
 | `$0B` | sinking platform | b1 `$69ED` | gives under Sonic's weight: sinks 16 px at ½ px/frame while stood on, floats back up when left |
+| `$3B` | bobbing platform | b1 `$B4E8` | free-floating (no terrain contact): Y-velocity ±$10 sub-px/frame on an 160-frame phase, clamped to ±2 px/frame — from the spawn it sinks ~160 px, then bobs in a 96 px, 160-frame cycle (Bridge's floating logs; rideable via `$7CF5`) |
 | `$50` | background animator | b1 `$7B29` | repaints its *own* map cell each frame through the scroll-draw request (`$D2AB/$D2AD` target, `$D2AF` source): a 4-phase sequence of block pairs (`$7BC1` patterns → `$7B99` blocks) — the growing flowers and twinkling sea. Steady-state timing: bare and full-grown hold ~240 frames, the transitions 16 (`webexport` emits each placement as a `cellAnims` entry and the Studio viewer runs them). Not a camera lock: `$D2AB` is the blit request, the camera is `$D254` |
 | `$51` | **checkpoint** | b1 `$6010` | on contact, writes the *checkpoint's own* block position into the respawn table `$D32F + act×2` (the `$6034` respawn-save code) |
 
 Unnamed but present (handlers confirmed, behaviour not yet identified): `$05` b1 `$5FD7`,
 `$0A`/`$0C`/`$0D` b1, `$11` b1 `$6F61`, `$13`–`$24` (mostly bank 2),
-`$27`–`$2B`, `$2E`–`$4C`, `$52`–`$56`. The full table is dumped by inspecting `$24B2`.
+`$27`–`$2B`, `$2E`–`$3A`, `$3C`–`$4C`, `$52`–`$56`. The full table is dumped by inspecting `$24B2`.
 
 ### Object sprites — the metasprite format
 
@@ -1085,6 +1086,19 @@ four-step claw walk (`$66F5`: frames 0,1,2,1 × 13), the beetle's two-frame walk
 exports every type as a horizontal strip of 48×48 frames with the engine durations in
 `sprites/index.json` — the Studio viewer plays them in its object layer.
 
+Two families cannot be extracted this way. The **bosses** (`$12`/`$2C`/`$48`/`$49`)
+are self-contained set-pieces: each decompresses its **own graphics over the zone sprite
+sheet** (`LD HL,src / LD DE,$2000 / LD A,bank / CALL $0406` in the handler) and draws a
+multi-part sprite from its script — a single extracted metasprite renders as tile salad
+(the "mess in the sky" early in Bridge Act 1 was the Egg Mobile flyby drawn with the
+wrong tiles). The **capsule** (`$25`) draws with the boss's runtime tiles too. The
+extractor skips them (`objplace.OwnGfx`) and the viewer shows its labelled marker.
+
+Initial facing matters as well: a walker's handler has one `$7C75` site per direction,
+each preceded by its X-velocity store — the extractor prefers the **negative** one, since
+every walker starts toward the player (the porcupine's first site is its facing-*right*
+walk, which is what briefly pointed it the wrong way in the viewer).
+
 One "animation" turned out not to be one. The pickup TV alternates two layouts on the
 frame rotor (`$5E17`): the full metasprite (`$5E97`, 3 of 8 frames) and a variant that
 *drops the middle top cell* (`$5EA4`, 5 of 8). Composited with the icon overlay the two
@@ -1119,9 +1133,13 @@ activates them — margins from the per-type table at `$2560`). The pickup famil
 boxes `$01`–`$05`, emerald, checkpoint, continue) additionally applies a one-shot spawn
 adjust first (`$6089`): **X += 4** (centring the monitor on its totem block), or
 **(+22,+22)** if the block at its position is `$B0` — an item socketed into a Green Hills
-slope. All of this is reimplemented in `extract/objplace` and **verified against the live
-engine** by `cmd/objsettle`, which watches the `$D3FD` array as the camera sweeps Green
-Hills Act 1: every stationary object's live rest position matches the static prediction
+slope. A handler with per-frame gravity (and terrain collision) additionally pulls its object
+down to the floor **below** when the spawn block has none: Bridge Act 1's porcupine
+spawns at (480, 320) over a gap and drops 48 px onto the lower ground the moment it
+activates — the exporter detects the gravity idiom (`objplace.HasGravity`, minus the
+`SET 5,(IX+24)` no-collision types) and applies the same drop. All of this is
+reimplemented in `extract/objplace` and **verified against the live engine** by
+`cmd/objsettle`, which watches the `$D3FD` array as the camera sweeps Green Hills Act 1: every stationary object's live rest position matches the static prediction
 exactly (walkers/flyers differ only by their own first step). The extractor keeps each
 sprite as the **whole 48×48 metasprite grid** (transparent where the layout has no tile)
 and the viewer draws it with its top-left at the object's **rest position** — so the crab

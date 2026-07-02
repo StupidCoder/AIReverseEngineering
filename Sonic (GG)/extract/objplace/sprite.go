@@ -201,12 +201,31 @@ func Anim(rom []byte, typ, zone int) []AnimFrame {
 	// Shared animator: parse the (frameId, duration) sequence. The sequence pointer
 	// is either a direct LD BC,nn, or — the common enemy idiom — entry 0 of a
 	// per-state pointer table: LD HL,table / ADD HL,DE / LD C,(HL) / INC HL /
-	// LD B,(HL) (bytes 19 4E 23 46) before the CALL.
+	// LD B,(HL) (bytes 19 4E 23 46) before the CALL. A handler with one $7C75 site
+	// per facing stores the X velocity just before each — prefer the site with the
+	// NEGATIVE velocity (walking left, every walker's initial direction; the
+	// porcupine's first site is its facing-right walk).
+	var sites []int
 	for o := a; o+2 < end; o++ {
 		if rom[o] == 0xCD && rom[o+1] == 0x75 && rom[o+2] == 0x7C { // CALL $7C75
+			sites = append(sites, o)
+		}
+	}
+	ordered := append([]int(nil), sites...)
+	for _, o := range sites {
+		for i := o - 20; i > a && i < o-3; i++ {
+			// LD (IX+8/9),$FF = a negative X-velocity byte
+			if rom[i] == 0xDD && rom[i+1] == 0x36 && (rom[i+2] == 8 || rom[i+2] == 9) && rom[i+3] == 0xFF {
+				ordered = append([]int{o}, ordered...)
+				break
+			}
+		}
+	}
+	for _, o := range ordered {
+		{
 			base, seq := imm16(0x11, o), imm16(0x01, o)
 			if base < 0 {
-				break
+				continue
 			}
 			if seq < 0 {
 				for i := o - 24; i > a && i < o-6; i++ {
@@ -409,5 +428,87 @@ func PlatformPaths(rom []byte) map[string][][2]int {
 		}
 		horiz = append(horiz, [2]int{off, 0})
 	}
-	return map[string][][2]int{"09": swing, "0f": horiz}
+	return map[string][][2]int{"09": swing, "0f": horiz, "3b": BobPath()}
+}
+
+// OwnGfx reports a handler that decompresses its OWN sprite graphics (the bosses:
+// LD HL,src / LD DE,$2000 / LD A,bank / CALL $0406 replaces the zone sprite sheet
+// while the set-piece runs) and returns the source file offset and destination
+// sprite-tile slot.
+func OwnGfx(rom []byte, typ int) (srcFile, dstTile int, ok bool) {
+	a, end := HandlerRange(rom, typ)
+	for o := a; a != 0 && o+2 < end; o++ {
+		if rom[o] == 0xCD && rom[o+1] == 0x06 && rom[o+2] == 0x04 { // CALL $0406
+			src, dst, bank := -1, -1, -1
+			for i := o - 14; i < o; i++ {
+				switch rom[i] {
+				case 0x21:
+					src = int(rom[i+1]) | int(rom[i+2])<<8
+				case 0x11:
+					dst = int(rom[i+1]) | int(rom[i+2])<<8
+				case 0x3E:
+					bank = int(rom[i+1])
+				}
+			}
+			if src >= 0 && bank >= 0 && dst >= 0x2000 && dst < 0x4000 {
+				return decomp.SourceOffset(bank, uint16(src)), (dst - 0x2000) / 32, true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+// HasGravity reports the per-frame Y-velocity increment idiom in the handler
+// (LD L,(IX+10) / LD H,(IX+11) ... LD (IX+10),L): the object pulls itself down
+// when airborne, so its rest position is the floor below the spawn.
+func HasGravity(rom []byte, typ int) bool {
+	a, end := HandlerRange(rom, typ)
+	for i := a; a != 0 && i+24 < end; i++ {
+		if rom[i] == 0xDD && rom[i+1] == 0x6E && rom[i+2] == 0x0A &&
+			rom[i+3] == 0xDD && rom[i+4] == 0x66 && rom[i+5] == 0x0B {
+			for j := i + 6; j < i+24; j++ {
+				if rom[j] == 0xDD && rom[j+1] == 0x75 && rom[j+2] == 0x0A {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// NoCollide reports a handler that opts out of terrain physics on entry
+// (SET 5,(IX+24) as its first instruction — platforms, floaters, effects).
+func NoCollide(rom []byte, typ int) bool {
+	a, _ := HandlerRange(rom, typ)
+	return a != 0 && rom[a] == 0xDD && rom[a+1] == 0xCB && rom[a+2] == 0x18 && rom[a+3] == 0xEE
+}
+
+// BobPath samples the bobbing platform's (type $3B, $B4E8) vertical float: the
+// Y velocity takes +/-$10 sub-px per frame — the sign flipping on an 160-frame
+// phase counter ($B515, threshold ($D217)=$50) — clamped to +/-2 px/frame
+// ($B53C), integrated into the 24-bit position. From the spawn it first sinks
+// ~160 px (the transient), then bobs +64..+160 below the spawn with a 160-frame
+// period — verified against the live engine. The exported path is one
+// steady-state cycle (the viewer loops it).
+func BobPath() [][2]int {
+	var path [][2]int
+	pos, vel := 0, 0
+	for t := 0; t < 760; t++ {
+		if t%160 < 80 {
+			vel += 0x10
+		} else {
+			vel -= 0x10
+		}
+		if vel > 0x200 {
+			vel = 0x200
+		}
+		if vel < -0x200 {
+			vel = -0x200
+		}
+		pos += vel
+		if t >= 600 {
+			path = append(path, [2]int{0, pos >> 8})
+		}
+	}
+	return path
 }

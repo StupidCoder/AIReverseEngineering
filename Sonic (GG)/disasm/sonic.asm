@@ -3759,7 +3759,7 @@
 2495  .byte 3E AE 3E 7F AF 3E 2F FE 13 0E 1F DE FE 12 10 AE ; >.>..>/.........
 24A5  .byte 3E 4E 1E FD 96 00 FE 16 13 3E 7F 2F FF          ; >N.......>./.
 
-; --- obj_dispatch  $24B2 — MASTER per-object behaviour table (bank0), WORD pointers indexed type*2, valid types $00-$56 ($4D/$4F null = unused; $57=end). $2CBA dispatches every live $D3FD object through it each frame (JP (HL), returns to common move code $2CD4). Handlers run in HOME banking (banks 0/1/2): addr $4000-$7FFF=bank1, $8000-$BFFF=bank2 (the loop pages b1/b2 into slots 1/2, then restores level gfx banks 4/5). Named (play-tested + confirmed vs handler): $00 Sonic($4AD0 b1), $01-$03 bonus($5DE1/$5EB1/$5EDD b1), $04 shield($5FAF b1), $06 emerald($6183 b1), $07 goal($61F8 b1), $08 CRAB($65F9 b1), $09 swingPlat($6747 b1), $0E bird($6BD9 b1), $0F horizPlat($6DCA b1), $10 BEETLE($6E65 b1), $12 world1-boss($7065 b1), $25 capsule($736B b1), $26 fish($7D25 b1), $2C world3-boss($806B b2), $2D porcupine($82FB b2), $48 world2-boss($84AB b2), $49 world4-boss($9271 b2), $4E seesaw($8681 b2), $50 camera/scroll-lock($7B29 b1, drives camera X $D2AB), $51 CHECKPOINT($6010 b1, writes respawn table $D32F via $6034). (data) ---
+; --- obj_dispatch  $24B2 — MASTER per-object behaviour table (bank0), WORD pointers indexed type*2, valid types $00-$56 ($4D/$4F null = unused; $57=end). $2CBA dispatches every live $D3FD object through it each frame (JP (HL), returns to common move code $2CD4). Handlers run in HOME banking (banks 0/1/2): addr $4000-$7FFF=bank1, $8000-$BFFF=bank2 (the loop pages b1/b2 into slots 1/2, then restores level gfx banks 4/5). Named (play-tested + confirmed vs handler): $00 Sonic($4AD0 b1), $01-$03 bonus($5DE1/$5EB1/$5EDD b1), $04 shield($5FAF b1), $06 emerald($6183 b1), $07 goal($61F8 b1), $08 CRAB($65F9 b1), $09 swingPlat($6747 b1), $0E bird($6BD9 b1), $0F horizPlat($6DCA b1), $10 BEETLE($6E65 b1), $12 world1-boss($7065 b1), $25 capsule($736B b1), $26 fish($7D25 b1), $2C world3-boss($806B b2), $2D porcupine($82FB b2), $48 world2-boss($84AB b2), $49 world4-boss($9271 b2), $4E seesaw($8681 b2), $50 BG ANIMATOR($7B29 b1, repaints its own map cell via the $D2AB/$D2AF blit request - NOT a camera lock), $51 CHECKPOINT($6010 b1, writes respawn table $D32F via $6034). (data) ---
 24B2  .byte D0 4A E1 5D B1 5E DD 5E AF 5F D7 5F 83 61 F8 61 ; .J.].^.^._._.a.a
 24C2  .byte F9 65 47 67 3E 69 ED 69 55 6A 26 6B D9 6B CA 6D ; .eGg>i.iUj&k.k.m
 24D2  .byte 65 6E 61 6F 65 70 4A 9B BD 9B 45 9C 63 9C C3 9D ; enaoepJ...E.c...
@@ -5214,7 +5214,7 @@
 3280  FB          EI
 3281  C9          RET
 
-; ==== scroll_draw  $3282  (1 caller) — draw ONE newly-revealed 2x2 macro-block (translated: decompiled/gameplay.py). When the camera ($D2AB X / $D2AD Y) crosses an 8px boundary vs the previous pos ($D254/$D257), compute the name-table address ($3800 + row*$40 + col*2, $1C row-wrap) and BLIT a 2x2 block: B=2 rows x 4 bytes/row (= 2 cells) copied straight from DE=($D2AF) = 8 bytes = four name-table cells (tile+attr). It does NOT expand blocks; $D2AF already points at a PRE-EXPANDED, name-table-ready 2x2 block. KEY (resolved by translating, not byte-correlating): gp_vdp_update $0130 calls scroll_draw with BANK 1 in slot1 ($0149 pages it back after the 8/9 tile stream), so $D2AF=$7B99 reads bank1 $07B99 = name-table entries (00*8 sky then F0 00 F1 00 E2 00 F2 00 = a cloud block) - NOT bank4 $13B99 (that was the wrong resting slot config). The upstream column streamer sets $D2AF to the next block = where the layout encoding lives. ====
+; ==== scroll_draw  $3282  (1 caller) — blit ONE 16x16 half-block of name-table cells from the REQUEST registers: $D2AB/$D2AD = the requested world position, $D2AF = source (8 bytes = 2x2 pre-expanded name-table cells, tile+attr). Guards: draws only when the request is ON SCREEN - ($D2AB&~7)-($D254&~7) in [8,255] and ($D2AD)-($D257) in [0,191]; NT address = $3800 + wrapped(row)*$40 + col*2 (row base $D24B/$D24C). TWO writers feed it: the camera-edge column streamer (newly revealed map cells while scrolling) and the type-$50 BACKGROUND ANIMATOR objects ($7B29), which submit their own block for repaint every frame. (Translated in decompiled/gameplay.py; called from gp_vdp_update $0130 with bank 1 in slot1, so $D2AF=$7B99 reads the bank-1 block-defs table.) ====
 3282  2A AB D2    LD HL,($D2AB)
 3285  7D          LD A,L
 3286  E6 F8       AND $F8
@@ -7073,38 +7073,40 @@
 4C77  .byte 14 05 2A 94 D2 11 68 01 A7 ED 52 D4 79 53 FD 7E ; ..*...h...R.yS.~
 4C87  .byte 03 FE FE F5 CC 3A 51 F1 C4 30 52 DD CB 18 46 C2 ; .....:Q..0R...F.
 4C97  .byte C7 55 DD 7E 0E FE 20 28 11 DD CB 18 56 C2 B1 4C ; .U.~.. (....V..L
-4CA7  .byte 2A 02 D4 11 F5 FF 19 22 02 D4 DD 36 0D 10 DD 36 ; *......"...6...6
-4CB7  .byte 0E 20 2A 04 D4 DD 46 09 0E 00 59 51 FD CB 03 5E ; . *...F...YQ...^
-4CC7  .byte CA 5E 51 FD CB 03 56 CA B9 51 7C B5 B0 28 5C DD ; .^Q...V..Q|..(\.
-4CD7  .byte 36 14 01 CB 78 20 30 ED 5B 13 D2 7B 2F 5F 7A 2F ; 6...x 0.[..{/_z/
-4CE7  .byte 57 13 0E FF E5 D5 ED 5B 3A D2 AF ED 52 D1 E1 38 ; W......[:...R..8
-4CF7  .byte 3A ED 5B 0F D2 7B 2F 5F 7A 2F 57 13 0E FF 3A 17 ; :.[..{/_z/W...:.
-4D07  .byte D2 DD 77 14 C3 32 4D ED 5B 13 D2 0E 00 E5 D5 7D ; ..w..2M.[......}
-4D17  .byte 2F 6F 7C 2F 67 23 ED 5B 3A D2 AF ED 52 D1 E1 38 ; /o|/g#.[:...R..8
-4D27  .byte 0A ED 5B 0F D2 3A 17 D2 DD 77 14 78 A7 FA 4F 4D ; ..[..:...w.x..OM
-4D37  .byte 19 89 4F F2 59 4D 3A 04 D4 DD B6 08 DD B6 09 28 ; ..O.YM:........(
-4D47  .byte 11 0E 00 69 61 C3 59 4D 19 89 4F FA 59 4D 0E 00 ; ...ia.YM..O.YM..
-4D57  .byte 69 61 79 22 04 D4 32 06 D4 2A 07 D4 DD 46 0C 0E ; iay"..2..*...F..
-4D67  .byte 00 59 51 DD CB 18 7E C4 12 53 DD CB 18 46 C2 A0 ; .YQ...~..S...F..
-4D77  .byte 56 3A 88 D2 A7 20 12 DD CB 18 7E 28 30 DD CB 18 ; V:... ....~(0...
-4D87  .byte 5E 20 06 FD CB 03 6E 28 24 FD CB 03 6E 20 25 3A ; ^ ....n($...n %:
-4D97  .byte 88 D2 A7 CC 00 53 2A 3C D2 06 FF 0E 00 59 51 3A ; .....S*<.....YQ:
-4DA7  .byte 88 D2 3D 32 88 D2 DD CB 18 D6 C3 D5 4D DD CB 18 ; ..=2........M...
-4DB7  .byte 9E C3 BF 4D DD CB 18 DE AF 32 88 D2 CB 7C 20 08 ; ...M.....2...| .
-4DC7  .byte 3A 16 D2 BC 28 08 38 06 ED 5B 3E D2 0E 00 FD CB ; :...(.8..[>.....
-4DD7  .byte 06 46 28 12 E5 7B 2F 5F 7A 2F 57 79 2F 21 01 00 ; .F(..{/_z/Wy/!..
-4DE7  .byte 19 EB CE 00 4F E1 19 78 89 22 07 D4 32 09 D4 E5 ; ....O..x."..2...
-4DF7  .byte 7B 2F 6F 7A 2F 67 79 2F 11 01 00 19 CE 00 22 E7 ; {/oz/gy/......".
-4E07  .byte D2 32 E9 D2 E1 DD CB 18 56 C4 1D 55 7C A7 F2 1F ; .2......V..U|...
-4E17  .byte 4E 7C 2F 67 7D 2F 6F 23 11 00 01 EB A7 ED 52 30 ; N|/g}/o#......R0
-4E27  .byte 17 3A 15 D4 E6 85 20 10 DD CB 0C 7E 28 06 DD 36 ; .:.... ....~(..6
-4E37  .byte 14 13 18 04 DD 36 14 01 01 08 00 11 08 00 CD D5 ; .....6..........
-4E47  .byte 30 7E E6 7F FE 79 D4 00 50 3A 86 D2 A7 C4 34 54 ; 0~...y..P:....4T
-4E57  .byte FD CB 06 76 C4 3D 54 FD CB 08 56 C4 5E 54 3A 11 ; ...v.=T...V.^T:.
-4E67  .byte D4 FE 0A CC 74 54 DD 6E 14 4D 26 00 29 11 5B 5C ; ....tT.n.M&.).[\
-4E77  .byte 19 5E 23 56 ED 53 0E D4 3A E0 D2 91 C4 9E 54 3A ; .^#V.S..:.....T:
-4E87  .byte 10 D4 26 00 6F 19 7E A7 F2 9A 4E 23 7E 32 10 D4 ; ..&.o.~...N#~2..
-4E97  .byte C3 89 4E                                        ; ..N
+4CA7  .byte 2A 02 D4                                        ; *..
+
+; --- sonic_box_stand  $4CAA — (bank1) roll->stand transition: Y += -11 ($FFF5) and box 16x32 ($4CB1/$4CB5) - the box switch keeps his FEET fixed (32 = 21+11). (data) ---
+4CAA  .byte 11 F5 FF 19 22 02 D4 DD 36 0D 10 DD 36 0E 20 2A ; ...."...6...6. *
+4CBA  .byte 04 D4 DD 46 09 0E 00 59 51 FD CB 03 5E CA 5E 51 ; ...F...YQ...^.^Q
+4CCA  .byte FD CB 03 56 CA B9 51 7C B5 B0 28 5C DD 36 14 01 ; ...V..Q|..(\.6..
+4CDA  .byte CB 78 20 30 ED 5B 13 D2 7B 2F 5F 7A 2F 57 13 0E ; .x 0.[..{/_z/W..
+4CEA  .byte FF E5 D5 ED 5B 3A D2 AF ED 52 D1 E1 38 3A ED 5B ; ....[:...R..8:.[
+4CFA  .byte 0F D2 7B 2F 5F 7A 2F 57 13 0E FF 3A 17 D2 DD 77 ; ..{/_z/W...:...w
+4D0A  .byte 14 C3 32 4D ED 5B 13 D2 0E 00 E5 D5 7D 2F 6F 7C ; ..2M.[......}/o|
+4D1A  .byte 2F 67 23 ED 5B 3A D2 AF ED 52 D1 E1 38 0A ED 5B ; /g#.[:...R..8..[
+4D2A  .byte 0F D2 3A 17 D2 DD 77 14 78 A7 FA 4F 4D 19 89 4F ; ..:...w.x..OM..O
+4D3A  .byte F2 59 4D 3A 04 D4 DD B6 08 DD B6 09 28 11 0E 00 ; .YM:........(...
+4D4A  .byte 69 61 C3 59 4D 19 89 4F FA 59 4D 0E 00 69 61 79 ; ia.YM..O.YM..iay
+4D5A  .byte 22 04 D4 32 06 D4 2A 07 D4 DD 46 0C 0E 00 59 51 ; "..2..*...F...YQ
+4D6A  .byte DD CB 18 7E C4 12 53 DD CB 18 46 C2 A0 56 3A 88 ; ...~..S...F..V:.
+4D7A  .byte D2 A7 20 12 DD CB 18 7E 28 30 DD CB 18 5E 20 06 ; .. ....~(0...^ .
+4D8A  .byte FD CB 03 6E 28 24 FD CB 03 6E 20 25 3A 88 D2 A7 ; ...n($...n %:...
+4D9A  .byte CC 00 53 2A 3C D2 06 FF 0E 00 59 51 3A 88 D2 3D ; ..S*<.....YQ:..=
+4DAA  .byte 32 88 D2 DD CB 18 D6 C3 D5 4D DD CB 18 9E C3 BF ; 2........M......
+4DBA  .byte 4D DD CB 18 DE AF 32 88 D2 CB 7C 20 08 3A 16 D2 ; M.....2...| .:..
+4DCA  .byte BC 28 08 38 06 ED 5B 3E D2 0E 00 FD CB 06 46 28 ; .(.8..[>......F(
+4DDA  .byte 12 E5 7B 2F 5F 7A 2F 57 79 2F 21 01 00 19 EB CE ; ..{/_z/Wy/!.....
+4DEA  .byte 00 4F E1 19 78 89 22 07 D4 32 09 D4 E5 7B 2F 6F ; .O..x."..2...{/o
+4DFA  .byte 7A 2F 67 79 2F 11 01 00 19 CE 00 22 E7 D2 32 E9 ; z/gy/......"..2.
+4E0A  .byte D2 E1 DD CB 18 56 C4 1D 55 7C A7 F2 1F 4E 7C 2F ; .....V..U|...N|/
+4E1A  .byte 67 7D 2F 6F 23 11 00 01 EB A7 ED 52 30 17 3A 15 ; g}/o#......R0.:.
+4E2A  .byte D4 E6 85 20 10 DD CB 0C 7E 28 06 DD 36 14 13 18 ; ... ....~(..6...
+4E3A  .byte 04 DD 36 14 01 01 08 00 11 08 00 CD D5 30 7E E6 ; ..6..........0~.
+4E4A  .byte 7F FE 79 D4 00 50 3A 86 D2 A7 C4 34 54 FD CB 06 ; ..y..P:....4T...
+4E5A  .byte 76 C4 3D 54 FD CB 08 56 C4 5E 54 3A 11 D4 FE 0A ; v.=T...V.^T:....
+4E6A  .byte CC 74 54 DD 6E 14 4D 26 00 29 11 5B 5C 19 5E 23 ; .tT.n.M&.).[\.^#
+4E7A  .byte 56 ED 53 0E D4 3A E0 D2 91 C4 9E 54 3A 10 D4 26 ; V.S..:.....T:..&
+4E8A  .byte 00 6F 19 7E A7 F2 9A 4E 23 7E 32 10 D4 C3 89 4E ; .o.~...N#~2....N
 
 ; --- sonic_frame_gfx  $4E9A — (bank1) Sonic's animation frame -> tile stream: source = slot-1 base $4000 (or $5800) + frame*192 -> ($D289), count $10 -> ($D28D), layout base $5C1B -> ($D40C) (overridable per state via $5499/$505F). 192 bytes = 8 tiles x 24 bytes = 3bpp (3 stored bitplanes/row, 4th plane zero), streamed into the dynamic sprite tiles $B4-$BB (VRAM $3680). Frame 0 in bank 8 (file $20000) = the STANDING pose - verified byte-identical to live VRAM; cmd/spriterip rips it as the type-$00 sprite. (data) ---
 4E9A  .byte 57 01 00 40 DD CB 18 4E 28 03 01 00 58 FD CB 06 ; W..@...N(...X...
@@ -7237,10 +7239,13 @@
 559C  .byte E1 FD CB 0D C6 C3 50 4E FD CB 0D 4E 20 0A 35 C2 ; ......PN...N .5.
 55AC  .byte 50 4E FD CB 0D CE 36 8C DD 36 14 17 7E A7 28 04 ; PN....6..6..~.(.
 55BC  .byte 35 C3 50 4E DD 36 14 19 C3 50 4E DD 7E 0E FE 15 ; 5.PN.6...PN.~...
-55CC  .byte 28 0A 2A 02 D4 11 0B 00 19 22 02 D4 DD 36 0D 10 ; (.*......"...6..
-55DC  .byte DD 36 0E 15 2A 04 D4 DD 46 09 0E 00 59 51 7C B5 ; .6..*...F...YQ|.
-55EC  .byte B0 CA 52 56 DD 36 14 09 FD CB 03 56 20 20 FD CB ; ..RV.6.....V  ..
-55FC  .byte 03 4E 28 1A                                     ; .N(.
+55CC  .byte 28 0A                                           ; (.
+
+; --- sonic_box_short  $55CE — (bank1) stand->short transition: Y += 11 then box 16x21 ($55D8/$55DC) - same feet-preserving switch; this short box is also his handler's INITIAL state, so his FIRST floor probe runs with feet at spawnY+21 (why Bridge 1/Labyrinth 1 snap UP onto a floor line inside the spawn block itself). (data) ---
+55CE  .byte 2A 02 D4 11 0B 00 19 22 02 D4 DD 36 0D 10 DD 36 ; *......"...6...6
+55DE  .byte 0E 15 2A 04 D4 DD 46 09 0E 00 59 51 7C B5 B0 CA ; ..*...F...YQ|...
+55EE  .byte 52 56 DD 36 14 09 FD CB 03 56 20 20 FD CB 03 4E ; RV.6.....V  ...N
+55FE  .byte 28 1A                                           ; (.
 
 ; --- level_table  $5600 — bank5 (z80 $5600 = file $15600): 18 word-pointers (offset+$5600) to 40-byte descriptors = the per-act LEVEL RESOURCE TABLE ($D238 indexes it = act number, 6 zones x 3 acts). $185D copies the descriptor to RAM $D355 then UNPACKS it (traced at $1912): +0 -> $D2D5 (zone); +1/+2 -> $D232 (extent); +3/+4 -> $D234 (extent); +5/+6 -> $D26D = LEFT scroll bound; +7/+8 -> $D26F = RIGHT scroll bound = LEVEL WIDTH (e.g. scene0 $18C0 ~6336px). Per-ZONE block: +23 = graphics bank ($09); +24/+25 = ptr to the zone's compressed TILE SET (128 tiles, VERIFIED by decompressing -> coherent level tiles); +29 = zone. +13..+19 = per-act pointers into slot-2 data ($8634-style) = the actual level MAP/object data (consumed after $185D's $1930; format not yet decoded). So the descriptor = the level BOUNDING BOX + tile-set ptr + per-act data ptrs. TWO CORRECTIONS via tracing the consumers: (1) +21/+22 is NOT the map ptr (per-zone garbage); (2) +7/+8 ($D26F) is NOT a map ptr either - it's the right scroll bound (camera-clamped at $4F5B; recomputed from the object pos at $73EB). Decoded in decompiled/scene.py. (data) ---
 5600  .byte DD CB 18 7E CA 12 56 CB 78 20 35 DD CB 18 86 C3 ; ...~..V.x 5.....
@@ -7413,7 +7418,7 @@
 601B  .byte 21 03 00 22 15 D2 CD 28 33 38 35 CD CC 60 38 30 ; !.."...(385..`80
 602B  .byte 21 12 D3 CD 8D 0B 7E B1 77                      ; !.....~.w
 
-; --- respawn_save  $6034 — (bank1) writes the RESPAWN table $D32F+act*2 = where Sonic reappears after death. Stores the CHECKPOINT OBJECT's OWN position (IX+2/3, IX+5/6 *8, high byte -> blockX, blockY-1) - NOT Sonic's pos (corrects earlier note). This code is INSIDE the CHECKPOINT handler (type $51 @ $6010): on first contact ($3328 + $60CC proximity) it saves the respawn point + sets a per-act bit in the $D312 bitmask ($0B8D picks the bit) so it fires once. (Earlier guessed type$50; off by one - $50 is the camera/scroll lock.) (data) ---
+; --- respawn_save  $6034 — (bank1) writes the RESPAWN table $D32F+act*2 = where Sonic reappears after death. Stores the CHECKPOINT OBJECT's OWN position (IX+2/3, IX+5/6 *8, high byte -> blockX, blockY-1) - NOT Sonic's pos (corrects earlier note). This code is INSIDE the CHECKPOINT handler (type $51 @ $6010): on first contact ($3328 + $60CC proximity) it saves the respawn point + sets a per-act bit in the $D312 bitmask ($0B8D picks the bit) so it fires once. (Earlier guessed type$50; off by one - $50 is the background animator.) (data) ---
 6034  .byte 3A 38 D2 87 5F 16 00 21 2F D3 19 EB DD 6E 02 DD ; :8.._..!/....n..
 6044  .byte 66 03 29 29 29 7C 12 13 DD 6E 05 DD 66 06 29 29 ; f.)))|...n..f.))
 6054  .byte 29 7C 3D 12 C3 01 5E 21 00 55 C3 0C 5E          ; )|=...^!.U..^
@@ -8305,10 +8310,13 @@
 7AF3  .byte 15 D2 CD 28 33 D8 FD CB 06 76 C0 3A 15 D4 E6 80 ; ...(3....v.:....
 7B03  .byte C8 21 FB FF AF 32 07 D4 22 08 D4 21 03 00 AF 32 ; .!...2.."..!...2
 7B13  .byte 04 D4 22 05 D4 21 15 D4 CB 8E FD CB 06 F6 FD 36 ; .."..!.........6
-7B23  .byte 03 FF 3E 11 EF C9 DD CB 18 EE DD CB 18 46 20 0C ; ..>..........F .
-7B33  .byte DD 36 11 32 DD 36 12 00 DD CB 18 C6 01 00 00    ; .6.2.6.........
+7B23  .byte 03 FF 3E 11 EF C9                               ; ..>...
 
-; --- block_stream  $7B42 — draws macro-blocks via $D2AF = $7B99 + index*8 (the only LD HL,$7B99 (data) ---
+; --- obj_bg_animator  $7B29 — (bank1) type $50 = BACKGROUND-CELL ANIMATOR (GH1 places 8: the twinkling sea waves + clouds; earlier mislabelled "camera/scroll lock"). SET 5,(IX+24) = no terrain physics. Init: countdown IX+17=50, phase IX+18=0. Every frame it submits a repaint of its OWN 32px block through the scroll-draw request registers: ($D2AB)=own X, ($D2AD)=own Y (+16 on odd frames = the two 16px halves), ($D2AF)=$7B99 + block*8 where block = pattern($7BC1)[phase*4 + parity]. scroll_draw $3282 consumes the request when it is on screen. Phase advances when IX+17 runs out (next duration = pattern[phase*4+2], wraps at 4). Verified live: req alternates (X,Y)/(X,Y+16) with src $7B99/$7BA1 while active. NOT a scroll/camera lock - $D2AB is the blit request, not the camera ($D254/$D257 is). (data) ---
+7B29  .byte DD CB 18 EE DD CB 18 46 20 0C DD 36 11 32 DD 36 ; .......F ..6.2.6
+7B39  .byte 12 00 DD CB 18 C6 01 00 00                      ; .........
+
+; --- block_stream  $7B42 — (part of obj_bg_animator $7B29) submits macro-blocks via $D2AF = $7B99 + index*8 (the only LD HL,$7B99 (data) ---
 7B42  .byte DD 6E 02 DD 66 03 22 AB D2 DD 6E 05 DD 66 06 3A ; .n..f."...n..f.:
 7B52  .byte 24 D2 0F 30 05 11 10 00 19 03 22 AD D2 DD 7E 12 ; $..0......"...~.
 7B62  .byte 87 87 5F 16 00 21 C1 7B 19 E5 09 7E 87 87 87 5F ; .._..!.{...~..._
@@ -8316,14 +8324,16 @@
 7B82  .byte D8 DD 35 11 C0 7E DD 77 11 DD 34 12 DD 7E 12 FE ; ..5..~.w..4..~..
 7B92  .byte 04 D8 DD 36 12 00 C9                            ; ...6...
 
-; --- block_defs  $7B99 — the macro-block DEFINITION table: 8 bytes/block = a 2x2 of name-table (data) ---
+; --- bg_block_defs  $7B99 — (bank1, data) name-table-ready 2x2 macro-blocks (8 bytes each: 4 cells of tile+attr) used by the $50 animator + the column streamer: block 0 = empty sky, 1 = cloud (F0/F1/E2/F2), 5+ = wave-sparkle rows (2E/2F...). (data) ---
 7B99  .byte 00 00 00 00 00 00 00 00 F0 00 F1 00 E2 00 F2 00 ; ................
 7BA9  .byte 00 00 00 00 F0 00 F1 00 E2 00 F2 00 2E 00 2F 00 ; ............../.
-7BB9  .byte 2E 00 2F 00 2E 00 2F 00 00 01 08 00 02 03 78 00 ; ../.../.......x.
-7BC9  .byte 01 04 08 00 02 03 78 00 DD CB 18 EE FD CB 09 C6 ; ......x.........
-7BD9  .byte 3A 24 D2 E6 01 CA FE 7B DD 7E 12 4F 87 81 4F 06 ; :$.....{.~.O..O.
-7BE9  .byte 00 21 53 7C 09 5E 23 56 23 7E DD 73 0F DD 72 10 ; .!S|.^#V#~.s..r.
-7BF9  .byte 32 FD D2 18 06 DD 77                            ; 2.....w
+7BB9  .byte 2E 00 2F 00 2E 00 2F 00                         ; ../.../.
+
+; --- bg_anim_patterns  $7BC1 — (bank1, data) the $50 animator's 4 phases x 4 bytes: (top-half block, bottom-half block, next-phase duration, pad). (data) ---
+7BC1  .byte 00 01 08 00 02 03 78 00 01 04 08 00 02 03 78 00 ; ......x.......x.
+7BD1  .byte DD CB 18 EE FD CB 09 C6 3A 24 D2 E6 01 CA FE 7B ; ........:$.....{
+7BE1  .byte DD 7E 12 4F 87 81 4F 06 00 21 53 7C 09 5E 23 56 ; .~.O..O..!S|.^#V
+7BF1  .byte 23 7E DD 73 0F DD 72 10 32 FD D2 18 06 DD 77    ; #~.s..r.2.....w
 
 ; ==== sub_7C00 (1 caller) ====
 7C00  0F          RRCA

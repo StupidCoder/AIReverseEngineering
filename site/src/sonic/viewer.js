@@ -26,7 +26,7 @@ const OBJ_CAT = {
   bonus: 'item', shield: 'item', emerald: 'item', goal: 'item', capsule: 'item', ring: 'item',
   'swing platform': 'platform', 'moving platform': 'platform', seesaw: 'platform',
   'world 1 boss': 'boss', 'world 2 boss': 'boss', 'world 3 boss': 'boss', 'world 4 boss': 'boss',
-  checkpoint: 'ctrl', 'scroll lock': 'ctrl',
+  checkpoint: 'ctrl', 'bg animator': 'ctrl',
 };
 
 export class LevelViewer {

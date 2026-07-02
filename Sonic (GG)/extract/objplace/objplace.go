@@ -39,7 +39,7 @@ func word(rom []byte, o int) int { return int(rom[o]) | int(rom[o+1])<<8 }
 // the LD (IX+13),n / LD (IX+14),n immediates at its handler's entry, and whether the
 // handler stores one at all (invisible triggers like the scroll locks do not).
 func Hitbox(rom []byte, typ int) (w, h int, ok bool) {
-	a, end := handlerRange(rom, typ)
+	a, end := HandlerRange(rom, typ)
 	if a == 0 {
 		return 0, 0, false
 	}
@@ -67,7 +67,7 @@ func Hitbox(rom []byte, typ int) (w, h int, ok bool) {
 // HasSpawnAdjust reports whether the type's handler is in the pickup family that
 // applies the one-time $6089 spawn adjust.
 func HasSpawnAdjust(rom []byte, typ int) bool {
-	a, end := handlerRange(rom, typ)
+	a, end := HandlerRange(rom, typ)
 	for o := a; a != 0 && o+2 < end; o++ {
 		if rom[o] == 0xCD && rom[o+1] == 0x89 && rom[o+2] == 0x60 {
 			return true
@@ -76,10 +76,10 @@ func HasSpawnAdjust(rom []byte, typ int) bool {
 	return false
 }
 
-// handlerRange returns the handler's z80 address (== file offset: the handlers live in
+// HandlerRange returns the handler's z80 address (== file offset: the handlers live in
 // the home banks 1/2) and the address of the next handler in the same bank, so a scan
 // cannot run into a neighbour.
-func handlerRange(rom []byte, typ int) (start, end int) {
+func HandlerRange(rom []byte, typ int) (start, end int) {
 	start = word(rom, dispatch+typ*2)
 	if start == 0 {
 		return 0, 0
@@ -158,17 +158,30 @@ func (l *Level) Settle(typ, x, y int) (rx, ry int, grounded bool) {
 
 // DropToFloor is Settle for an object whose handler pulls it down (Sonic: gravity in
 // $4AD0): starting from the spawn it lowers the hitbox until the $2CD4 snap grounds
-// it — the first floor line at or below the spawn's bottom edge — and returns the rest
-// position. If no floor exists below (spawn over a pit: the "falls in" levels), the
-// spawn position itself comes back with grounded=false.
+// it — the first floor line at or below the initial feet — and returns the rest
+// position. If no floor exists below (spawn over a pit), the spawn position itself
+// comes back with grounded=false.
+//
+// Sonic's FIRST probe runs in his handler's initial short-box state ($55D8: 16x21;
+// the paired ±11 Y adjusts at $55CE/$4CAA preserve his feet across every 21<->32 box
+// switch), so his feet start at spawnY+21 — which catches a floor line inside the
+// spawn block itself (Bridge 1, Labyrinth 1) that a 32-tall probe would jump past.
+// He then stands up to the full 32-tall box with his feet where they landed:
+// rest y = feet − 32. Oracle-verified per act by cmd/spawncheck.
+const sonicSpawnFeet = 21
+
 func (l *Level) DropToFloor(typ, x, y int) (rx, ry int, grounded bool) {
 	w, h, ok := Hitbox(l.rom, typ)
 	if !ok {
 		return x, y, false
 	}
+	h0 := h
+	if typ == 0 {
+		h0 = sonicSpawnFeet
+	}
 	rows := len(l.blocks) / l.stride
 	cx := x + w/2
-	for bottom := y + h; bottom < rows*32; bottom++ {
+	for bottom := y + h0; bottom < rows*32; bottom++ {
 		if p, bias, ok := l.floorAt(cx>>5, bottom>>5, cx); ok && (bottom&0x1F)+bias >= p {
 			return x, (bottom &^ 0x1F) + p - h, true
 		}

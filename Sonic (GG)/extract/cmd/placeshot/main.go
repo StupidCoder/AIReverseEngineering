@@ -52,13 +52,13 @@ func main() {
 	}
 
 	d := descTable + w(rom, descTable+act*2)
-	zone := act / 3
+	zone := int(rom[d]) // desc+0 = the engine zone ($D2D5); Sky Base 3 + the teleporter interiors are zone 7
 	stride := w(rom, d+1)
 	mp := decomp.LoadMapRLE(rom, 0x14000+w(rom, d+15), w(rom, d+17))
 	bgTiles := decomp.Decompress(rom, tileBase+w(rom, d+21))
 	bgPal := romPalette(rom, int(rom[d+29]))
 	blkTable := blockBase + w(rom, d+19)
-	sprTiles := decomp.Decompress(rom, decomp.SourceOffset(int(rom[d+23]), uint16(w(rom, d+24))))
+	sprTiles := objplace.SpriteSheet(rom, act)
 	sprPal := romPalette(rom, int(rom[d+26]))
 	rows := len(mp) / stride
 
@@ -92,7 +92,8 @@ func main() {
 			continue
 		}
 		if r := objplace.AnalyzeSprite(rom, typ, zone); r.Kind != "" && r.Layout != 0 {
-			blit(img, renderMeta(rom[r.Layout:r.Layout+18], sprTiles, sprPal), x-x0*32, y)
+			tt := objplace.ApplyIconUpload(rom, sprTiles, typ)
+			blit(img, renderMeta(rom[r.Layout:r.Layout+18], tt, sprPal), x-x0*32, y)
 			fmt.Printf("type $%02X spawn (%4d,%4d) rest (%4d,%4d)\n", typ, bx*32, by*32, x, y)
 		}
 	}

@@ -69,7 +69,7 @@ func main() {
 		stride = 256
 	}
 	blocks := decomp.LoadMapRLE(rom, 0x14000+w16(rom, d+15), w16(rom, d+17))
-	lvl := objplace.NewLevel(rom, blocks, stride, 0)
+	lvl := objplace.NewLevel(rom, blocks, stride, int(rom[d])) // desc+0 = the engine zone
 
 	type pred struct{ x, y int }
 	preds := map[int]pred{} // slot index -> predicted rest position

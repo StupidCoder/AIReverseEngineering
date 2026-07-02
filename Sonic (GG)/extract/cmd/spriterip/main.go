@@ -21,7 +21,6 @@ import (
 	"os"
 	"sort"
 
-	"sonicgg/extract/decomp"
 	"sonicgg/extract/objplace"
 	"stupidcoder.com/tools/gamegear"
 )
@@ -46,15 +45,11 @@ func romPalette(rom []byte, idx int) color.Palette {
 	return gamegear.Palette(rom[p : p+32])
 }
 
-// spriteTiles decompresses act i's sprite tile set (the VRAM $2000 sheet).
+// spriteTiles builds act i's full sprite sheet (objplace.SpriteSheet: the zone's own
+// tiles $00-$7F + the common block $80-$BF) and resolves its sprite palette.
 func spriteTiles(rom []byte, act int) ([]byte, color.Palette) {
 	d := descTable + w(rom, descTable+act*2)
-	bank := int(rom[d+23])
-	addr := uint16(w(rom, d+24))
-	off := decomp.SourceOffset(bank, addr)
-	tiles := decomp.Decompress(rom, off)
-	pal := romPalette(rom, int(rom[d+26]))
-	return tiles, pal
+	return objplace.SpriteSheet(rom, act), romPalette(rom, int(rom[d+26]))
 }
 
 // Sonic's sprite is not in the zone sheets: his animation frames are streamed into
@@ -303,7 +298,8 @@ func main() {
 			if r.Kind == "" || r.Layout == 0 || r.Layout+18 > len(rom) {
 				continue
 			}
-			full := renderMeta(rom[r.Layout:r.Layout+18], tiles, pal) // full 48x48 grid
+			tt := objplace.ApplyIconUpload(rom, tiles, t)
+			full := renderMeta(rom[r.Layout:r.Layout+18], tt, pal) // full 48x48 grid
 			if _, _, bb := trimBBox(full); bb.Rect.Dx() <= 1 && bb.Rect.Dy() <= 1 {
 				continue // empty layout
 			}

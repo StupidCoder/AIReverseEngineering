@@ -57,7 +57,7 @@ var objNames = map[byte]string{
 	0x0E: "bird", 0x0F: "moving platform", 0x10: "beetle", 0x12: "world 1 boss",
 	0x25: "capsule", 0x26: "fish", 0x2C: "world 3 boss", 0x2D: "porcupine",
 	0x48: "world 2 boss", 0x49: "world 4 boss", 0x4E: "seesaw",
-	0x50: "scroll lock", 0x51: "checkpoint", 0x13: "teleporter",
+	0x50: "bg animator", 0x51: "checkpoint", 0x13: "teleporter",
 	0x21: "bumper", 0x52: "continue", // special-stage objects ($52 = Continue powerup)
 	// (rings are not objects: they are baked into the block map as $79-$7B, like normal zones)
 }
@@ -70,6 +70,8 @@ type Act struct {
 	mapLen   int
 	widthBlk int
 	stride   int
+	engZone  int // descriptor +0 = the engine zone byte ($D2D5): selects the $343D
+	// collision-attribute table. act/3 except Sky Base 3 + the teleporter interiors (7).
 	blkTable int
 	tileFile int
 	bgPal    int
@@ -84,6 +86,7 @@ func mkAct(rom []byte, idx, zone int, name string) Act {
 	d := descTable + w(rom, descTable+idx*2)
 	return Act{
 		num: idx, zone: zone, name: name,
+		engZone:  int(rom[d]),
 		mapFile:  0x14000 + w(rom, d+15),
 		mapLen:   w(rom, d+17),
 		widthBlk: w(rom, d+7) / 32,
@@ -568,7 +571,7 @@ func main() {
 		// where the engine's first live frame puts them (objplace, verified by objsettle).
 		spawn := [2]int{a.spawnX, a.spawnY}
 		objs := objectTable(rom, a.num)
-		lvl := objplace.NewLevel(rom, mp, a.stride, a.zone)
+		lvl := objplace.NewLevel(rom, mp, a.stride, a.engZone)
 		settleObjects(objs, lvl)
 		sx, sy, grounded := lvl.DropToFloor(0, a.spawnX*32, a.spawnY*32)
 		spawnPx := [3]int{sx, sy, 0}
@@ -584,7 +587,7 @@ func main() {
 			Zone: a.zone, Act: actNo, Name: a.name, Atlas: atlas,
 			TileSize: 8, Stride: a.stride, WidthBlocks: cols, HeightBlocks: rows,
 			Palette:    paletteHex(pal),
-			BlockTiles: bt, BlockShape: blockShapes(rom, a.zone),
+			BlockTiles: bt, BlockShape: blockShapes(rom, a.engZone),
 			Blocks: blocks, Spawn: spawn, SpawnPx: spawnPx, Objects: objs,
 			Anim: atlasAnim[atlas], Music: musicTrack(rom, a.num),
 		}

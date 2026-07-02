@@ -872,7 +872,7 @@ Each act descriptor is **37 bytes**, reached as `$5600 + word($5600 + act×2)` i
 
 | Off | Size | Field | Notes |
 |----|------|-------|-------|
-| +0 | 1 | **zone** 0–6 | selects the per-zone tile table (`$343D`), palette set and collision table; **6 = the special stage** |
+| +0 | 1 | **zone** 0–7 | the engine zone byte (`$D2D5`): selects the per-zone attribute/collision table (`$343D`) etc. **6 = the special stage, 7 = the Sky Base interior** (Sky Base 3 and the Act 2 teleporter room) — for acts 0–16 it equals act÷3, for act 17 it is 7 |
 | +1 | 2 | **map stride** (`$D232`) | column count, hi byte: `$80`→128, `$40`→64, `$20`→32, `$10`→16, else 256 — so the map is `(4096/stride)` rows tall |
 | +3 | 2 | (vertical scroll extent — not pinned) | |
 | +5 | 2 | **left scroll bound** (`$D26D`) | |
@@ -1037,7 +1037,7 @@ slot:
 | `$48` | **world 2 boss** | b2 `$84AB` | |
 | `$49` | **world 4 boss** | b2 `$9271` | |
 | `$4E` | seesaw | b2 `$8681` | tilt-arm catapult; launch height scales with Sonic's landing impact (momentum transfer) |
-| `$50` | camera/scroll lock | b1 `$7B29` | writes the camera X (`$D2AB`) from the object position each frame — pins/limits scrolling |
+| `$50` | background animator | b1 `$7B29` | repaints its *own* map cell each frame through the scroll-draw request (`$D2AB/$D2AD` target, `$D2AF` source): a 4-phase sequence of block pairs (`$7BC1` patterns → `$7B99` blocks) — the twinkling sea waves and clouds. Not a camera lock: `$D2AB` is the blit request, the camera is `$D254` |
 | `$51` | **checkpoint** | b1 `$6010` | on contact, writes the *checkpoint's own* block position into the respawn table `$D32F + act×2` (the `$6034` respawn-save code) |
 
 Unnamed but present (handlers confirmed, behaviour not yet identified): `$05` b1 `$5FD7`,
@@ -1055,12 +1055,20 @@ advancing **+8 px per column** and **+16 px per row**; a cell value of `$FE` is 
 (a hole in the shape) and a `$FF` at the start of a row *ends* the sprite. Because the VDP
 runs in 8×16 mode, a layout byte `b` draws tile `b` on top of tile `b+1`.
 
-The referenced tiles come from the **per-zone sprite tile set** that the level loader
-decompresses (the `$0406` codec) into sprite VRAM `$2000`. That source is named by three
-descriptor fields decoded here: **+23** = bank, **+24/25** = address, and **+26** = the
-sprite **palette** index (stored to `$D22D`, resolved through the bank-8 `$7400` table to
-15 colours plus a transparent index 0). So an object sprite is simply *that zone's tile
-sheet* plus an *18-byte layout* held in the handler's bank.
+The referenced tiles come from sprite VRAM, which the level loader fills in **two**
+pieces: the **per-zone sprite tile set** decompressed (the `$0406` codec) to `$2000` =
+tiles `$00`–`$7F` (descriptor **+23** = bank, **+24/25** = address; **+26** = the sprite
+**palette** index, stored to `$D22D` and resolved through the bank-8 `$7400` table), and
+a **common sprite block** decompressed to `$3000` = tiles `$80`–`$BF` (bank 11, file
+`$2F354` — HUD digits, sparkles, springs, the item-box bottom; verified byte-identical
+to live VRAM). A layout may reference either — the item box's bottom row is tiles
+`$AA`–`$AF` in the common block, which is why a zone-sheet-only render lost its base.
+Two further slots are dynamic: the item handlers lazily stream a 16×16 **screen icon**
+into tiles `$5C`–`$5F` (`$0BA8`: 8 bytes/frame from bank 5; the `LD HL,nn` before the
+call names each type's icon — bonus `$01` = `$15200`, `$02` = `$15280`, emerald =
+`$15480`), and Sonic's animation frames stream into `$B4`–`$BB` (see *Sonic's spawn*).
+So an object sprite is *the composed sheet* plus an *18-byte layout* held in the
+handler's bank — all reproduced by `objplace.SpriteSheet`/`ApplyIconUpload`.
 
 Most animated enemies don't set `IX+15/16` directly; they go through the **shared
 animation routine `$7C75`**. It takes the object's *frame-layout base* in `DE` and an
@@ -1254,16 +1262,26 @@ block (5,11) → (160, 352), oracle-verified). After a death, `$1959` re-points 
 act's checkpoint entry (`$D32F + act×2`, written by the checkpoint object via `$6034`) —
 same mechanism, different table.
 
-The spawn is deliberately placed a little *above* the floor: his handler's gravity pulls
-him down until the shared floor snap (§2) grounds him, all within the level fade-in. The
-pattern across the acts is strikingly consistent — the drop is **16 px** almost everywhere
-(the spawn block sits one half-block surface offset above the rest position; GH1:
-352 → 368, feet on the floor line at 400). The exceptions are real gameplay: Bridge Act 1
-has **no terrain floor** below the spawn (he drops onto the log-bridge platforms — the one
-act where you visibly fall in), Bridge 2 and Sky Base 3 drop 48 px, and the Special Stages
-drop him 208–368 px — their trademark long fall. A vertical act spawns at the **bottom**
-(Jungle Act 2 — the start of the climb). The camera starts 3 blocks left of him
-(`$D251 = blockX − 3`, `$1959`).
+The spawn is placed a little off the floor and the handler settles him within the level
+fade-in — with one subtlety that matters: his handler's **initial state uses the short
+16×21 box** (`$55D8`; the paired ±11 Y adjustments at `$55CE`/`$4CAA` keep his feet fixed
+across every 21↔32 box switch), so the *first* floor probe runs with his feet at
+`spawnY+21`. That catches a floor line inside the spawn block itself: in **Bridge Act 1**
+and **Labyrinth Act 1** the spawn block carries the floor (profile 16) and Sonic snaps
+**up** 16 px onto it — with a 32-tall probe he would fall straight past it, which is
+exactly the bug the first export had. Everywhere else the pattern is strikingly
+consistent: a **16 px drop** onto the floor line below (GH1: 352 → 368, feet at 400),
+with the real exceptions being Bridge 2 (48 px), Sky Base 3 (112 px) and the Special
+Stages (208–368 px — their trademark visible fall). A vertical act spawns at the
+**bottom** (Jungle Act 2 — the start of the climb). The camera starts 3 blocks left of
+him (`$D251 = blockX − 3`, `$1959`). All 18 acts oracle-verified rest-exact by
+`cmd/spawncheck`.
+
+One more field mattered here: the collision zone is the descriptor's **byte +0** (the
+loader's `$D2D5`), *not* `act÷3` — **Sky Base 3 runs as zone 7**, the interior
+pseudo-zone it shares with the Sky Base 2 teleporter room, with its own `$343D`
+attribute table. Using `act÷3` read the wrong shape table for that act (and for the
+viewer's collision layer).
 
 The Studio viewer places Sonic's standing sprite at the settled position
 (`objplace.DropToFloor`); his standing frame itself is ripped from ROM — the player state
@@ -1288,8 +1306,8 @@ also sets a per-act "checkpoint reached" bit in the `$D312` bitmask (`$0B8D` pic
 by act number) so the save fires once, then draws its sprite (`$5500` via `$5E0C`).
 
 This resolves the long-standing guess: the checkpoint *is* a placed object, but it is type
-`$51`, not `$50` (which turned out to be the camera/scroll-lock — it drives `$D2AB`, the
-camera X).
+`$51`, not `$50` (which turned out to be the background animator — it feeds the `$D2AB`
+scroll-draw request, repainting its own map cell).
 
 ### Special-stage objects — bumper (`$21`), Continue powerup (`$52`)
 

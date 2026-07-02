@@ -1,6 +1,10 @@
 package objplace
 
-import "sort"
+import (
+	"sort"
+
+	"sonicgg/extract/decomp"
+)
 
 // SpriteRef is where a type's idle metasprite layout lives in the ROM.
 type SpriteRef struct {
@@ -118,4 +122,49 @@ func AnalyzeSprite(rom []byte, t, zone int) SpriteRef {
 		}
 	}
 	return SpriteRef{}
+}
+
+// CommonTilesFile is the COMMON sprite tile block the level loader decompresses to
+// VRAM $3000 (sprite tiles $80-$BF) alongside the zone sheets ($0406 call with
+// HL=$B354/DE=$3000, bank 11): HUD digits, sparkles, the item-box bottom, springs.
+// Oracle-verified byte-identical to live VRAM tiles $80-$B3 ($B4-$BB are later
+// overwritten by Sonic's dynamic frame stream).
+const CommonTilesFile = 0x2F354
+
+// SpriteSheet builds act i's full 256-tile sprite sheet exactly as the level loader
+// lays out sprite VRAM: the zone's own sheet at tiles $00-$7F (descriptor +23/+24,
+// VRAM $2000) and the common block at $80-$BF (VRAM $3000). Layout cells above the
+// 128-tile zone sheet (e.g. the item box's bottom row $AA-$AF) resolve into the
+// common block.
+func SpriteSheet(rom []byte, act int) []byte {
+	const descTable = 0x15600
+	d := descTable + word(rom, descTable+act*2)
+	off := decomp.SourceOffset(int(rom[d+23]), uint16(word(rom, d+24)))
+	tiles := make([]byte, 256*32)
+	copy(tiles, decomp.Decompress(rom, off))
+	copy(tiles[0x80*32:], decomp.Decompress(rom, CommonTilesFile))
+	return tiles
+}
+
+// ApplyIconUpload emulates the item handlers' lazy tile upload $0BA8 (8 bytes/frame
+// from bank 5 into VRAM $2B80 = sprite tiles $5C-$5F over 16 frames): the 16x16 icon
+// on the monitor's screen. The source is the LD HL,nn preceding the CALL $0BA8 in the
+// handler, so each type shows its own icon (bonus $01 = file $15200, $02 = $15280,
+// emerald $06 = $15480). Returns a patched copy when the handler uploads one, else
+// the sheet unchanged (the slots hold the zone sheet's own tiles $5C-$5F).
+func ApplyIconUpload(rom, tiles []byte, typ int) []byte {
+	a, end := HandlerRange(rom, typ)
+	for o := a; a != 0 && o+2 < end; o++ {
+		if rom[o] == 0xCD && rom[o+1] == 0xA8 && rom[o+2] == 0x0B { // CALL $0BA8
+			for j := o - 3; j >= o-16 && j >= a; j-- {
+				if rom[j] == 0x21 { // LD HL,nn
+					src := 0x14000 + (int(rom[j+1]) | int(rom[j+2])<<8) - 0x4000
+					patched := append([]byte(nil), tiles...)
+					copy(patched[0x5C*32:0x60*32], rom[src:src+128])
+					return patched
+				}
+			}
+		}
+	}
+	return tiles
 }

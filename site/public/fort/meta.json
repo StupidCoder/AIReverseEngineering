@@ -1,1 +1,1 @@
-{"levels":[{"name":"Vaults of Draconis","file":"level0.json","atlas":"atlas-L0.png"},{"name":"Crystalline Caves","file":"level1.json","atlas":"atlas-L1.png"}]}
+{"format":1,"game":"fort","levels":[{"name":"Vaults of Draconis","file":"level0.json","atlas":"atlas-L0.png"},{"name":"Crystalline Caves","file":"level1.json","atlas":"atlas-L1.png"}],"native":{"h":200,"w":320},"tickHz":50,"wrap":"x"}

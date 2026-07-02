@@ -57,6 +57,7 @@ export class Tilemap {
     const sliced = this.strategy === 'sliced'
       ? sliceAtlas(this.atlasImg, { tileSize: ts, atlasCols: g.atlasCols ?? 16, gutter: g.atlasGutter ?? 0 })
       : null;
+    this.sliced = sliced;
     if (sliced) this.sources.push(sliced.src);
     for (let r = 0; r < g.height; r++) {
       for (let c = 0; c < g.width; c++) {
@@ -112,6 +113,13 @@ export class Tilemap {
       ((srcTile / cols) | 0) * cell + (g.atlasGutter ?? 0),
       ts, ts, 0, 0, ts, ts);
     rec.tex.source.update();
+  }
+
+  // Texture for any tile id — used by object-pool stamps, which reference chars
+  // that may not appear in the map (baked on demand in the baked strategy).
+  tileTexture(tileId) {
+    if (this.baked) return (this.baked.get(tileId) || this._bakeTile(tileId)).tex;
+    return this.sliced ? this.sliced.tiles[tileId] : null;
   }
 
   setScaleMode(mode) {

@@ -141,13 +141,7 @@ export class LevelViewer {
     const seed = typeof window !== 'undefined' ? window.__studioSeed : null;
     const random = rng(seed);
     const copies = this.meta.wrap === 'x' ? 3 : 1;
-    const stampTex = (tileId) => {
-      if (this.tilemap.baked) {
-        const rec = this.tilemap.baked.get(tileId);
-        return rec && rec.tex;
-      }
-      return null;
-    };
+    const stampTex = (tileId) => this.tilemap.tileTexture(tileId);
     const pool = await buildPools(level, this.data, { random, stampTex });
     for (let i = 0; i < copies; i++) {
       if (i === 0) { this.poolLayer.addChild(pool); continue; }

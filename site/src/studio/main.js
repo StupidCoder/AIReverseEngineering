@@ -38,7 +38,11 @@ const GAMES = [
   },
   {
     id: 'fort', name: 'Fort Apocalypse', system: 'Commodore 64',
-    load: () => import('../fort/viewer.js').then(m => m.FortViewer),
+    load: () => Promise.all([
+      import('../shared/viewer.js'), import('../fort/config.js'),
+    ]).then(([m, c]) => class extends m.LevelViewer {
+      constructor(el, hud) { super(el, hud, c.default); }
+    }),
     make: (V, el, hud) => new V(el, hud),
     list: async (v) => (await v.init()).levels,
     show: (v, lvl, i) => v.loadLevel(lvl),
